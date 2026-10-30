@@ -258,9 +258,9 @@ const LOG_IF_CHANGED = `INSERT INTO activity_log (actor_kind, actor_id, entity_t
 // The single SQL definition of "latest PO" (highest id), correlated on the orders row being updated.
 const LATEST_PO_STATUS = `(SELECT status FROM purchase_orders WHERE order_id = orders.id ORDER BY id DESC LIMIT 1)`
 // SQL twin of canEnterProduction, re-asserted at write time because the route reads before it writes.
-const GATE_OK = `(state = 'active' AND artwork_status = 'approved' AND ((po_required = 0 AND authorized_at IS NOT NULL) OR (po_required = 1 AND ${LATEST_PO_STATUS} = 'approved')))`
+export const GATE_OK = `(state = 'active' AND artwork_status = 'approved' AND ((po_required = 0 AND authorized_at IS NOT NULL) OR (po_required = 1 AND ${LATEST_PO_STATUS} = 'approved')))`
 // SQL twin of preProductionStatus.
-const PRE_PRODUCTION = `CASE WHEN ${GATE_OK} THEN 'ready'
+export const PRE_PRODUCTION = `CASE WHEN ${GATE_OK} THEN 'ready'
   WHEN (po_required = 1 AND (${LATEST_PO_STATUS} IS NULL OR ${LATEST_PO_STATUS} <> 'approved')) OR (po_required = 0 AND authorized_at IS NULL) THEN 'awaiting_authorization'
   ELSE 'awaiting_artwork' END`
 
