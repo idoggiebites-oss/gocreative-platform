@@ -6,7 +6,9 @@ DELETE FROM activity_log;
 CREATE TRIGGER activity_log_no_delete BEFORE DELETE ON activity_log
 BEGIN SELECT RAISE(ABORT, 'activity_log is append-only'); END;
 DELETE FROM notes;
+DELETE FROM artwork;
 DELETE FROM po_documents;
+DELETE FROM files;
 DELETE FROM purchase_orders;
 DELETE FROM estimates;
 DELETE FROM order_items;

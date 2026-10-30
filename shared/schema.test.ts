@@ -48,6 +48,30 @@ describe('0001_init.sql', () => {
     expect(() => db.exec('DELETE FROM activity_log')).toThrow(/append-only/)
     expect(() => db.exec("UPDATE activity_log SET action = 'y'")).toThrow(/append-only/)
   })
+  it('REPLACE cannot bypass write-once / append-only', () => {
+    expect(() => db.exec("REPLACE INTO files (id, r2_key, mime, bytes, sha256) VALUES (1, 'k2', 'a', 1, 'x')")).toThrow(/write-once/)
+    expect(() => db.exec("INSERT OR REPLACE INTO files (id, r2_key, mime, bytes, sha256) VALUES (99, 'k', 'a', 1, 'x')")).toThrow(/write-once/)
+    expect(() => db.exec("REPLACE INTO activity_log (id, actor_kind, entity_type, entity_id, action) VALUES (1, 'system', 'order', 1, 'z')")).toThrow(/append-only/)
+    db.exec("INSERT INTO files (r2_key, mime, bytes, sha256) VALUES ('new', 'a', 1, 'x')")
+    db.exec("INSERT INTO activity_log (actor_kind, entity_type, entity_id, action) VALUES ('system', 'order', 1, 'y')")
+  })
+  it('deleting a user referenced by activity_log hits the FK, not a trigger', () => {
+    db.exec("INSERT INTO users (id, email, name, role) VALUES (50, 'u@x.com', 'U', 'staff')")
+    db.exec("INSERT INTO activity_log (actor_kind, actor_id, entity_type, entity_id, action) VALUES ('user', 50, 'order', 1, 'x')")
+    expect(() => db.exec('DELETE FROM users WHERE id = 50')).toThrow(/FOREIGN KEY/)
+  })
+  it('deleting an order with a purchase order fails', () => {
+    db.exec(`INSERT INTO orders (id, number, customer_id, source, title) VALUES (70, 'P-1', 1, 'phone', 't');
+             INSERT INTO purchase_orders (order_id) VALUES (70);`)
+    expect(() => db.exec('DELETE FROM orders WHERE id = 70')).toThrow(/FOREIGN KEY/)
+  })
+  it('enforces integer cents', () => {
+    db.exec("INSERT INTO orders (id, number, customer_id, source, title) VALUES (71, 'P-2', 1, 'phone', 't')")
+    const ins = (v: string) =>
+      db.exec(`INSERT INTO order_items (order_id, product, method, quantity, unit_price_cents) VALUES (71, 'p', 'dtg', 1, ${v})`)
+    expect(() => ins('1.5')).toThrow(/CHECK/)
+    ins('150')
+  })
   it('rejects a bogus production_status', () => {
     expect(() =>
       db.exec(`INSERT INTO orders (number, customer_id, source, title, production_status)

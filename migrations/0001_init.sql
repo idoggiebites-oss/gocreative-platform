@@ -62,7 +62,7 @@ CREATE TABLE orders (
   authorized_by INTEGER REFERENCES users (id) ON DELETE SET NULL,
   production_status TEXT NOT NULL DEFAULT 'awaiting_authorization' CHECK (production_status IN ('awaiting_authorization','awaiting_artwork','ready','in_production','quality_control','ready_for_pickup','completed')),
   assignee_id INTEGER REFERENCES users (id) ON DELETE SET NULL,
-  estimated_total_cents INTEGER,
+  estimated_total_cents INTEGER CHECK (estimated_total_cents IS NULL OR typeof(estimated_total_cents) = 'integer'),
   invoice_ref TEXT,
   payment_ref TEXT,
   state TEXT NOT NULL DEFAULT 'active' CHECK (state IN ('active','completed','cancelled')),
@@ -70,10 +70,10 @@ CREATE TABLE orders (
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
-CREATE INDEX idx_orders_prod_due ON orders (production_status, due_date);
+CREATE INDEX idx_orders_state_prod_due ON orders (state, production_status, due_date);
+CREATE INDEX idx_orders_state_due ON orders (state, due_date);
 CREATE INDEX idx_orders_customer ON orders (customer_id);
 CREATE INDEX idx_orders_due ON orders (due_date);
-CREATE INDEX idx_orders_state ON orders (state);
 
 CREATE TABLE order_items (
   id INTEGER PRIMARY KEY,
@@ -82,8 +82,8 @@ CREATE TABLE order_items (
   garment_color TEXT,
   method TEXT NOT NULL CHECK (method IN ('screen','embroidery','dtg','laser_engrave','laser_cut','other')),
   sizes TEXT CHECK (sizes IS NULL OR json_valid(sizes)),
-  quantity INTEGER NOT NULL CHECK (quantity >= 0),
-  unit_price_cents INTEGER NOT NULL CHECK (unit_price_cents >= 0),
+  quantity INTEGER NOT NULL CHECK (typeof(quantity) = 'integer' AND quantity >= 0),
+  unit_price_cents INTEGER NOT NULL CHECK (typeof(unit_price_cents) = 'integer' AND unit_price_cents >= 0),
   notes TEXT
 );
 CREATE INDEX idx_order_items_order ON order_items (order_id);
@@ -92,15 +92,20 @@ CREATE TABLE files (
   id INTEGER PRIMARY KEY,
   r2_key TEXT NOT NULL UNIQUE,
   mime TEXT NOT NULL,
-  bytes INTEGER NOT NULL CHECK (bytes >= 0),
+  bytes INTEGER NOT NULL CHECK (typeof(bytes) = 'integer' AND bytes >= 0),
   sha256 TEXT NOT NULL,
   preview_key TEXT,
-  uploaded_by INTEGER REFERENCES users (id) ON DELETE SET NULL,
+  -- RESTRICT, not SET NULL: SET NULL is an UPDATE the immutability triggers reject. Users are deactivated (active=0), never deleted.
+  uploaded_by INTEGER REFERENCES users (id) ON DELETE RESTRICT,
   via_portal INTEGER NOT NULL DEFAULT 0 CHECK (via_portal IN (0,1)),
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 -- Uploaded files are write-once: a new upload is a new row.
 CREATE TRIGGER files_write_once BEFORE UPDATE ON files
+BEGIN SELECT RAISE(ABORT, 'files are write-once'); END;
+-- REPLACE would swap a row without firing the UPDATE trigger, so reject inserts that collide.
+CREATE TRIGGER files_no_replace BEFORE INSERT ON files
+WHEN EXISTS (SELECT 1 FROM files WHERE id = NEW.id OR r2_key = NEW.r2_key)
 BEGIN SELECT RAISE(ABORT, 'files are write-once'); END;
 
 CREATE TABLE artwork (
@@ -120,11 +125,12 @@ CREATE INDEX idx_artwork_customer ON artwork (customer_id);
 
 CREATE TABLE estimates (
   id INTEGER PRIMARY KEY,
-  order_id INTEGER NOT NULL REFERENCES orders (id) ON DELETE CASCADE,
+  -- RESTRICT: orders are cancelled via state, never deleted; history must not cascade away.
+  order_id INTEGER NOT NULL REFERENCES orders (id) ON DELETE RESTRICT,
   version INTEGER NOT NULL CHECK (version >= 1),
   inputs TEXT NOT NULL CHECK (json_valid(inputs)),
   lines TEXT NOT NULL CHECK (json_valid(lines)),
-  total_cents INTEGER NOT NULL,
+  total_cents INTEGER NOT NULL CHECK (typeof(total_cents) = 'integer'),
   status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','sent','accepted','declined')),
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   UNIQUE (order_id, version)
@@ -132,9 +138,9 @@ CREATE TABLE estimates (
 
 CREATE TABLE purchase_orders (
   id INTEGER PRIMARY KEY,
-  order_id INTEGER NOT NULL REFERENCES orders (id) ON DELETE CASCADE,
+  order_id INTEGER NOT NULL REFERENCES orders (id) ON DELETE RESTRICT,
   po_number TEXT,
-  amount_cents INTEGER,
+  amount_cents INTEGER CHECK (amount_cents IS NULL OR typeof(amount_cents) = 'integer'),
   status TEXT NOT NULL DEFAULT 'requested' CHECK (status IN ('requested','received','under_review','approved','rejected','correction_required')),
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
@@ -143,7 +149,7 @@ CREATE INDEX idx_purchase_orders_order ON purchase_orders (order_id);
 
 CREATE TABLE po_documents (
   id INTEGER PRIMARY KEY,
-  po_id INTEGER NOT NULL REFERENCES purchase_orders (id) ON DELETE CASCADE,
+  po_id INTEGER NOT NULL REFERENCES purchase_orders (id) ON DELETE RESTRICT,
   file_id INTEGER NOT NULL REFERENCES files (id) ON DELETE RESTRICT
 );
 CREATE INDEX idx_po_documents_po ON po_documents (po_id);
@@ -162,7 +168,8 @@ CREATE INDEX idx_notes_entity ON notes (entity_type, entity_id);
 CREATE TABLE activity_log (
   id INTEGER PRIMARY KEY,
   actor_kind TEXT NOT NULL CHECK (actor_kind IN ('user','portal','system')),
-  actor_id INTEGER REFERENCES users (id) ON DELETE SET NULL,
+  -- RESTRICT, not SET NULL: SET NULL is an UPDATE the immutability triggers reject. Users are deactivated (active=0), never deleted.
+  actor_id INTEGER REFERENCES users (id) ON DELETE RESTRICT,
   entity_type TEXT NOT NULL,
   entity_id INTEGER NOT NULL,
   action TEXT NOT NULL,
@@ -173,6 +180,9 @@ CREATE TABLE activity_log (
 CREATE INDEX idx_activity_entity ON activity_log (entity_type, entity_id);
 -- Append-only audit trail.
 CREATE TRIGGER activity_log_no_update BEFORE UPDATE ON activity_log
+BEGIN SELECT RAISE(ABORT, 'activity_log is append-only'); END;
+CREATE TRIGGER activity_log_no_replace BEFORE INSERT ON activity_log
+WHEN EXISTS (SELECT 1 FROM activity_log WHERE id = NEW.id)
 BEGIN SELECT RAISE(ABORT, 'activity_log is append-only'); END;
 CREATE TRIGGER activity_log_no_delete BEFORE DELETE ON activity_log
 BEGIN SELECT RAISE(ABORT, 'activity_log is append-only'); END;
