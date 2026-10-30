@@ -12,11 +12,12 @@
     {
       "binding": "DB",
       "database_name": "gocreative",
-      // Placeholder until the remote database is created (ROADMAP 1.8); local D1 ignores it.
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "7a1c2b9b-61ec-4c76-9e60-8e430f423257",
       "migrations_dir": "migrations"
     }
   ],
   "r2_buckets": [{ "binding": "FILES", "bucket_name": "gocreative-files" }],
+  // Version preview hostnames would sit outside the Access app on the workers.dev host.
+  "preview_urls": false,
   "observability": { "enabled": true }
 }
