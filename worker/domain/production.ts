@@ -34,6 +34,19 @@ export function preProductionStatus(order: GateOrder, latestPo: GatePo): Product
   return 'awaiting_artwork'
 }
 
+/**
+ * The awaiting_* states are derived from their prerequisites, so when a PO changes
+ * they follow it. Returns the new status, or null when nothing should move: orders
+ * already at ready or later stay put (the gate blocks forward moves and the detail
+ * response's gate shows why), and inactive orders are never touched.
+ */
+export function syncAwaitingStatus(current: ProductionStatus, order: GateOrder, latestPo: GatePo): ProductionStatus | null {
+  if (order.state !== 'active') return null
+  if (current !== 'awaiting_authorization' && current !== 'awaiting_artwork') return null
+  const next = preProductionStatus(order, latestPo)
+  return next === current ? null : next
+}
+
 export function checkProductionTransition(
   from: ProductionStatus, to: ProductionStatus, order: GateOrder, latestPo: GatePo,
 ): TransitionResult {
