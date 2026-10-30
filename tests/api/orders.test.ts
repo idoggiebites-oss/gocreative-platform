@@ -4,6 +4,8 @@ import { Hono } from 'hono'
 import { appRoutes } from '../../worker/routes/app'
 import type { AppEnv } from '../../worker/auth'
 import type { DashboardResponse, OrderDetailResponse, OrdersListResponse } from '../../shared/api'
+import { buildDashboard, addDays } from '../../worker/domain/dashboard'
+import * as dbo from '../../worker/db/orders'
 import { createTestD1 } from './d1'
 
 const seed = readFileSync(new URL('../../scripts/seed.sql', import.meta.url), 'utf8')
@@ -22,8 +24,9 @@ function setup() {
   const json = async <T>(res: Response) => (await res.json()) as T
   const one = <T>(sql: string, ...p: (string | number)[]) => sqlite.prepare(sql).get(...p) as T
   const prod = (n: string) => one<{ production_status: string; state: string }>('SELECT production_status, state FROM orders WHERE number = ?', n)
+  const boom = () => sqlite.exec(`CREATE TEMP TRIGGER boom BEFORE INSERT ON activity_log BEGIN SELECT RAISE(ABORT, 'boom'); END`)
   const activityCount = () => one<{ n: number }>('SELECT COUNT(*) AS n FROM activity_log').n
-  return { sqlite, call, json, one, prod, activityCount }
+  return { db, sqlite, call, json, one, prod, activityCount, boom }
 }
 
 describe('auth', () => {
@@ -71,8 +74,8 @@ describe('orders list', () => {
     const sqlNums = (where: string) => (t.sqlite.prepare(`SELECT number FROM orders o WHERE ${where} ORDER BY due_date, number`).all() as { number: string }[]).map((r) => r.number)
     expect(await rowsOf('active')).toEqual(sqlNums(`state='active'`))
     expect(await rowsOf('completed')).toEqual(sqlNums(`state='completed'`))
-    expect(await rowsOf('ready')).toEqual(sqlNums(`production_status='ready_for_pickup'`))
-    expect(await rowsOf('in_production')).toEqual(sqlNums(`production_status IN ('in_production','quality_control')`))
+    expect(await rowsOf('ready')).toEqual(sqlNums(`state='active' AND production_status='ready_for_pickup'`))
+    expect(await rowsOf('in_production')).toEqual(sqlNums(`state='active' AND production_status IN ('in_production','quality_control')`))
     expect(await rowsOf('waiting_artwork')).toEqual(sqlNums(`state='active' AND artwork_status <> 'approved'`))
     expect(await rowsOf('waiting_po')).toEqual(
       sqlNums(`state='active' AND po_required=1 AND COALESCE((SELECT status FROM purchase_orders p WHERE p.order_id=o.id ORDER BY id DESC LIMIT 1),'') <> 'approved'`),
@@ -82,6 +85,19 @@ describe('orders list', () => {
     expect(active.counts.completed).toBe(2 + 1) // orders 1, 2, 15
     const row = (active.rows as { number: string; methods: string[]; totalQty: number; latestPoStatus: string | null }[]).find((r) => r.number === '2026-0004')
     expect(row).toMatchObject({ methods: ['screen', 'laser_cut'], totalQty: 50, latestPoStatus: 'approved' })
+  })
+  test('cancelled orders are excluded from in_production and ready views and counts', async () => {
+    const t = setup()
+    const before = (await t.json<OrdersListResponse>(await t.call('GET', '/orders'))).counts
+    t.sqlite.exec(`UPDATE orders SET state = 'cancelled' WHERE number IN ('2026-0003', '2026-0006')`) // in_production, ready_for_pickup
+    const get = async (view: string) => t.json<OrdersListResponse>(await t.call('GET', `/orders?view=${view}&limit=200`))
+    const nums = (r: OrdersListResponse) => (r.rows as { number: string }[]).map((x) => x.number)
+    const ip = await get('in_production')
+    const rd = await get('ready')
+    expect(nums(ip)).not.toContain('2026-0003')
+    expect(nums(rd)).not.toContain('2026-0006')
+    expect(ip.counts.in_production).toBe(before.in_production - 1)
+    expect(ip.counts.ready).toBe(before.ready - 1)
   })
   test('inquiries view reads the inquiries table', async () => {
     const t = setup()
@@ -129,6 +145,16 @@ describe('order detail', () => {
     expect(JSON.stringify(n.notes)).not.toContain('@')
     expect(n.activity.length).toBeGreaterThan(0)
   })
+  test('activity payloads are allowlisted', async () => {
+    const t = setup()
+    t.sqlite.exec(`INSERT INTO activity_log (actor_kind, actor_id, entity_type, entity_id, action, before, after)
+      VALUES ('user', 1, 'order', 3, 'x', '{"production_status":"ready","email":"a@b.c"}', '{"production_status":"in_production","reason":"po_sync","note_body":"secret","email":"a@b.c"}')`)
+    const d = await t.json<OrderDetailResponse>(await t.call('GET', '/orders/2026-0003'))
+    const a = d.activity[0]
+    expect(a?.before).toEqual({ production_status: 'ready' })
+    expect(a?.after).toEqual({ production_status: 'in_production', reason: 'po_sync' })
+    expect(JSON.stringify(d.activity)).not.toMatch(/note_body|a@b\.c/)
+  })
 })
 
 describe('production status change', () => {
@@ -172,10 +198,22 @@ describe('production status change', () => {
   })
   test('batch atomicity: a failing activity insert rolls the status back', async () => {
     const t = setup()
-    t.sqlite.exec('DROP TABLE activity_log')
+    t.boom()
     const res = await patch(t, '2026-0005', 'in_production')
     expect(res.status).toBe(500)
     expect(t.prod('2026-0005').production_status).toBe('ready')
+  })
+})
+
+describe('stale production gate', () => {
+  test('PO revoked between read and write: no change, no activity', async () => {
+    const t = setup()
+    const loaded = (await dbo.loadForProductionChange(t.db, '2026-0005'))! // ready, PO 6 approved
+    t.sqlite.exec(`UPDATE purchase_orders SET status = 'rejected' WHERE id = 6`)
+    const before = t.activityCount()
+    expect(await dbo.applyProductionChange(t.db, { orderId: loaded.id, actorId: 1, from: loaded.from, to: 'in_production' })).toBe(false)
+    expect(t.prod('2026-0005').production_status).toBe('ready')
+    expect(t.activityCount()).toBe(before)
   })
 })
 
@@ -190,8 +228,31 @@ describe('purchase order status change', () => {
     expect(res.status).toBe(200)
     expect(await t.json(res)).toEqual({ poId: 12, status: 'approved', productionStatus: 'ready' })
     expect(t.prod('2026-0011').production_status).toBe('ready')
+    expect(t.activityCount()).toBe(before + 2)
+    const [po, sync] = t.sqlite.prepare('SELECT action, before, after FROM activity_log ORDER BY id DESC LIMIT 2').all().reverse() as { action: string; before: string; after: string }[]
+    expect(po).toEqual({ action: 'po_status_changed', before: '{"po_id":12,"po_status":"under_review"}', after: '{"po_id":12,"po_status":"approved"}' })
+    expect(sync).toEqual({ action: 'production_status_changed', before: '{"production_status":"awaiting_authorization"}', after: '{"production_status":"ready","reason":"po_sync"}' })
+  })
+  test('production moved by someone else: PO change applies, no sync, no false activity', async () => {
+    const t = setup()
+    t.sqlite.exec(`UPDATE purchase_orders SET status = 'under_review' WHERE id = 12`)
+    const loaded = (await dbo.loadForPoChange(t.db, '2026-0011', 12))!
+    t.sqlite.exec(`UPDATE orders SET production_status = 'awaiting_artwork' WHERE number = '2026-0011'`)
+    const before = t.activityCount()
+    const r = await dbo.applyPoChange(t.db, { orderId: loaded.orderId, poId: 12, actorId: 1, from: 'under_review', to: 'approved', productionFrom: loaded.productionStatus, sync: true })
+    expect(r).toEqual({ changed: true, productionStatus: 'awaiting_artwork' })
+    expect(t.one<{ status: string }>('SELECT status FROM purchase_orders WHERE id = 12').status).toBe('approved')
+    expect(t.prod('2026-0011').production_status).toBe('awaiting_artwork')
     expect(t.activityCount()).toBe(before + 1)
-    expect(t.one<{ after: string }>('SELECT after FROM activity_log ORDER BY id DESC LIMIT 1').after).toBe('{"po_id":12,"po_status":"approved","production_status":"ready"}')
+    expect(t.one<{ action: string; after: string }>('SELECT action, after FROM activity_log ORDER BY id DESC LIMIT 1')).toEqual({ action: 'po_status_changed', after: '{"po_id":12,"po_status":"approved"}' })
+  })
+  test('PO moved by someone else: nothing applied, nothing logged', async () => {
+    const t = setup()
+    t.sqlite.exec(`UPDATE purchase_orders SET status = 'under_review' WHERE id = 12`)
+    const before = t.activityCount()
+    const r = await dbo.applyPoChange(t.db, { orderId: 11, poId: 12, actorId: 1, from: 'received', to: 'under_review', productionFrom: 'awaiting_authorization', sync: true })
+    expect(r.changed).toBe(false)
+    expect(t.activityCount()).toBe(before)
   })
   test('approving with pending artwork moves to awaiting_artwork', async () => {
     const t = setup()
@@ -210,6 +271,8 @@ describe('purchase order status change', () => {
     const before = t.activityCount()
     expect((await patch(t, '2026-0011', 12, 'approved')).status).toBe(409) // received -> approved
     expect(t.activityCount()).toBe(before)
+    expect(t.one<{ status: string }>('SELECT status FROM purchase_orders WHERE id = 12').status).toBe('received')
+    expect(t.prod('2026-0011').production_status).toBe('awaiting_authorization')
   })
   test("another order's PO is 404", async () => {
     const t = setup()
@@ -220,9 +283,22 @@ describe('purchase order status change', () => {
   test('batch atomicity: a failing activity insert rolls the PO and order back', async () => {
     const t = setup()
     t.sqlite.exec(`UPDATE purchase_orders SET status = 'under_review' WHERE id = 12`)
-    t.sqlite.exec('DROP TABLE activity_log')
+    t.boom()
     expect((await patch(t, '2026-0011', 12, 'approved')).status).toBe(500)
     expect(t.one<{ status: string }>('SELECT status FROM purchase_orders WHERE id = 12').status).toBe('under_review')
     expect(t.prod('2026-0011').production_status).toBe('awaiting_authorization')
+  })
+})
+
+describe('dashboard due window', () => {
+  const o = (id: number, dueDate: string) => ({
+    id, number: `N${id}`, customerName: 'c', title: 't', artworkStatus: 'approved' as const, productionStatus: 'ready' as const,
+    dueDate, latestPoStatus: null, latestPoAmountCents: null, latestEstimateStatus: null,
+  })
+  test('half-open [today, today+7) for dueIn7Days and dueThisWeek', () => {
+    const today = '2026-10-30'
+    const d = buildDashboard([o(1, today), o(2, addDays(today, 6)), o(3, addDays(today, 7))], new Map(), [], today)
+    expect(d.metrics.dueIn7Days.count).toBe(2)
+    expect(d.dueThisWeek.map((x) => x.number)).toEqual(['N1', 'N2'])
   })
 })

@@ -59,7 +59,7 @@ export function buildDashboard(orders: DashOrder[], readyAt: Map<number, string>
       qc: orders.filter((o) => o.productionStatus === 'quality_control').length,
     },
     dueIn7Days: {
-      count: notDone.filter((o) => o.dueDate !== null && o.dueDate >= today && o.dueDate <= weekEnd).length,
+      count: notDone.filter((o) => o.dueDate !== null && o.dueDate >= today && o.dueDate < weekEnd).length,
       overdue: notDone.filter(overdue).length,
     },
     readyForPickup: { count: ready.length, ...(oldest.length ? { oldestDaysWaiting: Math.max(...oldest) } : {}) },
@@ -90,7 +90,7 @@ export function buildDashboard(orders: DashOrder[], readyAt: Map<number, string>
   )
 
   const dueThisWeek = orders
-    .filter((o) => o.dueDate !== null && o.dueDate >= today && o.dueDate < addDays(today, 7))
+    .filter((o) => o.dueDate !== null && o.dueDate >= today && o.dueDate < weekEnd)
     .sort((a, b) => (a.dueDate as string).localeCompare(b.dueDate as string) || a.number.localeCompare(b.number))
     .map((o) => ({ number: o.number, customerName: o.customerName, dueDate: o.dueDate as string, productionStatus: o.productionStatus }))
 

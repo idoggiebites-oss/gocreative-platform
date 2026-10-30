@@ -82,11 +82,11 @@ export function orderRoutes() {
       // The order's latest PO after this change: the edited one if it is the latest, else unchanged.
       const latestAfter = loaded.latestPoId === loaded.po.id ? { status: body.data.to } : loaded.latestPo
       const syncTo = syncAwaitingStatus(loaded.productionStatus, loaded.order, latestAfter)
-      const changed = await db.applyPoChange(c.env.DB, {
+      const { changed, productionStatus } = await db.applyPoChange(c.env.DB, {
         orderId: loaded.orderId, poId: loaded.po.id, actorId: c.get('user').id, from: loaded.po.status, to: body.data.to,
-        productionFrom: loaded.productionStatus, syncTo,
+        productionFrom: loaded.productionStatus, sync: syncTo !== null,
       })
       if (!changed) return c.json({ error: 'Purchase order changed, reload and retry' }, 409)
-      return c.json({ poId: loaded.po.id, status: body.data.to, productionStatus: syncTo ?? loaded.productionStatus })
+      return c.json({ poId: loaded.po.id, status: body.data.to, productionStatus })
     })
 }

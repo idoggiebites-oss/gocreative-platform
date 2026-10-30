@@ -1,6 +1,6 @@
 // All SQL for the order screens. Every value is bound; the only interpolated
 // fragments are the constants in VIEW_WHERE and generated "?,?" placeholder lists.
-import { METHODS } from '../../shared/enums'
+import { METHODS, PRODUCTION_STATUSES } from '../../shared/enums'
 import type { ArtworkStatus, CustomerKind, Method, OrderSource, OrderState, PoStatus, ProductionStatus } from '../../shared/enums'
 import type { InquiryListRow, OrderCounts, OrderDetailResponse, OrderListRow, OrderView } from '../../shared/api'
 import type { DashInquiry, DashOrder } from '../domain/dashboard'
@@ -40,10 +40,12 @@ const VIEW_WHERE: Record<Exclude<OrderView, 'inquiries'>, string> = {
   active: `state = 'active'`,
   waiting_po: `state = 'active' AND po_required = 1 AND (latest_po_status IS NULL OR latest_po_status <> 'approved')`,
   waiting_artwork: `state = 'active' AND artwork_status <> 'approved'`,
-  in_production: `production_status IN ('in_production','quality_control')`,
-  ready: `production_status = 'ready_for_pickup'`,
+  in_production: `state = 'active' AND production_status IN ('in_production','quality_control')`,
+  ready: `state = 'active' AND production_status = 'ready_for_pickup'`,
   completed: `state = 'completed'`,
 }
+
+const ACTIVITY_KEYS = ['production_status', 'state', 'po_status', 'po_id', 'artwork_status', 'reason']
 
 const likeEscape = (q: string) => q.replace(/[\\%_]/g, (ch) => `\\${ch}`)
 
@@ -208,6 +210,12 @@ export async function getOrderDetail(db: D1Database, number: string): Promise<(O
       .all<{ id: number; actor: string; action: string; before: string | null; after: string | null; at: string }>(),
   ])
   const json = (s: string | null) => (s === null ? null : (JSON.parse(s) as unknown))
+  // Activity payloads are an allowlist: anything else stored in the JSON never leaves the server.
+  const payload = (s: string | null) => {
+    const v = json(s)
+    if (v === null || typeof v !== 'object') return null
+    return Object.fromEntries(Object.entries(v).filter(([k]) => ACTIVITY_KEYS.includes(k)))
+  }
   const latestPo = pos.results[0] ? { status: pos.results[0].status } : null
   return {
     order: {
@@ -228,7 +236,7 @@ export async function getOrderDetail(db: D1Database, number: string): Promise<(O
     },
     purchaseOrders: pos.results.map((p) => ({ id: p.id, poNumber: p.po_number, amountCents: p.amount_cents, status: p.status, createdAt: p.created_at, updatedAt: p.updated_at })),
     notes: notes.results.map((n) => ({ id: n.id, body: n.body, authorName: n.author_name, createdAt: n.created_at })),
-    activity: activity.results.map((a) => ({ id: a.id, actor: a.actor, action: a.action, before: json(a.before), after: json(a.after), createdAt: a.at })),
+    activity: activity.results.map((a) => ({ id: a.id, actor: a.actor, action: a.action, before: payload(a.before), after: payload(a.after), createdAt: a.at })),
     gateInput: { order: toGateOrder(o), latestPo },
   }
 }
@@ -247,16 +255,27 @@ const NOW = `strftime('%Y-%m-%dT%H:%M:%fZ','now')`
 const LOG_IF_CHANGED = `INSERT INTO activity_log (actor_kind, actor_id, entity_type, entity_id, action, before, after)
   SELECT 'user', ?, 'order', ?, ?, ?, ? WHERE changes() > 0`
 
+// The single SQL definition of "latest PO" (highest id), correlated on the orders row being updated.
+const LATEST_PO_STATUS = `(SELECT status FROM purchase_orders WHERE order_id = orders.id ORDER BY id DESC LIMIT 1)`
+// SQL twin of canEnterProduction, re-asserted at write time because the route reads before it writes.
+const GATE_OK = `(state = 'active' AND artwork_status = 'approved' AND ((po_required = 0 AND authorized_at IS NOT NULL) OR (po_required = 1 AND ${LATEST_PO_STATUS} = 'approved')))`
+// SQL twin of preProductionStatus.
+const PRE_PRODUCTION = `CASE WHEN ${GATE_OK} THEN 'ready'
+  WHEN (po_required = 1 AND (${LATEST_PO_STATUS} IS NULL OR ${LATEST_PO_STATUS} <> 'approved')) OR (po_required = 0 AND authorized_at IS NULL) THEN 'awaiting_authorization'
+  ELSE 'awaiting_artwork' END`
+
 /**
  * THE only writer of orders.production_status for a user-requested change (the PO
  * auto-sync below is the other). Callers must have passed checkProductionTransition.
- * Returns false when the order moved under us (nothing logged, nothing changed).
+ * For ready or later the gate is re-asserted in the UPDATE itself. Returns false when
+ * the order moved or the gate no longer holds (nothing logged, nothing changed).
  */
 export async function applyProductionChange(db: D1Database, p: { orderId: number; actorId: number; from: ProductionStatus; to: ProductionStatus }) {
   const completing = p.to === 'completed'
+  const gated = PRODUCTION_STATUSES.indexOf(p.to) >= PRODUCTION_STATUSES.indexOf('ready')
   const [update] = await db.batch([
     db
-      .prepare(`UPDATE orders SET production_status = ?, ${completing ? `state = 'completed', ` : ''}updated_at = ${NOW} WHERE id = ? AND production_status = ?`)
+      .prepare(`UPDATE orders SET production_status = ?, ${completing ? `state = 'completed', ` : ''}updated_at = ${NOW} WHERE id = ? AND production_status = ?${gated ? ` AND ${GATE_OK}` : ''}`)
       .bind(p.to, p.orderId, p.from),
     db
       .prepare(LOG_IF_CHANGED)
@@ -274,24 +293,40 @@ export async function loadForPoChange(db: D1Database, number: string, poId: numb
   return { orderId: o.id, productionStatus: o.production_status, order: toGateOrder(o), po, latestPoId: latest?.id ?? po.id, latestPo: latest ? { status: latest.status } : null }
 }
 
-/** Updates the PO and, when `syncTo` is set, the awaiting_* production status, plus one activity row, in one batch. */
+/**
+ * Updates the PO (guarded by its previous status) with its own activity row. When `sync` is set, the
+ * awaiting_* production status is then re-derived in SQL from the latest PO at write time, guarded by the
+ * production status the caller saw, with its own activity row. Each row exists only if its UPDATE changed one.
+ * Returns whether the PO changed, and the persisted production status.
+ */
 export async function applyPoChange(
   db: D1Database,
-  p: { orderId: number; poId: number; actorId: number; from: PoStatus; to: PoStatus; productionFrom: ProductionStatus; syncTo: ProductionStatus | null },
+  p: { orderId: number; poId: number; actorId: number; from: PoStatus; to: PoStatus; productionFrom: ProductionStatus; sync: boolean },
 ) {
-  const before = { po_id: p.poId, po_status: p.from, ...(p.syncTo ? { production_status: p.productionFrom } : {}) }
-  const after = { po_id: p.poId, po_status: p.to, ...(p.syncTo ? { production_status: p.syncTo } : {}) }
   const stmts = [
     db.prepare(`UPDATE purchase_orders SET status = ?, updated_at = ${NOW} WHERE id = ? AND status = ?`).bind(p.to, p.poId, p.from),
-    db.prepare(LOG_IF_CHANGED).bind(p.actorId, p.orderId, 'po_status_changed', JSON.stringify(before), JSON.stringify(after)),
+    db.prepare(LOG_IF_CHANGED).bind(p.actorId, p.orderId, 'po_status_changed', JSON.stringify({ po_id: p.poId, po_status: p.from }), JSON.stringify({ po_id: p.poId, po_status: p.to })),
   ]
-  if (p.syncTo) {
+  if (p.sync) {
+    // changes() here is the PO log insert, so the sync only runs when the PO change applied.
     stmts.push(
       db
-        .prepare(`UPDATE orders SET production_status = ?, updated_at = ${NOW} WHERE id = ? AND production_status = ? AND (SELECT status FROM purchase_orders WHERE id = ?) = ?`)
-        .bind(p.syncTo, p.orderId, p.productionFrom, p.poId, p.to),
+        .prepare(
+          `UPDATE orders SET production_status = ${PRE_PRODUCTION}, updated_at = ${NOW}
+           WHERE id = ? AND changes() > 0 AND state = 'active' AND production_status = ? AND production_status IN ('awaiting_authorization','awaiting_artwork')
+           AND production_status <> ${PRE_PRODUCTION}`,
+        )
+        .bind(p.orderId, p.productionFrom),
+      db
+        .prepare(
+          `INSERT INTO activity_log (actor_kind, actor_id, entity_type, entity_id, action, before, after)
+           SELECT 'user', ?, 'order', id, 'production_status_changed', ?, json_object('production_status', production_status, 'reason', 'po_sync')
+           FROM orders WHERE id = ? AND changes() > 0`,
+        )
+        .bind(p.actorId, JSON.stringify({ production_status: p.productionFrom }), p.orderId),
     )
   }
   const [update] = await db.batch(stmts)
-  return (update?.meta.changes ?? 0) > 0
+  const row = await db.prepare('SELECT production_status FROM orders WHERE id = ?').bind(p.orderId).first<{ production_status: ProductionStatus }>()
+  return { changed: (update?.meta.changes ?? 0) > 0, productionStatus: row?.production_status ?? p.productionFrom }
 }
