@@ -7,3 +7,4 @@ playwright-report
 *.tsbuildinfo
 .DS_Store
 .claude/worktrees
+!.dev.vars.example
