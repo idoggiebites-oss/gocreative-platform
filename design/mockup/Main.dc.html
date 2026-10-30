@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Dashboard</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#F6F5F2}
+a{color:#2340A8}a:hover{color:#1A3184}
+.chip{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px;border-radius:999px;font-size:12px;font-weight:500;white-space:nowrap}
+.chip::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.amber{background:#FBF1DE;color:#8A5300}.blue{background:#E8EEFB;color:#1E46A8}.green{background:#E4F3E9;color:#1B6E3E}.red{background:#FCEAE8;color:#A8261B}.gray{background:#EFEDE8;color:#55524B}
+.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl th{text-align:left;font-weight:500;font-size:12px;color:#6B675F;padding:0 12px;height:34px;border-bottom:1px solid #E7E5E0;white-space:nowrap}
+.tbl td{padding:0 12px;height:44px;border-bottom:1px solid #F0EEE9;white-space:nowrap}
+.tbl tr:last-child td{border-bottom:0}
+.tbl tbody tr:hover td{background:#FAF9F7}
+.num{font-variant-numeric:tabular-nums}
+.kpi{display:flex;flex-direction:column;gap:4px;padding:14px 16px;border-right:1px solid #EFEDE8}
+.kpi:last-child{border-right:0}
+.btn{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:7px;font:500 13px Inter,system-ui,sans-serif;border:1px solid #E1DED8;background:#FFFFFF;color:#1C1B19;cursor:pointer;transition:transform 160ms cubic-bezier(.23,1,.32,1)}
+.btn:active{transform:scale(.97)}
+.btn.primary{background:#2340A8;border-color:#2340A8;color:#FFFFFF}
+</style>
+</helmet>
+<div style="display: flex; flex-wrap: wrap; min-height: 100vh; font-family: Inter, system-ui, sans-serif; color: #1C1B19; background: #F6F5F2">
+<dc-import name="Sidebar" active="dashboard" hint-size="232px,900px"></dc-import>
+<main style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
+<header style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 32px; border-bottom: 1px solid #E7E5E0; background: #FBFAF8">
+<label style="flex: 1 1 280px; max-width: 480px; display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px; border: 1px solid #E1DED8; border-radius: 8px; background: #FFFFFF; color: #6B675F; font-size: 13px">
+<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg>
+<input type="search" placeholder="Search orders, customers, PO numbers" aria-label="Search" style="flex-grow: 1; border: 0; outline: none; font: inherit; color: #1C1B19; background: transparent; min-width: 0">
+<kbd style="font: 500 11px Inter, system-ui, sans-serif; color: #6B675F; border: 1px solid #E1DED8; border-radius: 4px; padding: 1px 5px">⌘K</kbd>
+</label>
+<div style="flex-grow: 1"></div>
+<button class="btn" aria-label="Notifications, 3 unread" style="width: 32px; padding: 0; justify-content: center; position: relative"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path></svg><span style="position: absolute; top: 6px; right: 7px; width: 7px; height: 7px; border-radius: 50%; background: #C2410C; box-shadow: 0 0 0 2px #FFFFFF"></span></button>
+<button class="btn primary"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>New order</button>
+</header>
+<div style="width: 100%; max-width: 1240px; box-sizing: border-box; padding: 24px 32px 40px; display: flex; flex-direction: column; gap: 20px">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px">
+<h1 style="margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.015em">Good afternoon</h1>
+<span style="font-size: 13px; color: #6B675F">Friday, October 30</span>
+</div>
+<section aria-label="Overview" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 10px; box-shadow: 0 1px 2px rgba(28,27,25,.04)">
+<div class="kpi"><span style="font-size: 12px; color: #6B675F">Active orders</span><span class="num" style="font-size: 24px; font-weight: 600; letter-spacing: -0.02em">24</span><span style="font-size: 12px; color: #6B675F">3 new this week</span></div>
+<div class="kpi"><span style="font-size: 12px; color: #6B675F">Pending quotes</span><span class="num" style="font-size: 24px; font-weight: 600; letter-spacing: -0.02em">5</span><span style="font-size: 12px; color: #8A5300">2 waiting 5+ days</span></div>
+<div class="kpi"><span style="font-size: 12px; color: #6B675F">Artwork to approve</span><span class="num" style="font-size: 24px; font-weight: 600; letter-spacing: -0.02em">4</span><span style="font-size: 12px; color: #A8261B">1 changes requested</span></div>
+<div class="kpi"><span style="font-size: 12px; color: #6B675F">POs to approve</span><span class="num" style="font-size: 24px; font-weight: 600; letter-spacing: -0.02em">3</span><span style="font-size: 12px; color: #6B675F">$8,420 held</span></div>
+<div class="kpi"><span style="font-size: 12px; color: #6B675F">In production</span><span class="num" style="font-size: 24px; font-weight: 600; letter-spacing: -0.02em">6</span><span style="font-size: 12px; color: #6B675F">1 in quality control</span></div>
+<div class="kpi"><span style="font-size: 12px; color: #6B675F">Due in 7 days</span><span class="num" style="font-size: 24px; font-weight: 600; letter-spacing: -0.02em">8</span><span style="font-size: 12px; color: #A8261B">1 overdue</span></div>
+<div class="kpi"><span style="font-size: 12px; color: #6B675F">Ready for pickup</span><span class="num" style="font-size: 24px; font-weight: 600; letter-spacing: -0.02em">3</span><span style="font-size: 12px; color: #6B675F">oldest 4 days</span></div>
+</section>
+<div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start">
+<section aria-labelledby="att" style="flex: 999 1 560px; min-width: 0; background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 10px; box-shadow: 0 1px 2px rgba(28,27,25,.04)">
+<div style="display: flex; align-items: center; justify-content: space-between; padding: 14px 16px 10px">
+<h2 id="att" style="margin: 0; font-size: 14px; font-weight: 600">Needs attention</h2>
+<a href="#" style="font-size: 13px; text-decoration: none">All orders</a>
+</div>
+<div style="overflow-x: auto">
+<table class="tbl">
+<thead><tr><th>Order</th><th>Customer</th><th>Why it's here</th><th>Due</th></tr></thead>
+<tbody>
+<tr><td class="num" style="font-weight: 500">2026-0138</td><td><div style="display: flex; flex-direction: column"><span>Lakeview Booster Club</span><span style="font-size: 12px; color: #6B675F">Laser-cut banners · 12</span></div></td><td><span class="chip red">Overdue 2 days · in QC</span></td><td class="num" style="color: #A8261B; font-weight: 500">Oct 28</td></tr>
+<tr><td class="num" style="font-weight: 500">2026-0151</td><td><div style="display: flex; flex-direction: column"><span>Cedar Hollow ISD</span><span style="font-size: 12px; color: #6B675F">Staff polos · embroidery · 86</span></div></td><td><span class="chip red">Artwork changes requested</span></td><td class="num">Nov 6</td></tr>
+<tr><td class="num" style="font-weight: 500">2026-0142</td><td><div style="display: flex; flex-direction: column"><span>Riverbend Unified SD</span><span style="font-size: 12px; color: #6B675F">Fall spirit wear · screen · 240</span></div></td><td><span class="chip amber">PO under review · 6 days</span></td><td class="num">Nov 4</td></tr>
+<tr><td class="num" style="font-weight: 500">2026-0155</td><td><div style="display: flex; flex-direction: column"><span>Jordan Pierce</span><span style="font-size: 12px; color: #6B675F">Engraved tumblers · 24</span></div></td><td><span class="chip amber">Quote sent 5 days ago</span></td><td class="num">Nov 12</td></tr>
+<tr><td class="num" style="font-weight: 500">2026-0149</td><td><div style="display: flex; flex-direction: column"><span>Northgate Elementary PTA</span><span style="font-size: 12px; color: #6B675F">Field day tees · DTG · 310</span></div></td><td><span class="chip green">Ready for pickup since Mon</span></td><td class="num">Nov 1</td></tr>
+<tr><td class="num" style="font-weight: 500; color: #6B675F">Inquiry</td><td><div style="display: flex; flex-direction: column"><span>Maple Grove Little League</span><span style="font-size: 12px; color: #6B675F">From the website · 2 files</span></div></td><td><span class="chip blue">New inquiry · not reviewed</span></td><td class="num" style="color: #6B675F">—</td></tr>
+</tbody>
+</table>
+</div>
+</section>
+<div style="flex: 1 1 300px; min-width: 0; display: flex; flex-direction: column; gap: 20px">
+<section aria-labelledby="due" style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 10px; box-shadow: 0 1px 2px rgba(28,27,25,.04); padding: 14px 16px; display: flex; flex-direction: column; gap: 12px">
+<h2 id="due" style="margin: 0; font-size: 14px; font-weight: 600">Due this week</h2>
+<div style="display: flex; flex-direction: column; gap: 10px; font-size: 13px">
+<div style="display: flex; gap: 12px"><span style="width: 52px; flex: none; font-size: 12px; color: #6B675F; padding-top: 2px">Today</span><div style="display: flex; flex-direction: column; gap: 6px; min-width: 0"><span><b class="num" style="font-weight: 500">2026-0144</b> Westfield HS Band</span><span><b class="num" style="font-weight: 500">2026-0146</b> Avery Chen</span></div></div>
+<div style="display: flex; gap: 12px"><span style="width: 52px; flex: none; font-size: 12px; color: #6B675F; padding-top: 2px">Sun 1</span><div style="display: flex; flex-direction: column; gap: 6px"><span><b class="num" style="font-weight: 500">2026-0149</b> Northgate Elem. PTA</span></div></div>
+<div style="display: flex; gap: 12px"><span style="width: 52px; flex: none; font-size: 12px; color: #6B675F; padding-top: 2px">Tue 3</span><div style="display: flex; flex-direction: column; gap: 6px"><span><b class="num" style="font-weight: 500">2026-0140</b> Cedar Hollow ISD</span><span><b class="num" style="font-weight: 500">2026-0147</b> Riverbend Unified SD</span></div></div>
+<div style="display: flex; gap: 12px"><span style="width: 52px; flex: none; font-size: 12px; color: #6B675F; padding-top: 2px">Wed 4</span><div style="display: flex; flex-direction: column; gap: 6px"><span><b class="num" style="font-weight: 500">2026-0142</b> Riverbend Unified SD</span></div></div>
+</div>
+</section>
+<section aria-labelledby="act" style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 10px; box-shadow: 0 1px 2px rgba(28,27,25,.04); padding: 14px 16px; display: flex; flex-direction: column; gap: 12px">
+<h2 id="act" style="margin: 0; font-size: 14px; font-weight: 600">Recent activity</h2>
+<ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 12px; font-size: 13px">
+<li style="display: flex; flex-direction: column; gap: 2px"><span>PO received for <b class="num" style="font-weight: 500">2026-0142</b></span><span style="font-size: 12px; color: #6B675F">Owner 2 · 12 min ago</span></li>
+<li style="display: flex; flex-direction: column; gap: 2px"><span>Artwork v3 approved on <b class="num" style="font-weight: 500">2026-0147</b></span><span style="font-size: 12px; color: #6B675F">Owner 1 · 1 hr ago</span></li>
+<li style="display: flex; flex-direction: column; gap: 2px"><span><b class="num" style="font-weight: 500">2026-0138</b> moved to Quality control</span><span style="font-size: 12px; color: #6B675F">Owner 2 · 2 hr ago</span></li>
+<li style="display: flex; flex-direction: column; gap: 2px"><span>New inquiry from Maple Grove Little League</span><span style="font-size: 12px; color: #6B675F">Website · 3 hr ago</span></li>
+</ul>
+</section>
+</div>
+</div>
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

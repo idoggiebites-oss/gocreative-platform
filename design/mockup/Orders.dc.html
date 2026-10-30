@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Orders</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#F6F5F2}
+a{color:#2340A8}a:hover{color:#1A3184}
+.chip{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px;border-radius:999px;font-size:12px;font-weight:500;white-space:nowrap}
+.chip::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.amber{background:#FBF1DE;color:#8A5300}.blue{background:#E8EEFB;color:#1E46A8}.green{background:#E4F3E9;color:#1B6E3E}.red{background:#FCEAE8;color:#A8261B}.gray{background:#EFEDE8;color:#55524B}
+.none{color:#8C887F;font-size:12px}
+.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl th{text-align:left;font-weight:500;font-size:12px;color:#6B675F;padding:0 12px;height:34px;border-bottom:1px solid #E7E5E0;white-space:nowrap;background:#FBFAF8}
+.tbl td{padding:0 12px;height:40px;border-bottom:1px solid #F0EEE9;white-space:nowrap}
+.tbl tbody tr:hover td{background:#FAF9F7}
+.tbl tr:last-child td{border-bottom:0}
+.num{font-variant-numeric:tabular-nums}
+.r{text-align:right !important}
+.tab{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px;border-radius:7px;font:500 13px Inter,system-ui,sans-serif;color:#55524B;background:transparent;border:0;cursor:pointer}
+.tab .c{font-size:12px;color:#7A766E;font-variant-numeric:tabular-nums}
+.tab.on{background:#FFFFFF;color:#1C1B19;box-shadow:0 0 0 1px #E4E1DB,0 1px 2px rgba(28,27,25,.05)}
+.btn{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:7px;font:500 13px Inter,system-ui,sans-serif;border:1px solid #E1DED8;background:#FFFFFF;color:#1C1B19;cursor:pointer;transition:transform 160ms cubic-bezier(.23,1,.32,1)}
+.btn:active{transform:scale(.97)}
+.btn.primary{background:#2340A8;border-color:#2340A8;color:#FFFFFF}
+.filter{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:7px;border:1px dashed #D6D2CA;background:transparent;font:500 12.5px Inter,system-ui,sans-serif;color:#55524B;cursor:pointer}
+.filter.set{border-style:solid;background:#FFFFFF;color:#1C1B19}
+.m{display:inline-flex;align-items:center;height:20px;padding:0 6px;border-radius:5px;background:#F1EFEA;color:#4A4741;font-size:11.5px;font-weight:500;margin-right:4px}
+</style>
+</helmet>
+<div style="display: flex; flex-wrap: wrap; min-height: 100vh; font-family: Inter, system-ui, sans-serif; color: #1C1B19; background: #F6F5F2">
+<dc-import name="Sidebar" active="orders" hint-size="232px,900px"></dc-import>
+<main style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
+<header style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 32px; border-bottom: 1px solid #E7E5E0; background: #FBFAF8">
+<h1 style="margin: 0; font-size: 16px; font-weight: 600">Orders</h1>
+<div style="flex-grow: 1"></div>
+<button class="btn">Export CSV</button>
+<button class="btn primary"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>New order</button>
+</header>
+<div style="width: 100%; box-sizing: border-box; padding: 16px 32px 40px; display: flex; flex-direction: column; gap: 12px">
+<div role="tablist" aria-label="Order views" style="display: flex; flex-wrap: wrap; gap: 4px">
+<button role="tab" aria-selected="true" class="tab on">Active <span class="c">24</span></button>
+<button role="tab" aria-selected="false" class="tab">Inquiries <span class="c">2</span></button>
+<button role="tab" aria-selected="false" class="tab">Waiting on PO <span class="c">3</span></button>
+<button role="tab" aria-selected="false" class="tab">Waiting on artwork <span class="c">4</span></button>
+<button role="tab" aria-selected="false" class="tab">In production <span class="c">6</span></button>
+<button role="tab" aria-selected="false" class="tab">Ready <span class="c">3</span></button>
+<button role="tab" aria-selected="false" class="tab">Completed</button>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px">
+<label style="flex: 0 1 300px; display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; border: 1px solid #E1DED8; border-radius: 7px; background: #FFFFFF; color: #6B675F; font-size: 13px">
+<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg>
+<input type="search" placeholder="Filter by number, customer, PO" aria-label="Filter orders" style="flex-grow: 1; border: 0; outline: none; font: inherit; background: transparent; min-width: 0">
+</label>
+<button class="filter set">Hide completed ×</button>
+<button class="filter">+ Customer type</button>
+<button class="filter">+ Method</button>
+<button class="filter">+ Due date</button>
+<button class="filter">+ Assignee</button>
+<div style="flex-grow: 1"></div>
+<span style="font-size: 12px; color: #6B675F">Sorted by due date</span>
+</div>
+<section style="background: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 10px; box-shadow: 0 1px 2px rgba(28,27,25,.04); overflow-x: auto">
+<table class="tbl">
+<thead><tr><th>Order</th><th>Customer</th><th>Items</th><th>Artwork</th><th>PO</th><th>Production</th><th>Due</th><th class="r">Estimate</th></tr></thead>
+<tbody>
+<tr><td class="num" style="font-weight: 500">2026-0138</td><td>Lakeview Booster Club</td><td><span class="m">Laser cut</span>12 banners</td><td><span class="chip green">Approved</span></td><td><span class="none">Not required</span></td><td><span class="chip blue">Quality control</span></td><td class="num" style="color: #A8261B; font-weight: 500">Oct 28 · overdue</td><td class="num r">$1,140.00</td></tr>
+<tr><td class="num" style="font-weight: 500">2026-0144</td><td>Westfield HS Band</td><td><span class="m">Screen</span>180 tees</td><td><span class="chip green">Approved</span></td><td><span class="chip green">Approved</span></td><td><span class="chip blue">In production</span></td><td class="num">Today</td><td class="num r">$2,610.00</td></tr>
+<tr><td class="num" style="font-weight: 500">2026-0146</td><td>Avery Chen</td><td><span class="m">DTG</span>6 hoodies</td><td><span class="chip green">Approved</span></td><td><span class="none">Not required</span></td><td><span class="chip green">Ready for pickup</span></td><td class="num">Today</td><td class="num r">$294.00</td></tr>
+<tr><td class="num" style="font-weight: 500">2026-0149</td><td>Northgate Elementary PTA</td><td><span class="m">DTG</span>310 tees</td><td><span class="chip green">Approved</span></td><td><span class="none">Not required</span></td><td><span class="chip green">Ready for pickup</span></td><td class="num">Nov 1</td><td class="num r">$3,875.00</td></tr>
+<tr><td class="num" style="font-weight: 500">2026-0140</td><td>Cedar Hollow ISD</td><td><span class="m">Embroidery</span><span class="m">Screen</span>148 items</td><td><span class="chip green">Approved</span></td><td><span class="chip green">Approved</span></td><td><span class="chip gray">Ready</span></td><td class="num">Nov 3</td><td class="num r">$4,212.50</td></tr>
+<tr><td class="num" style="font-weight: 500">2026-0147</td><td>Riverbend Unified SD</td><td><span class="m">Screen</span>96 tees</td><td><span class="chip green">Approved</span></td><td><span class="chip amber">Received</span></td><td><span class="chip amber">Awaiting authorization</span></td><td class="num">Nov 3</td><td class="num r">$1,488.00</td></tr>
+<tr><td class="num" style="font-weight: 500">2026-0142</td><td>Riverbend Unified SD</td><td><span class="m">Screen</span>240 items</td><td><span class="chip green">Approved</span></td><td><span class="chip amber">Under review</span></td><td><span class="chip amber">Awaiting authorization</span></td><td class="num">Nov 4</td><td class="num r">$5,180.00</td></tr>
+<tr><td class="num" style="font-weight: 500">2026-0151</td><td>Cedar Hollow ISD</td><td><span class="m">Embroidery</span>86 polos</td><td><span class="chip red">Changes requested</span></td><td><span class="chip amber">Requested</span></td><td><span class="chip amber">Awaiting artwork</span></td><td class="num">Nov 6</td><td class="num r">$2,752.00</td></tr>
+<tr><td class="num" style="font-weight: 500">2026-0153</td><td>Pinecrest Middle School</td><td><span class="m">Laser engrave</span>40 plaques</td><td><span class="chip amber">Pending</span></td><td><span class="chip red">Correction needed</span></td><td><span class="chip amber">Awaiting authorization</span></td><td class="num">Nov 10</td><td class="num r">$1,960.00</td></tr>
+<tr><td class="num" style="font-weight: 500">2026-0155</td><td>Jordan Pierce</td><td><span class="m">Laser engrave</span>24 tumblers</td><td><span class="chip amber">Pending</span></td><td><span class="none">Not required</span></td><td><span class="chip amber">Awaiting authorization</span></td><td class="num">Nov 12</td><td class="num r">$576.00</td></tr>
+<tr><td class="num" style="font-weight: 500">2026-0156</td><td>Riverbend Unified SD</td><td><span class="m">Embroidery</span>30 jackets</td><td><span class="none">No artwork yet</span></td><td><span class="chip gray">Not requested</span></td><td><span class="chip amber">Awaiting authorization</span></td><td class="num">Nov 20</td><td class="num r" style="color: #8C887F">—</td></tr>
+</tbody>
+</table>
+</section>
+<span style="font-size: 12px; color: #6B675F">Showing 11 of 24 active orders</span>
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

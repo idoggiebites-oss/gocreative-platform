@@ -51,3 +51,17 @@ write-once `files` and `activity_log` rows reference them.
 There is no storefront until Phase 4, so nothing public is lost. Path-level
 Access (only `/app` and `/api/app`) moves to the custom domain when the
 storefront ships. See [notes/access-setup.md](notes/access-setup.md).
+
+### 2026-10-30 — Phase 1 mockup approved (Arturo: "Mockups are good")
+Source in `design/mockup/*.dc.html` (also at
+https://claude.ai/artifact/SwwVcE6jJz2CSS37Hv9wnZ). The screens are built to it.
+
+### 2026-10-30 — English/Spanish language toggle (Arturo)
+Applies to the dashboard and the storefront. **How (Claude):** no i18n library.
+`shared/i18n/en.ts` is the source of truth; `es.ts` is typed to the same shape,
+so a missing translation fails `tsc`. Each enum gets a typed label record. Dates
+and money go through `Intl`. The choice is stored per device (localStorage); a
+first visit follows `navigator.language`; `<html lang>` follows the choice.
+User-entered content is never translated. Customer emails (Phase 4) go out in
+the language the inquiry was submitted in. The Spanish copy is written by Claude
+and needs a read-through by a native speaker in the family.
