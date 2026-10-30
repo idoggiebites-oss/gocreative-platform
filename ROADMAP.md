@@ -26,7 +26,7 @@ Codex reviews the phase diff read-only before merge.
 | 1.1 | Scaffold: Vite/React/TS, Tailwind v4, shadcn, Hono worker, wrangler (D1 + R2), Vitest + Playwright, `npm run verify` | mechanical, well-trodden | Claude (did it inline) | done |
 | 1.2 | Migration 0001 (full schema in ARCHITECTURE.md) + seed script with sample orders in every status | mechanical given the schema | Sonnet agent | done (90745e4) |
 | 1.3 | Domain rules: status enums, `canEnterProduction`, order numbering, plus unit tests | business rules; a thin version passes and is wrong | **Codex** (writes + tests) | done (ea63a82), Claude reviewed |
-| 1.4 | Auth: Access JWT verify, `users` lookup, role guard, 401/403 API boundary tests | trust boundary | Opus agent, after 1.2; Codex reviews | done (99eed65); Codex findings being fixed |
+| 1.4 | Auth: Access JWT verify, `users` lookup, role guard, 401/403 API boundary tests | trust boundary | Opus agent, after 1.2; Codex reviews | done (99eed65, hardened 787c9d9 after Codex review) |
 | 1.5 | Design pass: tokens + mockup of the 3 screens for Arturo to review (design skills) | taste + judgment; **review gate** | Claude | mockup published, waiting on Arturo's review: https://claude.ai/artifact/SwwVcE6jJz2CSS37Hv9wnZ |
 | 1.6 | App shell: sidebar, ⌘K search, mobile nav, `brand.css` | build to the approved mockup | Sonnet agent | todo |
 | 1.7 | Dashboard, order list, order detail: read API + inline status changes | build to the mockup + domain rules | Sonnet agent; Codex reviews | todo |
