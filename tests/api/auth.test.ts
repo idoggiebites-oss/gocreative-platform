@@ -1,8 +1,8 @@
-import { beforeAll, describe, expect, test } from 'vitest'
+import { beforeAll, describe, expect, test, vi } from 'vitest'
 import { Hono } from 'hono'
 import { sign } from 'hono/jwt'
 import { appRoutes } from '../../worker/routes/app'
-import type { AppEnv, Jwk } from '../../worker/auth'
+import { makeKeyFetcher, type AppEnv, type Jwk } from '../../worker/auth'
 import realApp from '../../worker/index'
 import { createTestD1 } from './d1'
 
@@ -76,6 +76,25 @@ describe('401 unauthenticated', () => {
   })
 })
 
+describe('401 algorithm and time claims, known kid', () => {
+  const claims = { aud: [AUD], iss: `https://${TEAM}`, email: 'owner1@example.com', iat: now(), exp: now() + 600 }
+  const rejects = async (jwt: string) => expectError(await get('/me', jwt), 401, 'unauthenticated')
+  // hono's sign() can't set a custom header, so build the HS256 token by hand with the known kid.
+  const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url')
+  test('HS256 with the known kid', async () => {
+    const input = `${b64({ alg: 'HS256', typ: 'JWT', kid: 'good' })}.${b64(claims)}`
+    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(good.pub.n), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+    const sig = Buffer.from(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(input))).toString('base64url')
+    await rejects(`${input}.${sig}`)
+  })
+  test('RS512 correctly signed with the known kid (RS256 is pinned)', async () =>
+    rejects(await sign(claims, { ...good.priv, alg: 'RS512' }, 'RS512')))
+  test('nbf 5 minutes in the future', async () => rejects(await token({ nbf: now() + 300 })))
+  test('iat 5 minutes in the future', async () => rejects(await token({ iat: now() + 300 })))
+  test('exp equal to now', async () => rejects(await token({ exp: now() })))
+  test('exp as a string', async () => rejects(await token({ exp: String(now() + 600) })))
+})
+
 describe('403 forbidden', () => {
   test('unknown email', async () =>
     expectError(await get('/me', await token({ email: 'stranger@example.com' })), 403, 'forbidden'))
@@ -136,5 +155,51 @@ describe('worker/index.ts mounting', () => {
   test('/api/app/* is behind auth in the real app', async () => {
     const res = await realApp.request('https://x.workers.dev/api/app/me', {}, env())
     await expectError(res, 401, 'unauthenticated')
+  })
+})
+
+describe('makeKeyFetcher', () => {
+  const T = 'a.cloudflareaccess.com'
+  const setup = (impl: () => Promise<Response>) => {
+    let t = 1_000_000
+    const f = vi.fn(impl)
+    return { f, get: makeKeyFetcher(f as unknown as typeof fetch, () => t), tick: (ms: number) => (t += ms) }
+  }
+  const ok = () => Promise.resolve(Response.json({ keys: [{ kid: 'k' }] }))
+  const bad = () => Promise.resolve(new Response('no', { status: 500 }))
+
+  test('10 concurrent calls on a cold cache → one fetch', async () => {
+    const { f, get } = setup(ok)
+    const all = await Promise.all(Array.from({ length: 10 }, () => get(T, false)))
+    expect(f).toHaveBeenCalledTimes(1)
+    for (const keys of all) expect(keys).toEqual([{ kid: 'k' }])
+  })
+  test('failed fetch is not retried within 10s, is after', async () => {
+    const { f, get, tick } = setup(bad)
+    await expect(get(T, false)).rejects.toThrow()
+    await expect(get(T, true)).rejects.toThrow()
+    expect(f).toHaveBeenCalledTimes(1)
+    tick(10_000)
+    await expect(get(T, false)).rejects.toThrow()
+    expect(f).toHaveBeenCalledTimes(2)
+  })
+  test('refresh within 10s of a good fetch does not refetch', async () => {
+    const { f, get, tick } = setup(ok)
+    await get(T, false)
+    tick(9_000)
+    await get(T, true)
+    expect(f).toHaveBeenCalledTimes(1)
+    tick(1_000)
+    await get(T, true)
+    expect(f).toHaveBeenCalledTimes(2)
+  })
+  test('during backoff after a failed refresh, last good keys are served', async () => {
+    let n = 0
+    const { f, get, tick } = setup(() => (n++ ? bad() : ok()))
+    await get(T, false)
+    tick(6 * 60_000)
+    await expect(get(T, false)).rejects.toThrow() // expired, refetch fails
+    expect(await get(T, false)).toEqual([{ kid: 'k' }]) // backoff: stale keys
+    expect(f).toHaveBeenCalledTimes(2)
   })
 })

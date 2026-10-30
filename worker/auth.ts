@@ -11,18 +11,40 @@ export type GetKeys = (teamDomain: string, refresh: boolean) => Promise<Jwk[]>
 const KEY_TTL_MS = 5 * 60_000
 // A forced refresh is ignored while the cache is younger than this, so tokens with made-up kids can't hammer the certs URL.
 const MIN_REFRESH_MS = 10_000
-let cache: { domain: string; keys: Jwk[]; at: number } | undefined
+type KeyState = { keys?: Jwk[]; goodAt: number; attemptAt: number; inflight?: Promise<Jwk[]> }
 
-export const fetchAccessKeys: GetKeys = async (teamDomain, refresh) => {
-  const age = cache?.domain === teamDomain ? Date.now() - cache.at : Infinity
-  if (cache && age < (refresh ? MIN_REFRESH_MS : KEY_TTL_MS)) return cache.keys
-  const res = await fetch(`https://${teamDomain}/cdn-cgi/access/certs`)
-  if (!res.ok) throw new Error(`Access certs fetch failed: ${res.status}`)
-  const { keys } = (await res.json()) as { keys: Jwk[] }
-  if (!Array.isArray(keys)) throw new Error('Access certs response has no keys array')
-  cache = { domain: teamDomain, keys, at: Date.now() }
-  return keys
+/** fetchImpl and now are injectable so tests can count fetches and move the clock. */
+export function makeKeyFetcher(fetchImpl: typeof fetch, now: () => number): GetKeys {
+  const state = new Map<string, KeyState>()
+  return async (teamDomain, refresh) => {
+    const s = state.get(teamDomain) ?? { goodAt: 0, attemptAt: -Infinity }
+    state.set(teamDomain, s)
+    // Concurrent callers (cold cache, unknown kid) share one fetch instead of each starting their own.
+    if (s.inflight) return s.inflight
+    if (s.keys && now() - s.goodAt < (refresh ? MIN_REFRESH_MS : KEY_TTL_MS)) return s.keys
+    // The attempt time is recorded even on failure, so a failing certs URL is retried at most every MIN_REFRESH_MS.
+    // During that backoff serve the last good keys if there are any, else fail.
+    if (now() - s.attemptAt < MIN_REFRESH_MS) {
+      if (s.keys) return s.keys
+      throw new Error('Access certs fetch failed recently')
+    }
+    s.attemptAt = now()
+    s.inflight = (async () => {
+      const res = await fetchImpl(`https://${teamDomain}/cdn-cgi/access/certs`)
+      if (!res.ok) throw new Error(`Access certs fetch failed: ${res.status}`)
+      const { keys } = (await res.json()) as { keys: Jwk[] }
+      if (!Array.isArray(keys)) throw new Error('Access certs response has no keys array')
+      s.keys = keys
+      s.goodAt = now()
+      return keys
+    })().finally(() => {
+      s.inflight = undefined
+    })
+    return s.inflight
+  }
 }
+
+export const fetchAccessKeys: GetKeys = makeKeyFetcher((...a) => fetch(...a), Date.now)
 
 /** Returns the verified email, or null for any missing/invalid/expired/foreign token. */
 async function verifyAccessJwt(token: string | undefined, aud: string, teamDomain: string, getKeys: GetKeys) {
