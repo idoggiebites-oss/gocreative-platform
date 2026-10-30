@@ -19,3 +19,9 @@ and check both in a private window after setup.
 ### 2026-10-30 — Codex's sandbox can't run vitest/tsc -b (cache writes)
 It writes the code but can't run the gate. Rule: after a Codex write task,
 run `npm run verify` yourself before committing.
+
+### 2026-10-30 — Parallel worktrees collide on the e2e port (4280)
+`npm run verify` failed with "localhost:4280 is already used" while another
+agent's e2e was running. Not a code failure. Rule: run e2e in only one worktree
+at a time, or re-run after the other agent finishes, before concluding that
+anything broke.
