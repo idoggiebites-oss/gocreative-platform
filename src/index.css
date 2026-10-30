@@ -1,13 +1,26 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@import "@fontsource-variable/geist";
+@import "@fontsource-variable/inter";
+@import "./brand.css";
 
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
     --font-heading: var(--font-sans);
-    --font-sans: 'Geist Variable', sans-serif;
+    --font-sans: 'Inter Variable', system-ui, sans-serif;
+    --color-header: var(--header);
+    --color-brand-tint: var(--brand-tint);
+    --color-status-amber: var(--status-amber);
+    --color-status-amber-fg: var(--status-amber-fg);
+    --color-status-blue: var(--status-blue);
+    --color-status-blue-fg: var(--status-blue-fg);
+    --color-status-green: var(--status-green);
+    --color-status-green-fg: var(--status-green-fg);
+    --color-status-red: var(--status-red);
+    --color-status-red-fg: var(--status-red-fg);
+    --color-status-gray: var(--status-gray);
+    --color-status-gray-fg: var(--status-gray-fg);
     --color-sidebar-ring: var(--sidebar-ring);
     --color-sidebar-border: var(--sidebar-border);
     --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -48,73 +61,54 @@
     --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-:root {
-    --background: oklch(1 0 0);
-    --foreground: oklch(0.145 0 0);
-    --card: oklch(1 0 0);
-    --card-foreground: oklch(0.145 0 0);
-    --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.145 0 0);
-    --primary: oklch(0.205 0 0);
-    --primary-foreground: oklch(0.985 0 0);
-    --secondary: oklch(0.97 0 0);
-    --secondary-foreground: oklch(0.205 0 0);
-    --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.556 0 0);
-    --accent: oklch(0.97 0 0);
-    --accent-foreground: oklch(0.205 0 0);
-    --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.922 0 0);
-    --input: oklch(0.922 0 0);
-    --ring: oklch(0.708 0 0);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
-    --radius: 0.625rem;
-    --sidebar: oklch(0.985 0 0);
-    --sidebar-foreground: oklch(0.145 0 0);
-    --sidebar-primary: oklch(0.205 0 0);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.97 0 0);
-    --sidebar-accent-foreground: oklch(0.205 0 0);
-    --sidebar-border: oklch(0.922 0 0);
-    --sidebar-ring: oklch(0.708 0 0);
+@utility num {
+    font-variant-numeric: tabular-nums;
 }
 
-.dark {
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.205 0 0);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.205 0 0);
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.922 0 0);
-    --primary-foreground: oklch(0.205 0 0);
-    --secondary: oklch(0.269 0 0);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
-    --accent-foreground: oklch(0.985 0 0);
-    --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
-    --sidebar: oklch(0.205 0 0);
-    --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.488 0.243 264.376);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.269 0 0);
-    --sidebar-accent-foreground: oklch(0.985 0 0);
-    --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.556 0 0);
+:root {
+    --background: #f6f5f2;
+    --foreground: #1c1b19;
+    --card: #ffffff;
+    --card-foreground: #1c1b19;
+    --popover: #ffffff;
+    --popover-foreground: #1c1b19;
+    --primary: var(--brand);
+    --primary-foreground: var(--brand-foreground);
+    --secondary: #efede8;
+    --secondary-foreground: #1c1b19;
+    --muted: #efede8;
+    --muted-foreground: #6b675f;
+    --accent: #efede8;
+    --accent-foreground: #1c1b19;
+    --destructive: #a8261b;
+    --border: #e7e5e0;
+    --input: #e1ded8;
+    --ring: var(--brand);
+    --chart-1: #2340a8;
+    --chart-2: #1b6e3e;
+    --chart-3: #8a5300;
+    --chart-4: #a8261b;
+    --chart-5: #55524b;
+    --radius: 0.625rem;
+    --header: #fbfaf8;
+    --sidebar: #f6f5f2;
+    --sidebar-foreground: #1c1b19;
+    --sidebar-primary: var(--brand);
+    --sidebar-primary-foreground: var(--brand-foreground);
+    --sidebar-accent: #efede8;
+    --sidebar-accent-foreground: #1c1b19;
+    --sidebar-border: #e7e5e0;
+    --sidebar-ring: var(--brand);
+    --status-amber: #fbf1de;
+    --status-amber-fg: #8a5300;
+    --status-blue: #e8eefb;
+    --status-blue-fg: #1e46a8;
+    --status-green: #e4f3e9;
+    --status-green-fg: #1b6e3e;
+    --status-red: #fceae8;
+    --status-red-fg: #a8261b;
+    --status-gray: #efede8;
+    --status-gray-fg: #55524b;
 }
 
 @layer base {
@@ -127,4 +121,24 @@
   html {
     @apply font-sans;
     }
+}
+
+/* Press feedback on every button; hover only where hover exists. */
+button, [role="button"], a[data-press] {
+  transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1), background-color 120ms;
+}
+button:active:not(:disabled), a[data-press]:active { transform: scale(0.97); }
+
+/* The command palette is used many times a day: no open/close animation. */
+body:has([data-slot="command"]) [data-slot="dialog-overlay"],
+body:has([data-slot="command"]) [data-slot="dialog-content"] {
+  animation: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

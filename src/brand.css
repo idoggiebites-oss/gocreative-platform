@@ -1,0 +1,8 @@
+/* The only stylesheet that carries brand-specific values. Another business =
+   another copy of this file (and shared/business.ts). Default: deep ink-blue. */
+:root {
+  --brand: #2340a8;
+  --brand-foreground: #ffffff;
+  --brand-hover: #1a3184;
+  --brand-tint: #e3e8f8;
+}
