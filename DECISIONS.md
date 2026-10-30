@@ -35,3 +35,19 @@ pickup/delivery. **Blocker:** sending needs a domain on Cloudflare, and GoCreati
 has no website or domain. Phases 1–3 don't need one; the domain is needed by
 Phase 4. The domain also becomes the storefront's address. Until then the app
 runs on `*.workers.dev`.
+
+### 2026-10-30 — Models assigned per task by Claude; Codex writes and reviews (Arturo)
+"Assign models for efficiency and use codex as well." Sonnet does the mechanical,
+fully specified tasks. Opus is used for trust boundaries. Codex writes pure,
+testable logic (task 1.3) and does a read-only review of every merged task. The
+assignment is recorded in [ROADMAP.md](ROADMAP.md).
+
+### 2026-10-30 — Orders, quotes and POs are never deleted; users are never deleted (Claude, from Codex review)
+Orders end as `cancelled` or `completed`. Estimates, POs and PO documents are
+`ON DELETE RESTRICT`. Users are deactivated with `active = 0`, because the
+write-once `files` and `activity_log` rows reference them.
+
+### 2026-10-30 — Phase 1 runs on workers.dev with the whole hostname behind Access (Claude)
+There is no storefront until Phase 4, so nothing public is lost. Path-level
+Access (only `/app` and `/api/app`) moves to the custom domain when the
+storefront ships. See [notes/access-setup.md](notes/access-setup.md).

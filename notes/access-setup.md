@@ -23,9 +23,14 @@ Access only emails a PIN to an address that some Access policy allows.
 1. Zero Trust → **Access controls** → **Applications** → **Create new application**
    → **Self-hosted and private**.
 2. Name it after the business's dashboard. **(unverified: the name field's position)**
-3. **Add public hostname** twice, on the same hostname:
-   - path `app/*`
-   - path `api/app/*`
+3. **Add public hostname** four times, on the same hostname:
+   - path `app` and path `app/*`
+   - path `api/app` and path `api/app/*`
+
+   A wildcard path does NOT cover its parent: `app/*` leaves `/app` itself open
+   (Cloudflare app-paths docs; found by Codex review, 2026-10-30). After setup,
+   open `/app`, `/app/orders`, `/api/app` and `/api/app/me` in a private window and
+   confirm each one asks for a PIN.
 
    **(unverified: the docs page mentions hostnames and wildcards but not the path
    field or several destinations per app.)** Keep both paths in ONE application:
@@ -38,7 +43,10 @@ Access only emails a PIN to an address that some Access policy allows.
    - **`*.workers.dev`.** Cloudflare can protect a Worker's `workers.dev` URL from
      the Worker's settings, but the docs don't say whether that can be limited to
      paths. **(unverified)** If it can only cover the whole hostname, do NOT use it:
-     it would put the storefront behind Access. Wait for the custom domain instead.
+     it would put the storefront behind Access. **For Phase 1–3 that is fine:**
+     there is no storefront until Phase 4, so the whole workers.dev hostname can
+     sit behind Access and only the family can open anything. Switch to path-level
+     protection on the custom domain when the storefront ships.
 5. **Identity providers:** select One-time PIN only. Optionally turn on
    **Apply instant authentication**, since it is the only IdP.
 6. **Session duration:** pick one (for example 24 hours). Not decided in DECISIONS.
