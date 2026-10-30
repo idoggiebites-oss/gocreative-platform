@@ -65,3 +65,14 @@ first visit follows `navigator.language`; `<html lang>` follows the choice.
 User-entered content is never translated. Customer emails (Phase 4) go out in
 the language the inquiry was submitted in. The Spanish copy is written by Claude
 and needs a read-through by a native speaker in the family.
+
+### 2026-10-30 — Spanish is for the dashboard only; the storefront stays English for now (Arturo)
+Narrows the previous entry. The storefront has no toggle, and customer emails go
+out in English, so there is no `inquiries.language` column. The i18n
+dictionaries live in `shared/` so the storefront can adopt them later without
+moving anything.
+
+### 2026-10-30 — Public GitHub repo for now (Arturo)
+Under `idoggiebites-oss`. Nothing secret is committed: `.dev.vars` is ignored,
+the seed data is fictional, and the D1 id is a placeholder until deploy (a D1 id
+is not a credential anyway). Secrets only ever go in `wrangler secret`.

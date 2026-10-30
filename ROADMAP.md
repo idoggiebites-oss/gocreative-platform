@@ -38,5 +38,3 @@ Codex reviews the phase diff read-only before merge.
 - An order's contact and an artwork's order must belong to the same customer.
   Enforce this in the order and artwork routes, with negative tests. (Codex
   review of 1.2; ownership triggers were deliberately not added.)
-- Phase 4: `inquiries.language` (en|es), set by the storefront toggle; customer
-  emails are sent in it.
