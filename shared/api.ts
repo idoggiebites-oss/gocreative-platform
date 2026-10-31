@@ -142,12 +142,12 @@ export type ProductionChangeResponse = { number: string; productionStatus: Produ
 export type PoChangeRequest = { to: PoStatus }
 export type PoChangeResponse = { poId: number; status: PoStatus; productionStatus: ProductionStatus }
 // `error` is English text for logs; the UI shows a translation of `code` (and of each gate reason code in `reasons`).
-export const API_ERROR_CODES = ['transition_not_allowed', 'gate_failed', 'conflict_retry', 'po_transition_not_allowed', 'not_found', 'invalid_request'] as const
+export const API_ERROR_CODES = ['transition_not_allowed', 'gate_failed', 'conflict_retry', 'po_transition_not_allowed', 'not_found', 'invalid_request', 'contact_archived'] as const
 export type ApiErrorCode = (typeof API_ERROR_CODES)[number]
 export type ApiError = { error: string; code?: ApiErrorCode; reasons?: string[] }
 
 // Codes the UI translates. Unknown codes fall back to a generic label, so the API can add one first.
-export const ACTIVITY_ACTIONS = ['created', 'production_status_changed', 'po_status_changed'] as const
+export const ACTIVITY_ACTIONS = ['created', 'production_status_changed', 'po_status_changed', 'customer_created', 'customer_updated', 'contact_added', 'contact_updated', 'contact_archived', 'contact_unarchived', 'note_added'] as const
 export type ActivityAction = (typeof ACTIVITY_ACTIONS)[number]
 export const GATE_REASON_CODES = [
   'order_not_active',
@@ -158,3 +158,67 @@ export const GATE_REASON_CODES = [
   'preparation.not_started', 'preparation.in_progress',
 ] as const
 export type GateReasonCode = (typeof GATE_REASON_CODES)[number]
+
+// ---- customers (M1b) ----
+export type CustomerListRow = {
+  id: number
+  name: string
+  kind: CustomerKind
+  organization: string | null
+  email: string | null
+  phone: string | null
+  defaultPoRequired: boolean
+  defaultPaymentTerms: PaymentTerms
+  activeOrders: number
+  /** null until M5 (payments) fills it. */
+  outstanding: number | null
+  lastOrderAt: string | null
+}
+export type CustomersListResponse = { rows: CustomerListRow[] }
+export type CustomerContact = {
+  id: number
+  name: string
+  email: string | null
+  phone: string | null
+  title: string | null
+  isPrimary: boolean
+  archived: boolean
+  archivedAt: string | null
+}
+export type CustomerRecord = {
+  id: number
+  name: string
+  kind: CustomerKind
+  organization: string | null
+  email: string | null
+  phone: string | null
+  defaultPoRequired: boolean
+  defaultPaymentTerms: PaymentTerms
+  internalNotes: string | null
+  createdAt: string
+  /** Send back as expectedUpdatedAt when patching. */
+  updatedAt: string
+}
+export type CustomerNote = { id: number; body: string; authorName: string | null; createdAt: string }
+export type CustomerDetailResponse = {
+  customer: CustomerRecord
+  contacts: CustomerContact[]
+  orders: { number: string; title: string; productionStatus: ProductionStatus; state: OrderState; quote: { status: QuoteStatus; totalCents: number } | null; createdAt: string }[]
+  notes: CustomerNote[]
+  activity: { id: number; actor: string; action: string; before: unknown; after: unknown; createdAt: string }[]
+}
+export type CustomerCreateRequest = {
+  name: string
+  kind: CustomerKind
+  organization?: string | null
+  email?: string | null
+  phone?: string | null
+  defaultPoRequired?: boolean
+  defaultPaymentTerms?: PaymentTerms
+  internalNotes?: string | null
+}
+export type CustomerPatchRequest = Partial<CustomerCreateRequest> & { expectedUpdatedAt: string }
+export type CustomerResponse = { customer: CustomerRecord }
+export type ContactRequest = { name: string; email?: string | null; phone?: string | null; title?: string | null; isPrimary?: boolean }
+export type ContactResponse = { contact: CustomerContact }
+export type NoteResponse = { note: CustomerNote }

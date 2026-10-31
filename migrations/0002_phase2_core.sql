@@ -15,6 +15,9 @@ PRAGMA defer_foreign_keys = ON;
 ALTER TABLE customers ADD COLUMN default_po_required INTEGER NOT NULL DEFAULT 0 CHECK (default_po_required IN (0,1));
 ALTER TABLE customers ADD COLUMN default_payment_terms TEXT NOT NULL DEFAULT 'due_at_pickup' CHECK (default_payment_terms IN ('due_at_pickup','due_after_pickup'));
 
+-- Contacts are never deleted (orders reference them); archiving hides them instead.
+ALTER TABLE customer_contacts ADD COLUMN archived_at TEXT;
+
 -- ---- set aside everything that references orders ----
 CREATE TABLE _m2_orders AS SELECT * FROM orders;
 CREATE TABLE _m2_order_items AS SELECT * FROM order_items;
