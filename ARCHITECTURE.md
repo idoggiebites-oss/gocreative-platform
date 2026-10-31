@@ -99,7 +99,8 @@ FK is declared, and `PRAGMA foreign_keys` is on in D1.
 
 The five status tracks the spec keeps apart (quote, artwork, PO, production,
 invoice/payment refs) stay separate columns or tables. **The production gate** is
-one pure function, `canEnterProduction(order, latestPo)`: artwork approved AND
+one pure function (Phase 1; superseded in Phase 2 by the five-item `readiness()` in
+`worker/domain/readiness.ts`, see PHASE2_PLAN.md §4), `canEnterProduction(order, latestPo)`: artwork approved AND
 (po_required ? PO approved : authorized_at set). The production-status route is the
 only place that writes `production_status`, and it calls that function. It gets a
 unit test and an API test.

@@ -29,8 +29,11 @@ the files don't say, say "not in the notes".
 - `npm run verify` is the gate. Read its exit code, not the tail of its output.
 - Business rules go in `worker/domain/` as pure functions with tests. Routes do
   HTTP, auth and validation only. SQL lives only in `worker/db/`.
-- `production_status` is written in one place, and only after `canEnterProduction`
-  allows it. Never add a second path.
+- `production_status` is written only by `applyProductionChange` (after
+  `checkOrderProductionMove`, which uses `readiness()` and `productionFlow`) and by the
+  awaiting-status re-derive. Starts re-check the full five-item gate inside the SQL
+  UPDATE, and `tests/api/gate-parity.test.ts` keeps that SQL in step with `readiness()`.
+  Never add a third path.
 - Public routes (`/api/public/*`) must never return internal notes, employee
   data, or another customer's records. Every such route gets a boundary test.
 - Hiding something in the UI is not access control. Enforce it on the server.

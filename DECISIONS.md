@@ -133,3 +133,20 @@ The live dashboard is empty until M1 lets staff create customers and orders.
 The first review found 9 issues; all were fixed in 4fad2f6 (248 unit + 22 e2e
 tests). The re-review confirmed each one. Its residual risks are assigned to
 M1, M3/M4 and M5 in PHASE2_PLAN.md ("Carried forward from the M0 review").
+
+### 2026-10-30 — M1a: migration 0002 and the Phase 2 vocabulary (Claude/agent, reviewed by Codex next)
+- `order_items.product` and `method` are nullable. A CHECK keeps them required on
+  product lines; charge and discount lines don't have them.
+- A design = an artwork lineage on the order. Its current version is the highest
+  version attached to that order.
+- Production starts re-check the full gate in the UPDATE. QC and production
+  complete are not re-gated (the M0 rule). Every move requires an active order.
+- The PO re-derive still moves only `awaiting_*` orders. A `ready` order whose PO is
+  revoked stays `ready`, and the start guard refuses it.
+- Extra DB guards: quote total = subtotal + charges − discounts; an approved
+  artwork version must record when, how and by whom; at most one accepted quote
+  per order.
+- Until M3, materials can only be satisfied by `materials_required = 0`.
+- 0002 drops `estimates`, the stored `artwork_status` and `estimated_total_cents`
+  without converting them. That's safe on the wiped remote (users only). Re-check
+  the counts before `db:migrate:remote`, and migrate before deploying.
