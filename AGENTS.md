@@ -8,6 +8,7 @@ builds; Codex reviews and tests. Both read this file first.
 ## Where things live
 
 - [SPEC.md](SPEC.md) — the product requirements as Arturo wrote them. [DECISIONS.md](DECISIONS.md) overrides it where they differ.
+- [SPEC-phase2.md](SPEC-phase2.md) — the authoritative Phase 2 brief; [PHASE2_PLAN.md](PHASE2_PLAN.md) — its implementation plan, milestones and open questions.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — stack, layering, schema, security, testing, cost.
 - [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md) — tokens, type, the two layouts, motion.
 - [ROADMAP.md](ROADMAP.md) — phases, the current phase's tasks, and who runs each one.

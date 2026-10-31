@@ -46,38 +46,9 @@ Codex reviews the phase diff read-only before merge.
   disappears (the dropdown case is fixed). Return focus to a stable element.
 - Native Spanish read-through of shared/i18n/es.ts by the family.
 
-## Phase 2 plan — internal operations (drafted 2026-10-30, awaiting Arturo)
+## Phase 2 — see [PHASE2_PLAN.md](PHASE2_PLAN.md)
 
-**Done when:** a real phone or email order can be entered end to end: find or
-create the customer, add items and sizes, record artwork approval and the
-authorization or PO, and move the order into production. Then the sample data is
-wiped and the family starts using it for real.
-
-Defaults until Arturo says otherwise (Q1–Q4 in the session):
-- Q1: simple quotes are in (versions, Draft → Sent → Accepted/Declined; no PDF or email).
-- Q2: a `not_needed` artwork status satisfies the production gate.
-- Q3: the shop time zone lives in `shared/business.ts` and drives "today",
-  overdue, and this week.
-- Q4: a mockup of the New order form and customer detail gets reviewed before the UI is built.
-
-| # | Task | Shape | Who | Depends on |
-|---|---|---|---|---|
-| 2.0 | Mockup: New order form, customer list + detail (review gate) | taste + judgment | Claude | — |
-| 2.1 | Shared pure helpers + tests: dollars↔cents parsing, size sets (in business.ts), item and quote totals, shop-timezone "today", order-number formatting for the counter | pure, testable | **Codex** writes, Claude verifies | — |
-| 2.2 | Migration 0002: `not_needed` artwork status, `notes` edit-free, `updated_at` triggers if needed; atomic order-number counter (`UPDATE … RETURNING`) | schema + one concurrency point | Sonnet; Codex reviews | 2.1 |
-| 2.3 | Customers API: list/search, detail (contacts, orders, notes), create/update, contacts add/update/archive, add note; activity log on every write | CRUD with validation | Sonnet; Codex reviews | 2.2 |
-| 2.4 | Orders write API: create (with items), edit header with an `updated_at` conflict guard, replace items atomically, record authorization (non-PO), set artwork status (manual until Phase 3), cancel/reopen, assignee, add note; awaiting-status sync after each prerequisite change; **cross-customer contact check** (carried over) | data integrity, single write paths | **Opus**; Codex reviews | 2.2 |
-| 2.5 | Quotes API: create a version from the current items, status transitions, the latest drives the dashboard | small, rules-based | Sonnet; Codex reviews | 2.4 |
-| 2.6 | Global search API for ⌘K (orders, customers, PO numbers) | small SQL | Sonnet | 2.3 |
-| 2.7 | Customers UI: list + search, detail, create/edit, contacts | build to the 2.0 mockup | Sonnet; Codex reviews | 2.0, 2.3 |
-| 2.8 | Order create/edit UI: New order flow (customer picker with inline create), items editor with size grid, header edit, authorize / artwork / cancel controls, notes composer, assignee, quote panel, ⌘K search results | build to the 2.0 mockup | Sonnet; Codex reviews | 2.0, 2.4–2.6 |
-| 2.9 | Phase 1 polish carry-overs (ES column overflow, focus after Record approval, timezone switch-over) | small | Sonnet | 2.8 |
-| 2.10 | Wipe the sample data on remote (keep users 1–2), migrate, deploy, smoke test signed in | ops | Claude, with Arturo's go | all |
-
-Running order: 2.0 ∥ 2.1 → 2.2 → 2.3 ∥ 2.4 → 2.5 ∥ 2.6 → (mockup approved) 2.7 ∥ 2.8 → 2.9 → 2.10.
-Every merged task gets a read-only Codex review and a fix pass before the next
-one builds on it. e2e runs in one worktree at a time.
-
-Deliberately not in Phase 2: file uploads (Phase 3), PO documents (Phase 3),
-the storefront and inquiries (Phase 4), the production board (Phase 5), quote
-PDF/email, user management screens (2 users; edit via SQL until there are more).
+The authoritative brief is [SPEC-phase2.md](SPEC-phase2.md) (2026-10-30). It replaced
+the plan drafted earlier the same day and absorbs the old Phase 3 (artwork uploads, PO
+documents) and Phase 5 (production queue). The storefront becomes Phase 3 and the
+estimator Phase 4.

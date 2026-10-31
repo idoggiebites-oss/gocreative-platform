@@ -82,3 +82,9 @@ A reusable Access policy, `GoCreative staff`, lists the two staff emails. It is
 applied to the whole Worker (all traffic, 24-hour sessions). `ACCESS_AUD` and
 `ACCESS_TEAM_DOMAIN` are Worker secrets. The remote DB holds sample orders for
 the family to evaluate; they get wiped before real use (see ROADMAP).
+
+### 2026-10-30 — The Phase 2 brief is authoritative (Arturo)
+[SPEC-phase2.md](SPEC-phase2.md) replaces SPEC.md's Phase 2 and the plan drafted
+earlier. It folds artwork uploads, PO documents and the production queue into
+Phase 2. The plan, with 14 points awaiting Arturo's answers, is
+[PHASE2_PLAN.md](PHASE2_PLAN.md). Nothing is built until those are answered.
