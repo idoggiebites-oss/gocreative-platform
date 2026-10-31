@@ -128,3 +128,8 @@ real behaviour in the build.
 Done per PHASE2_PLAN §4.6: backup and evidence first, counts re-checked, users
 kept. Details are in [notes/remote-sample-wipe.md](notes/remote-sample-wipe.md).
 The live dashboard is empty until M1 lets staff create customers and orders.
+
+### 2026-10-30 — M0 complete: Codex re-review verdict "M0 ready for M1"
+The first review found 9 issues; all were fixed in 4fad2f6 (248 unit + 22 e2e
+tests). The re-review confirmed each one. Its residual risks are assigned to
+M1, M3/M4 and M5 in PHASE2_PLAN.md ("Carried forward from the M0 review").

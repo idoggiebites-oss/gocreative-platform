@@ -222,16 +222,32 @@ logic it can test, Claude for design, integration and verification).
 
 ### M0 — Foundations (no user-visible change) — authorised 2026-10-30
 - [x] Decisions recorded (§4, DECISIONS.md). *(Arturo, Claude)*
-- [ ] Backup + evidence for the wipe (§4.6); the wipe itself waits for your explicit go. *(Claude)*
-- [ ] Pure domain rules + tests: readiness checklist (the five items, which one is missing, the
+- [x] Backup + evidence, then the wipe after Arturo's explicit go (2026-10-30). *(Claude)*
+- [x] Pure domain rules + tests: readiness checklist (the five items, which one is missing, the
       derived awaiting status), quote transitions/supersede/`items_revision`, line and quote
       totals with discounts and charges, payment balance and status, purchase status from
       receipts, money parsing, shop-time-zone "today", fulfilment and unpaid-release rules,
       check-collection transitions, the production slot choice, and the §4.3 DDL test.
       *(Codex writes; Claude verifies)*
-- [ ] Codex independent review (fresh, read-only) of the M0 rules and the concurrency
-      design; fixes. **Gate before M1.**
-- [ ] Design round: dashboard, order workspace, New order, customer, Production, Payments. *(Claude; your review)*
+- [x] Codex independent review (fresh, read-only) of the M0 rules and the concurrency
+      design; 9 findings fixed; re-review verdict **"M0 ready for M1"** (2026-10-30).
+- [x] Design round: dashboard, order workspace, New order, customer, Production, Payments. Approved 2026-10-30 (`design/mockup/phase2/`).
+
+**Carried forward from the M0 review** (each lands in the milestone named, with tests):
+- **M1:** quote acceptance always goes through `checkQuoteAcceptable`; a charge-only or empty
+  snapshot can never be accepted (route and boundary tests). Readiness `lineCount` counts
+  product lines. The order-number counter row is created on first use (the remote
+  `counters` table is empty after the wipe).
+- **M1:** one integration check against a real D1 runtime (`wrangler dev`, workerd) proving
+  that batch statements run in order and that `changes()` carries from one to the next.
+  The node:sqlite tests can't show this.
+- **M3/M4:** the start SQL re-asserts full readiness in the WHERE (not just
+  `production_status = 'ready'`), with a domain↔SQL parity test like Phase 1's. There will be
+  a readiness-guarded `quality_control → in_production` restart path, because the domain
+  allows it and the SQL today doesn't. Routes map both slot-2 errors (trigger and CHECK).
+- **M5:** a check-collect retry with a different amount returns 409 after reading back.
+  Payment corrections are an audited **void** that keeps the row and its `request_id`, never a
+  hard delete.
 
 ### M1 — Customers, orders, quotes, authorization (brief Step 2) → acceptance 1, 2, 3, 4, 6
 - [ ] Migration 0002 + schema tests. *(Opus; Codex reviews)*
