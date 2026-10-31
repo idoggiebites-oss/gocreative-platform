@@ -29,8 +29,8 @@ Codex reviews the phase diff read-only before merge.
 | 1.4 | Auth: Access JWT verify, `users` lookup, role guard, 401/403 API boundary tests | trust boundary | Opus agent, after 1.2; Codex reviews | done (99eed65, hardened 787c9d9 after Codex review) |
 | 1.5 | Design pass: tokens + mockup of the 3 screens for Arturo to review (design skills) | taste + judgment; **review gate** | Claude | done, approved 2026-10-30 (design/mockup/) |
 | 1.6 | App shell: sidebar, ⌘K search, mobile nav, `brand.css`, design tokens, **EN/ES toggle + i18n foundation** | build to the approved mockup | Sonnet agent | done (bbe36c7) |
-| 1.7a | Read API (dashboard, order list, order detail) + PO and production status changes through the domain rules, activity log, API tests | wiring with a single write path | Sonnet agent; Codex reviews | done (713370d); Codex reviewing |
-| 1.7b | Dashboard, order list, order detail screens on the 1.7a API, EN/ES | build to the mockup | Sonnet agent; Codex reviews | in progress |
+| 1.7a | Read API (dashboard, order list, order detail) + PO and production status changes through the domain rules, activity log, API tests | wiring with a single write path | Sonnet agent; Codex reviews | done (713370d, hardened 1959139 + gate parity test 4358ff5) |
+| 1.7b | Dashboard, order list, order detail screens on the 1.7a API, EN/ES | build to the mockup | Sonnet agent; Codex reviews | done (d268283, review fixes 6296911) |
 | 1.8 | Deploy: create D1/R2, Access app, add the 2 users, ship to workers.dev | needs Arturo's emails + login | Claude | in progress: D1 + R2 created, schema + sample data + 2 users on remote, deployed to gocreative.idoggiebites.workers.dev (API fails closed); waiting on Access setup |
 
 ## Carried into Phase 2
@@ -40,3 +40,8 @@ Codex reviews the phase diff read-only before merge.
   review of 1.2; ownership triggers were deliberately not added.)
 - Before real orders go in: wipe the sample data from the remote DB (keep the
   `users` rows for ids 1 and 2).
+- Polish: in Spanish at 1440px the orders table's Estimate column overflows its card
+  by a few pixels (scrolls inside it). Shorten the long ES chip labels or tighten columns.
+- Focus is lost after the "Record approval" button or a production-tab button
+  disappears (the dropdown case is fixed). Return focus to a stable element.
+- Native Spanish read-through of shared/i18n/es.ts by the family.
