@@ -58,7 +58,7 @@ describe('slot exactly while in_production, only on active orders', () => {
   })
 
   it('at most one job per slot: a second slot-1 job hits one_job_per_slot', () => {
-    expect(exec(`UPDATE orders SET production_status = 'in_production', production_slot = 1 WHERE id = 5`)).toThrow(/UNIQUE constraint failed: orders\.production_slot/)
+    expect(exec(`UPDATE orders SET production_status = 'in_production', production_slot = 1 WHERE id = 5`)).toThrow(/production_slot_invalid/) // the slot trigger refuses before the unique index (which still backs it)
   })
 
   it('every status is reachable with the right slot (the CHECK vocabulary is complete)', () => {
@@ -106,12 +106,45 @@ describe('slot 2: the owner override', () => {
   })
 })
 
+describe('REPLACE and identity changes can\'t get around the slot rules (Codex review of fcdbb90)', () => {
+  // Order 3 runs in slot 1; force 5 into slot 2 with an override, then free slot 1.
+  const setupSlot2 = () => {
+    forceSlot2(5, OWNER, 'rush')
+    exec(`UPDATE orders SET production_status = 'quality_control', production_slot = NULL WHERE id = 3`)()
+  }
+  it('INSERT OR REPLACE of a slot-2 job can\'t promote it to slot 1 or rewrite its override', () => {
+    setupSlot2()
+    const before = { row: row(5), audit: overrides(), n: activityCount() }
+    const cols = 'id, number, customer_id, source, title, production_status, state'
+    const copy = (slot: number, by: number | null, reason: string | null) => exec(`INSERT OR REPLACE INTO orders (${cols}, production_slot, production_override_by, production_override_reason)
+      SELECT ${cols}, ?, ?, ? FROM orders WHERE id = 5`, slot, by, reason)
+    // Whichever trigger refuses first (SQLite runs the newest first), the insert is refused and nothing changes.
+    expect(copy(1, null, null)).toThrow(/order_exists|production_/)
+    expect(copy(2, OWNER, 'a different reason')).toThrow(/order_exists|production_/)
+    expect({ row: row(5), audit: overrides(), n: activityCount() }).toEqual(before)
+  })
+  it('a new row can\'t evict the job holding a slot', () => {
+    expect(exec(`INSERT OR REPLACE INTO orders (number, customer_id, source, title, production_status, production_slot) SELECT 'X-1', customer_id, source, 'x', 'in_production', 1 FROM orders WHERE id = 3`)).toThrow(/production_slot_invalid/)
+    expect(exec(`UPDATE OR REPLACE orders SET production_status = 'in_production', production_slot = 1 WHERE id = 5`)).toThrow(/production_slot_invalid/)
+    expect(row(3)).toMatchObject({ production_status: 'in_production', production_slot: 1 })
+  })
+  it('an order\'s id is fixed through every alias, so it can\'t count itself as the running slot-1 job', () => {
+    const n = activityCount()
+    for (const alias of ['id', 'rowid', 'oid', '_rowid_']) {
+      expect(exec(`UPDATE orders SET ${alias} = 999, production_slot = 2, production_override_by = ?, production_override_reason = 'rush' WHERE id = 3`, OWNER), alias).toThrow(/order_id_fixed|production_override_invalid/)
+      expect(exec(`UPDATE orders SET ${alias} = 999 WHERE id = 5`), alias).toThrow(/order_id_fixed/)
+    }
+    expect(row(3)).toMatchObject({ production_slot: 1, production_override_by: null })
+    expect(activityCount()).toBe(n)
+  })
+})
+
 describe('the writer under a race', () => {
   it('two starts that both read slot 1 free: one wins, the other rolls back whole and logs nothing', async () => {
     db.exec(`UPDATE orders SET production_status = 'quality_control', production_slot = NULL WHERE id = 3`)
     const before = activityCount()
     expect(await start(5, 1)).toBe(true)
-    await expect(start(17, 1)).rejects.toThrow(/UNIQUE constraint failed: orders\.production_slot/)
+    await expect(start(17, 1)).rejects.toThrow(/production_slot_invalid/) // the slot trigger refuses before the unique index (which still backs it)
     expect(row(17)).toMatchObject({ production_status: 'ready', production_slot: null })
     expect(activityCount()).toBe(before + 1)
   })
@@ -123,7 +156,7 @@ describe('the writer under a race', () => {
   })
   it('a third job is refused even for an owner', async () => {
     expect(await start(5, 2, OWNER, 'rush')).toBe(true)
-    await expect(start(17, 2, OWNER, 'another')).rejects.toThrow(/UNIQUE constraint failed: orders\.production_slot/)
+    await expect(start(17, 2, OWNER, 'another')).rejects.toThrow(/production_slot_invalid/) // the slot trigger refuses before the unique index (which still backs it)
     expect(overrides()).toHaveLength(1)
   })
 })

@@ -30,6 +30,13 @@ CREATE UNIQUE INDEX one_job_per_slot ON orders (production_slot) WHERE productio
 -- into slot 1 (it leaves production and the next normal start takes slot 1).
 CREATE TRIGGER orders_production_slot_insert BEFORE INSERT ON orders
 BEGIN
+  -- INSERT OR REPLACE would delete a conflicting row without firing the UPDATE rules (promoting a slot-2 job,
+  -- rewriting an override, evicting a running job): refuse any insert that collides with an existing order or a
+  -- held slot (Codex review of fcdbb90).
+  SELECT RAISE(ABORT, 'order_exists')
+  WHERE EXISTS (SELECT 1 FROM orders WHERE id = NEW.id OR number = NEW.number);
+  SELECT RAISE(ABORT, 'production_slot_invalid')
+  WHERE NEW.production_slot IS NOT NULL AND EXISTS (SELECT 1 FROM orders WHERE production_slot = NEW.production_slot);
   SELECT RAISE(ABORT, 'production_slot_invalid')
   WHERE (NEW.production_status = 'in_production') <> (NEW.production_slot IS NOT NULL)
      OR (NEW.production_slot IS NOT NULL AND NEW.state IS NOT 'active')
@@ -39,6 +46,12 @@ BEGIN
 END;
 CREATE TRIGGER orders_production_slot_update BEFORE UPDATE ON orders
 BEGIN
+  -- An order's identity is fixed (through id or any rowid alias); otherwise an order could count itself as the
+  -- running slot-1 job (Codex review of fcdbb90). UPDATE OR REPLACE into a held slot would evict its job: refuse.
+  SELECT RAISE(ABORT, 'order_id_fixed') WHERE NEW.id IS NOT OLD.id;
+  SELECT RAISE(ABORT, 'production_slot_invalid')
+  WHERE NEW.production_slot IS NOT NULL AND NEW.production_slot IS NOT OLD.production_slot
+    AND EXISTS (SELECT 1 FROM orders WHERE production_slot = NEW.production_slot AND id IS NOT OLD.id);
   SELECT RAISE(ABORT, 'production_slot_invalid')
   WHERE (NEW.production_status = 'in_production') <> (NEW.production_slot IS NOT NULL)
      OR (NEW.production_slot IS NOT NULL AND NEW.state IS NOT 'active')
@@ -66,7 +79,7 @@ BEGIN
     OR NEW.production_override_reason IS NOT OLD.production_override_reason);
   SELECT RAISE(ABORT, 'production_override_invalid')
   WHERE OLD.production_slot IS NOT 2 AND (
-    NOT EXISTS (SELECT 1 FROM orders WHERE production_slot = 1 AND id IS NOT NEW.id)
+    NOT EXISTS (SELECT 1 FROM orders WHERE production_slot = 1 AND id IS NOT NEW.id AND id IS NOT OLD.id)
     OR NOT EXISTS (SELECT 1 FROM users WHERE id = NEW.production_override_by AND active = 1 AND role = 'owner'));
 END;
 

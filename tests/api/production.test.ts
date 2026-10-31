@@ -318,6 +318,38 @@ describe('stale expectedVersion on every write: 409, nothing written', () => {
   })
 })
 
+describe('interleavings on one order: whichever batch lands second changes nothing (Codex review of fcdbb90)', () => {
+  // D1 runs each batch atomically, so a race between two writes is one of the two orders below. Both carry the version
+  // their caller read; the second must match nothing and log nothing.
+  const slot1 = { slot: 1 as const, overrideBy: null, reason: null }
+  test('start vs cancel, in both orders', async () => {
+    for (const first of ['cancel', 'start'] as const) {
+      const t = setup()
+      t.sqlite.exec(`UPDATE orders SET production_status = 'quality_control', production_slot = NULL WHERE id = 3`) // free slot 1
+      const r = t.o('2026-0005')
+      const start = () => dbo.applyProductionChange(t.db, { orderId: r.id, actorId: 1, from: 'ready', to: 'in_production', expectedVersion: r.version, slot: slot1 })
+      const cancel = () => dbo.cancelOrder(t.db, { orderId: r.id, version: r.version, actorId: 1, reason: 'x', productionFrom: 'ready', productionTo: 'ready' })
+      if (first === 'cancel') { expect(await cancel()).not.toBeNull() } else { expect(await start()).toBe(true) }
+      const mid = t.footprint()
+      if (first === 'cancel') { expect(await start()).toBe(false) } else { expect(await cancel()).toBeNull() }
+      expect(t.footprint(), first).toEqual(mid)
+    }
+  })
+  test('pause vs send to QC on the running job, in both orders', async () => {
+    for (const first of ['pause', 'qc'] as const) {
+      const t = setup()
+      const r = t.o('2026-0003')
+      const pause = () => dbo.applyProductionChange(t.db, { orderId: r.id, actorId: 1, from: 'in_production', to: 'ready', expectedVersion: r.version })
+      const qc = () => dbo.applyProductionChange(t.db, { orderId: r.id, actorId: 1, from: 'in_production', to: 'quality_control', expectedVersion: r.version })
+      expect(await (first === 'pause' ? pause() : qc())).toBe(true)
+      const mid = t.footprint()
+      expect(await (first === 'pause' ? qc() : pause())).toBe(false)
+      expect(t.footprint(), first).toEqual(mid)
+      expect(t.o('2026-0003').production_slot).toBeNull()
+    }
+  })
+})
+
 describe('dashboard v2', () => {
   test('current job, upcoming queue and the action-required groups', async () => {
     const t = setup()
@@ -331,6 +363,15 @@ describe('dashboard v2', () => {
     expect(nums(d.actionRequired.materialsAwaiting)).toEqual(['2026-0016'])
     expect(d.actionRequired.pendingPos.find((r) => r.number === '2026-0013')).toMatchObject({ poStatus: 'rejected' })
     expect([d.actionRequired.awaitingPickup, d.actionRequired.checksToCollect]).toEqual([[], []])
+    // Running (3), QC (4, 19) and cancelled (24) orders with a rejected PO, an unreceived purchase and changes-requested
+    // artwork still stay out: only pre-production orders need these actions (Codex review of fcdbb90).
+    for (const id of [3, 4, 19, 24]) {
+      t.sqlite.exec(`UPDATE orders SET po_required = 1 WHERE id = ${id}`)
+      t.sqlite.exec(`INSERT INTO purchase_orders (order_id, po_number, status) VALUES (${id}, 'R-${id}', 'rejected')`)
+      t.sqlite.exec(`INSERT INTO order_purchases (order_id, supplier_id, description, quantity, status, ordered_on) VALUES (${id}, 1, 'late', 5, 'ordered', '2026-10-30')`)
+    }
+    t.sqlite.exec(`UPDATE artwork SET approval_status = 'changes_requested' WHERE order_id IN (3, 4, 19, 24)`)
+    expect((await t.call<DashboardResponse>('GET', '/dashboard')).body.actionRequired).toEqual(d.actionRequired)
     // Materials: once everything ordered has arrived it leaves the group.
     t.sqlite.exec(`INSERT INTO purchase_receipts (purchase_id, quantity, received_on) VALUES (2, 10, date('now'))`)
     expect((await t.call<DashboardResponse>('GET', '/dashboard')).body.actionRequired.materialsAwaiting).toEqual([])

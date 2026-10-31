@@ -367,3 +367,7 @@ Business-rule choices made while building the M4 API. Each can be overturned.
   production drops to `ready`, as cancelling does. One running active order gets slot 1. If
   two or more active orders are running, the migration fails on purpose and changes nothing:
   someone must decide which job is really running before it is applied.
+
+## 2026-10-31 — Order identity and slot collisions are refused by the database (Codex review of fcdbb90)
+- An order's id can't change (through `id` or any rowid alias); an INSERT that collides with an existing order (id or number) or a held production slot is refused, so `INSERT/UPDATE OR REPLACE` can't promote a slot-2 job, rewrite an override or evict a running job.
+- A start that loses the slot race now fails on the slot trigger (`production_slot_invalid`) before the unique index; the route maps both to 409 as before.
