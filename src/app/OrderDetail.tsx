@@ -14,6 +14,8 @@ import { allowedPoTransitions } from '../../worker/domain/purchaseOrder'
 import { BTN, BTN_PRIMARY, MutationError as MoveError, Segmented } from './form'
 import { ItemsQuoteTab, NoteComposer, OrderActions, ReadinessCard, DetailsEditor } from './OrderPanels'
 import { ArtworkTab } from './ArtworkTab'
+import { PaymentsTab } from './PaymentsTab'
+import { PickupTab } from './PickupActions'
 import { PoTab } from './PoTab'
 import { JobActions, UnitsEditor } from './ProductionControls'
 import { PurchasingTab } from './PurchasingTab'
@@ -243,7 +245,7 @@ function Side({ d }: { d: Detail }) {
   )
 }
 
-const TABS = ['items', 'artwork', 'po', 'purchasing', 'production', 'activity'] as const
+const TABS = ['items', 'artwork', 'po', 'purchasing', 'production', 'pickup', 'payments', 'activity'] as const
 type Tab = (typeof TABS)[number]
 
 function Order({ d }: { d: Detail }) {
@@ -300,6 +302,8 @@ function Order({ d }: { d: Detail }) {
             <TabsContent value="po"><PoTab d={d} menu={(p) => <><PoMenu po={p} status={p.status} mut={c.po} /></>} /><div className="px-4 pb-3 empty:hidden"><MoveError error={c.po.error} /></div></TabsContent>
             <TabsContent value="purchasing"><PurchasingTab d={d} autoAdd={autoAdd} onAutoAdd={() => setAutoAdd(false)} /></TabsContent>
             <TabsContent value="production"><ProductionTab d={d} /></TabsContent>
+            <TabsContent value="pickup"><PickupTab number={d.order.number} /></TabsContent>
+            <TabsContent value="payments"><PaymentsTab number={d.order.number} /></TabsContent>
             <TabsContent value="activity"><ActivityTab d={d} /></TabsContent>
           </Tabs>
         </section>

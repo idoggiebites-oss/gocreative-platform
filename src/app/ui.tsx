@@ -1,7 +1,7 @@
 import type { MouseEvent, ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { ChevronDown } from 'lucide-react'
-import type { OrderArtworkStatus, PoStatus, ProductionStatus, PurchaseStatus, QuoteStatus } from '@shared/enums'
+import type { CheckStatus, FinancialStatus, FulfilmentStatus, OrderArtworkStatus, PoStatus, ProductionStatus, PurchaseStatus, QuoteStatus } from '@shared/enums'
 import { cn } from '@/lib/utils'
 
 export type Tone = 'amber' | 'blue' | 'green' | 'red' | 'gray'
@@ -24,6 +24,10 @@ export const PRODUCTION_TONE: Record<ProductionStatus, Tone> = {
 }
 export const PURCHASE_TONE: Record<PurchaseStatus, Tone> = { not_ordered: 'gray', ordered: 'blue', partially_received: 'amber', received: 'green', cancelled: 'red' }
 export const QUOTE_TONE: Record<QuoteStatus, Tone> = { draft: 'gray', sent: 'amber', accepted: 'green', declined: 'red', superseded: 'gray' }
+
+export const FULFILMENT_TONE: Record<FulfilmentStatus, Tone> = { not_ready: 'gray', ready_for_pickup: 'amber', customer_notified: 'blue', picked_up: 'green' }
+export const FINANCIAL_TONE: Record<FinancialStatus, Tone> = { unpaid: 'amber', partially_paid: 'amber', paid: 'green' }
+export const CHECK_TONE: Record<CheckStatus, Tone> = { awaiting_payment: 'gray', ready_for_collection: 'amber', collected: 'blue', deposited: 'blue', cleared: 'green' }
 
 export function Chip({ tone, children, className }: { tone: Tone; children: ReactNode; className?: string }) {
   return <span className={cn(CHIP, TONE[tone], className)}>{children}</span>
