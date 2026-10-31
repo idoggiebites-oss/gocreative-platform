@@ -78,6 +78,10 @@ export type ProductionJob = {
   unitsCompleted: number
   notesCount: number
   latestNote: { body: string; createdAt: string } | null
+  /** What readiness says the job would be without production: Pause sends this (the server re-checks it). */
+  preProductionStatus: ProductionStatus
+  /** When the latest production start was logged (null if never started). */
+  startedAt: string | null
   /** Ready to start only: the manual position (null = never placed; sorts after placed orders, then by due date). */
   queuePosition: number | null
   /** In production only. */

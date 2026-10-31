@@ -177,6 +177,23 @@ describe('leaving production', () => {
     expect(t.o('2026-0003')).toMatchObject({ production_status: 'awaiting_authorization', production_slot: null, units_completed: 4 })
   })
 
+  test('a production row carries readiness’s preProductionStatus (what Pause sends) and startedAt', async () => {
+    const t = setup()
+    const row = async () => (await t.production()).current.find((j) => j.number === '2026-0003')!
+    const detail = async () => (await t.call<{ readiness: { preProductionStatus: string } }>('GET', '/orders/2026-0003')).body.readiness.preProductionStatus
+    expect((await row()).preProductionStatus).toBe(await detail())
+    expect((await row()).preProductionStatus).toBe('ready')
+    t.sqlite.exec(`UPDATE purchase_orders SET status = 'rejected' WHERE id = 3`)
+    const stale = await row() // read after the change, so it is current
+    expect(stale.preProductionStatus).toBe('awaiting_authorization')
+    expect(stale.preProductionStatus).toBe(await detail())
+    t.sqlite.exec(`UPDATE purchase_orders SET status = 'approved' WHERE id = 3`) // readiness moved back: the old target is now wrong
+    expect(await t.move('2026-0003', stale.preProductionStatus, { expectedVersion: stale.version })).toMatchObject({ status: 409 })
+    await finishSlot1(t)
+    expect((await t.move('2026-0017', 'in_production')).status).toBe(200)
+    expect((await t.production()).current[0]).toMatchObject({ number: '2026-0017', startedAt: expect.stringMatching(/^\d{4}-\d\d-\d\dT/) })
+  })
+
   test('cancel releases the slot (the one cancel path); a slot-2 job too', async () => {
     const t = setup()
     await t.move('2026-0005', 'in_production', { override: true, reason: 'rush' })

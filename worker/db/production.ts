@@ -4,7 +4,7 @@
 import { METHODS } from '../../shared/enums'
 import type { Method, ProductionStatus } from '../../shared/enums'
 import type { ProductionJob, ProductionResponse } from '../../shared/api'
-import { orderWriteResults } from './orders'
+import { orderWriteResults, PRE_PRODUCTION } from './orders'
 
 const READY = `orders.state = 'active' AND orders.production_status = 'ready'`
 /** The Ready to start order: manual position (unplaced last), then due date (none last), then oldest first. */
@@ -16,6 +16,7 @@ type JobRow = {
   number: string; customer_name: string; title: string; production_status: ProductionStatus; due_date: string | null; version: number
   first_product: string | null; product_lines: number; total_qty: number; methods: string | null; units_completed: number
   notes_count: number; latest_note: string | null; latest_note_at: string | null; queue_position: number | null
+  pre_production_status: ProductionStatus; started_at: string | null
   production_slot: 1 | 2 | null; override_by: string | null; production_override_reason: string | null
 }
 const toJob = (r: JobRow): ProductionJob => ({
@@ -24,6 +25,7 @@ const toJob = (r: JobRow): ProductionJob => ({
   methods: ((r.methods ?? '').split(',').filter(Boolean) as Method[]).sort((a, b) => METHODS.indexOf(a) - METHODS.indexOf(b)),
   unitsCompleted: r.units_completed, notesCount: r.notes_count,
   latestNote: r.latest_note === null ? null : { body: r.latest_note, createdAt: r.latest_note_at! },
+  preProductionStatus: r.pre_production_status, startedAt: r.started_at,
   queuePosition: r.queue_position, slot: r.production_slot,
   override: r.production_slot === 2 ? { by: r.override_by ?? '', reason: r.production_override_reason ?? '' } : null,
 })
@@ -35,6 +37,8 @@ export async function listProduction(db: D1Database): Promise<ProductionResponse
       (SELECT COALESCE(SUM(i.quantity), 0) FROM ${PRODUCT}) AS total_qty, (SELECT group_concat(DISTINCT i.method) FROM ${PRODUCT}) AS methods,
       orders.units_completed, (SELECT COUNT(*) FROM ${NOTE}) AS notes_count,
       (SELECT n.body FROM ${NOTE} ORDER BY n.id DESC LIMIT 1) AS latest_note, (SELECT n.created_at FROM ${NOTE} ORDER BY n.id DESC LIMIT 1) AS latest_note_at,
+      ${PRE_PRODUCTION} AS pre_production_status,
+      (SELECT a.at FROM activity_log a WHERE a.entity_type = 'order' AND a.entity_id = orders.id AND a.action = 'production_started' ORDER BY a.id DESC LIMIT 1) AS started_at,
       orders.queue_position, orders.production_slot, u.name AS override_by, orders.production_override_reason, orders.updated_at
     FROM orders JOIN customers c ON c.id = orders.customer_id LEFT JOIN users u ON u.id = orders.production_override_by
     WHERE orders.state = 'active' AND orders.production_status IN ('ready','in_production','quality_control','production_complete')

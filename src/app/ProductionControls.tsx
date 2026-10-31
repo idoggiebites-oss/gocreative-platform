@@ -1,7 +1,8 @@
 import { useState } from 'react'
+import type { UseMutationResult } from '@tanstack/react-query'
 import type { ProductionJob } from '@shared/api'
 import { useI18n } from '@/i18n'
-import { ApiError, fetchPauseTarget, isConflict, useMe, useMoveProduction, useStartProduction, useUnitsCompleted } from '@/lib/api'
+import { ApiError, isConflict, useMe, useMoveProduction, useStartProduction, useUnitsCompleted } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { BTN, BTN_PRIMARY, BTN_SM, ConflictNotice, Field, FormDialog, INPUT, MutationError, TEXTAREA, useEditSession } from './form'
 import { MUTED } from './ui'
@@ -27,16 +28,47 @@ export function ProdError({ error }: { error: Error | null }) {
   return <MutationError error={error} />
 }
 
-/** Progress bar plus the editable count (in production or quality control). Each save sends the rendered job's version. */
+/**
+ * The typed count. Its draft and the version it was read at are captured together (useEditSession), so a background
+ * refetch never lets it overwrite someone else's newer count; a 409 shows the notice and loads the fresh count.
+ */
+function UnitsDraft({ job, w, onDirty, onSaved }: { job: ProductionJob; w: UseMutationResult<unknown, Error, { unitsCompleted: number; expectedVersion: number }>; onDirty: () => void; onSaved: () => void }) {
+  const { m } = useI18n()
+  const t = m.production.units
+  const ed = useEditSession(job.version, () => String(job.unitsCompleted))
+  const typed = ed.values.trim() === '' ? NaN : Number(ed.values)
+  return (
+    <>
+      <form className="flex items-center gap-2" onSubmit={(e) => {
+        e.preventDefault()
+        if (w.isPending || ed.blocked || !Number.isFinite(typed)) return
+        ed.clear()
+        w.mutate({ unitsCompleted: typed, expectedVersion: ed.version }, { onSuccess: onSaved, onError: ed.onError })
+      }}>
+        <input
+          className={cn(INPUT, 'num w-20')} inputMode="numeric" aria-label={`${t.input}: ${job.number}`} value={ed.values} aria-describedby={`uh-${job.number}`}
+          onChange={(e) => { onDirty(); ed.setValues(e.target.value) }}
+        />
+        <button type="submit" className={BTN} disabled={w.isPending || ed.blocked || !Number.isFinite(typed)}>{t.save}</button>
+      </form>
+      <div className="basis-full empty:hidden"><ConflictNotice show={ed.conflict} /></div>
+    </>
+  )
+}
+
+/** Progress bar plus the editable count (in production or quality control). The ±10 buttons send the rendered job's version; the typed count sends the version it was started from. */
 export function UnitsEditor({ job, readOnly }: { job: ProductionJob; readOnly?: boolean }) {
   const { m } = useI18n()
   const t = m.production.units
   const w = useUnitsCompleted(job.number)
-  const [text, setText] = useState(String(job.unitsCompleted))
+  // Not dirty: the draft follows the job (a new epoch, so a fresh draft, on every new version). Dirty: it keeps its text and its version.
+  const [dirty, setDirty] = useState(false)
+  const [epoch, setEpoch] = useState(0)
+  const [seen, setSeen] = useState(job.version)
+  if (!dirty && seen !== job.version) { setSeen(job.version); setEpoch((e) => e + 1) }
   const total = job.totalQuantity
-  const save = (n: number) => !w.isPending && w.mutate({ unitsCompleted: n, expectedVersion: job.version }, { onSuccess: () => setText(String(n)) })
+  const save = (n: number) => !w.isPending && w.mutate({ unitsCompleted: n, expectedVersion: job.version })
   const pct = total > 0 ? Math.min(100, Math.round((job.unitsCompleted / total) * 100)) : 0
-  const typed = text.trim() === '' ? NaN : Number(text)
   return (
     <div className="flex min-w-0 flex-col gap-2.5">
       <div className="flex items-baseline justify-between gap-2">
@@ -49,16 +81,13 @@ export function UnitsEditor({ job, readOnly }: { job: ProductionJob; readOnly?: 
       {!readOnly && <div className="flex flex-wrap items-center gap-2">
         <button type="button" className={BTN} aria-label={`${t.minus}: ${job.number}`} disabled={w.isPending || job.unitsCompleted <= 0} onClick={() => save(Math.max(0, job.unitsCompleted - 10))}>− 10</button>
         <button type="button" className={BTN} aria-label={`${t.plus}: ${job.number}`} disabled={w.isPending || job.unitsCompleted >= total} onClick={() => save(Math.min(total, job.unitsCompleted + 10))}>+ 10</button>
-        <form className="flex items-center gap-2" onSubmit={(e) => { e.preventDefault(); if (Number.isFinite(typed)) save(typed) }}>
-          <input
-            className={cn(INPUT, 'num w-20')} inputMode="numeric" aria-label={`${t.input}: ${job.number}`} value={text} aria-describedby={`uh-${job.number}`}
-            onChange={(e) => setText(e.target.value)}
-          />
-          <button type="submit" className={BTN} disabled={w.isPending || !Number.isFinite(typed)}>{t.save}</button>
-        </form>
+        <UnitsDraft
+          key={epoch} job={job} w={w} onDirty={() => setDirty(true)}
+          onSaved={() => setDirty(false)}
+        />
         <span id={`uh-${job.number}`} className={MUTED}>{t.hint(total)}</span>
       </div>}
-      <ProdError error={w.error} />
+      <ProdError error={isConflict(w.error) ? null : w.error} />
     </div>
   )
 }
@@ -92,23 +121,17 @@ export function JobActions({ job, running }: { job: ProductionJob; running: Prod
   const start = useStartProduction(job.number)
   const move = useMoveProduction(job.number)
   const [dialog, setDialog] = useState(false)
-  const [pausing, setPausing] = useState(false)
   const n = job.number
   const aria = (a: string) => t.ariaFor(a, n)
-  const busy = start.isPending || move.isPending || pausing
+  const busy = start.isPending || move.isPending
   const s = job.productionStatus
   const startsAJob = s === 'ready' || s === 'quality_control'
   // The slot a start needs is held by another job (a job in QC holds none).
   const slot1Taken = running.some((j) => j.number !== n && j.slot === 1)
   const canOverride = startsAJob && me.data?.role === 'owner' && slot1Taken && running.length < 2
   const go = (to: 'quality_control' | 'production_complete') => !busy && move.mutate({ to, expectedVersion: job.version })
-  const pause = async () => {
-    if (busy) return
-    setPausing(true)
-    try {
-      move.mutate({ to: await fetchPauseTarget(n), expectedVersion: job.version })
-    } catch { /* the read failed: nothing was sent, try again */ } finally { setPausing(false) }
-  }
+  // Pause returns to what readiness said in this row; the server re-checks it and refuses (409, refetch) if it has moved.
+  const pause = () => !busy && move.mutate({ to: job.preProductionStatus, expectedVersion: job.version })
   const startLabel = s === 'ready' ? t.start : t.restart
   return (
     <div className="flex flex-col gap-1.5">
@@ -120,7 +143,7 @@ export function JobActions({ job, running }: { job: ProductionJob; running: Prod
         )}
         {canOverride && <button type="button" aria-label={aria(t.startOverride)} className={sm} onClick={() => setDialog(true)}>{t.startOverride}</button>}
         {s === 'in_production' && <button type="button" aria-label={aria(t.toQc)} aria-busy={busy || undefined} className={smPrimary} onClick={() => go('quality_control')}>{t.toQc}</button>}
-        {s === 'in_production' && <button type="button" aria-label={aria(t.pause)} aria-busy={busy || undefined} className={sm} onClick={() => void pause()}>{t.pause}</button>}
+        {s === 'in_production' && <button type="button" aria-label={aria(t.pause)} aria-busy={busy || undefined} className={sm} onClick={pause}>{t.pause}</button>}
         {s === 'quality_control' && <button type="button" aria-label={aria(t.complete)} aria-busy={busy || undefined} className={smPrimary} onClick={() => go('production_complete')}>{t.complete}</button>}
       </div>
       <ProdError error={start.error ?? move.error} />

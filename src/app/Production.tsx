@@ -11,7 +11,7 @@ import { CARD, Chip, MUTED, PAGE, PRODUCTION_TONE } from './ui'
 
 /** The active job, prominent. Read-only on the dashboard (progress and a link); full controls on the Production page. */
 export function CurrentJob({ job, running, readOnly }: { job: ProductionJob; running: ProductionJob[]; readOnly?: boolean }) {
-  const { m } = useI18n()
+  const { m, fmt } = useI18n()
   const sum = useJobSummary()
   const t = m.production
   return (
@@ -24,7 +24,7 @@ export function CurrentJob({ job, running, readOnly }: { job: ProductionJob; run
             <Chip tone={PRODUCTION_TONE[job.productionStatus]}>{m.labels.productionStatus[job.productionStatus]}</Chip>
           </div>
           <span className="text-[13px]">{job.title} · {sum.what(job)}</span>
-          <span className={MUTED}>{sum.due(job)}</span>
+          <span className={MUTED}>{sum.due(job)}{job.startedAt && ` · ${t.started(fmt.relative(job.startedAt))}`}</span>
           {job.override && (
             <p className="rounded-[7px] bg-status-amber px-2.5 py-2 text-[12.5px] text-status-amber-fg"><b className="font-semibold">{t.override.badge}.</b> {t.override.by(job.override.by, job.override.reason)}</p>
           )}

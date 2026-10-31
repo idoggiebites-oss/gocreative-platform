@@ -138,6 +138,7 @@ export const en = {
     pieces: (n: number) => `${n} ${n === 1 ? 'piece' : 'pieces'}`,
     due: (date: string) => `Due ${date}`,
     noDue: 'No due date',
+    started: (when: string) => `Started ${when}`,
     position: (n: number) => `Position ${n}`,
     queueChanged: 'The queue changed while you were looking at it. It has been reloaded; check the order and try again.',
     busy: (n: string) => `Order ${n} is already in production. Only one job runs at a time.`,

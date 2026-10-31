@@ -206,6 +206,3 @@ export function useReorderQueue() {
 export const useMe = () =>
   useQuery({ queryKey: ['me'], queryFn: () => call<{ id: number; email: string; name: string; role: Role }>('/me'), retry, staleTime: 5 * 60_000 })
 
-/** Pause returns to whatever readiness says now; the Production page's rows don't carry it, so read it from the order. */
-export const fetchPauseTarget = async (number: string) =>
-  (await call<OrderDetailResponse>(`/orders/${encodeURIComponent(number)}`)).readiness.preProductionStatus
