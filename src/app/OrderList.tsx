@@ -6,7 +6,7 @@ import { useI18n } from '@/i18n'
 import { cn } from '@/lib/utils'
 import { useOrders } from '@/lib/api'
 import QueryBoundary from './QueryBoundary'
-import { ARTWORK_TONE, CARD, Chip, MethodTag, MUTED, PAGE, PO_TONE, PRODUCTION_TONE, TD, TH, useRowLink } from './ui'
+import { ARTWORK_TONE, CARD, Chip, MethodTag, MUTED, PAGE, PO_TONE, PRODUCTION_TONE, StackedRows, TD, TH, useRowLink } from './ui'
 
 const isView = (v: string | null): v is OrderView => ORDER_VIEWS.includes(v as OrderView)
 
@@ -15,8 +15,22 @@ function OrdersTable({ rows }: { rows: OrderListRow[] }) {
   const rowLink = useRowLink()
   const today = fmt.todayIso()
   const c = m.orders.cols
+  const dueOf = (r: OrderListRow) => {
+    const overdue = r.dueDate !== null && r.dueDate < today && r.productionStatus !== 'completed'
+    const text = r.dueDate === null ? m.common.dash : overdue ? `${fmt.date(r.dueDate)} · ${m.orders.overdue}` : r.dueDate === today ? m.common.today : fmt.date(r.dueDate)
+    return { overdue, text }
+  }
   return (
-    <table className="w-full border-collapse text-[13px]">
+    <>
+    <StackedRows rows={rows.map((r) => {
+      const due = dueOf(r)
+      return {
+        key: r.number, to: `/app/orders/${r.number}`, number: r.number, who: r.customerName, sub: r.title,
+        chip: <Chip tone={PRODUCTION_TONE[r.productionStatus]}>{m.labels.productionStatus[r.productionStatus]}</Chip>,
+        due: <span className={cn(due.overdue && 'font-medium text-status-red-fg', r.dueDate === null && 'text-muted-foreground')}>{due.text}</span>,
+      }
+    })} />
+    <table className="hidden w-full border-collapse text-[13px] sm:table">
       <thead><tr className="bg-header">
         <th className={TH}>{c.order}</th><th className={TH}>{c.customer}</th><th className={TH}>{c.items}</th><th className={TH}>{c.artwork}</th>
         <th className={TH}>{c.po}</th><th className={TH}>{c.production}</th><th className={TH}>{c.due}</th><th className={cn(TH, 'text-right')}>{c.estimate}</th>
@@ -58,6 +72,7 @@ function OrdersTable({ rows }: { rows: OrderListRow[] }) {
         })}
       </tbody>
     </table>
+    </>
   )
 }
 
@@ -107,31 +122,33 @@ export default function OrderList() {
     return () => clearTimeout(t)
   }, [text, q, setParams])
 
-  const setView = (v: OrderView) => setParams((p) => {
-    const next = new URLSearchParams(p)
+  // The views are filters kept in the URL, so they are links (with the current search kept), not tabs.
+  const viewHref = (v: OrderView) => {
+    const next = new URLSearchParams(params)
     if (v === 'active') next.delete('view')
     else next.set('view', v)
-    return next
-  })
+    const s = next.toString()
+    return s ? `?${s}` : '.'
+  }
 
   const counts = query.data?.counts
   return (
     <div className={cn(PAGE, 'max-w-none gap-3 pt-4')}>
       <h1 className="text-xl font-semibold tracking-[-0.015em]">{m.orders.title}</h1>
-      <div role="tablist" aria-label={m.orders.views} className="flex flex-wrap gap-1">
+      <nav aria-label={m.orders.views} className="flex flex-wrap gap-1">
         {ORDER_VIEWS.map((v) => (
-          <button
-            key={v} type="button" role="tab" aria-selected={view === v} onClick={() => setView(v)}
+          <Link
+            key={v} to={viewHref(v)} aria-current={view === v ? 'page' : undefined}
             className={cn(
-              'inline-flex h-[30px] items-center gap-1.5 rounded-[7px] px-2.5 text-[13px] font-medium',
+              'inline-flex h-[30px] items-center gap-1.5 rounded-[7px] px-2.5 text-[13px] font-medium no-underline',
               view === v ? 'bg-card text-foreground shadow-[0_0_0_1px_#E4E1DB,0_1px_2px_rgba(28,27,25,.05)]' : 'text-[#55524B] hover:bg-secondary',
             )}
           >
             {m.orders.view[v]}
             {counts && v !== 'completed' && <span className="num text-xs text-[#7A766E]">{counts[v]}</span>}
-          </button>
+          </Link>
         ))}
-      </div>
+      </nav>
       <div className="flex flex-wrap items-center gap-2">
         <label className="flex h-[30px] flex-[0_1_300px] items-center gap-2 rounded-[7px] border border-input bg-card px-2.5 text-[13px] text-muted-foreground focus-within:ring-2 focus-within:ring-ring/40">
           <Search className="size-3.5 shrink-0" strokeWidth={1.75} aria-hidden />

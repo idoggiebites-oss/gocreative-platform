@@ -1,5 +1,5 @@
 import type { MouseEvent, ReactNode } from 'react'
-import { useNavigate } from 'react-router'
+import { Link, useNavigate } from 'react-router'
 import { ChevronDown } from 'lucide-react'
 import type { ArtworkStatus, EstimateStatus, PoStatus, ProductionStatus } from '@shared/enums'
 import { cn } from '@/lib/utils'
@@ -30,7 +30,7 @@ export function Chip({ tone, children, className }: { tone: Tone; children: Reac
 /** A chip that opens a menu: the trigger of an inline status change. */
 export function ChipTrigger({ tone, children, className, ...props }: { tone: Tone; children: ReactNode } & React.ComponentProps<'button'>) {
   return (
-    <button type="button" {...props} className={cn(CHIP, TONE[tone], 'cursor-pointer disabled:cursor-wait disabled:opacity-60', className)}>
+    <button type="button" {...props} className={cn(CHIP, TONE[tone], 'cursor-pointer aria-busy:cursor-wait aria-busy:opacity-60', className)}>
       {children}
       <ChevronDown className="-mr-0.5 size-3" strokeWidth={2} aria-hidden />
     </button>
@@ -71,4 +71,27 @@ export function useRowLink() {
       if (e.button === 1 && !(e.target as HTMLElement).closest('a')) window.open(to, '_blank')
     },
   })
+}
+
+export type StackRow = { key: string; to: string; number: ReactNode; who: ReactNode; sub?: ReactNode; chip: ReactNode; due: ReactNode }
+
+/**
+ * Phone replacement for the wide tables (shown below 640px): number and customer on the first line,
+ * the status chip and due date on the second. The number is the one real link, stretched over the row.
+ */
+export function StackedRows({ rows }: { rows: StackRow[] }) {
+  return (
+    <ul className="sm:hidden">
+      {rows.map((r) => (
+        <li key={r.key} className="relative flex flex-col gap-1.5 border-b border-secondary px-4 py-3 text-[13px] last:border-b-0 hover:bg-header">
+          <div className="flex min-w-0 items-baseline gap-2">
+            <Link to={r.to} className="num font-medium text-foreground no-underline after:absolute after:inset-0 after:content-['']">{r.number}</Link>
+            <span className="min-w-0 truncate">{r.who}</span>
+          </div>
+          {r.sub && <span className={`${MUTED} truncate`}>{r.sub}</span>}
+          <div className="flex flex-wrap items-center justify-between gap-2">{r.chip}<span className="num text-xs">{r.due}</span></div>
+        </li>
+      ))}
+    </ul>
+  )
 }

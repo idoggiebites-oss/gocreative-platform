@@ -1,10 +1,11 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router'
 import { Lock, SearchX } from 'lucide-react'
 import type { UseMutationResult } from '@tanstack/react-query'
 import type { GateReasonCode, OrderDetailResponse } from '@shared/api'
 import { PRODUCTION_STATUSES, type PoStatus, type ProductionStatus } from '@shared/enums'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useI18n } from '@/i18n'
 import { ApiError, useChangePo, useChangeProduction, useOrder } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -26,7 +27,12 @@ function MoveError({ error }: { error: Error | null }) {
   const { m } = useI18n()
   if (!error) return null
   const refused = error instanceof ApiError && error.status === 409
-  const detail = error instanceof ApiError ? [error.body.error, ...(error.body.reasons ?? [])].filter(Boolean).join(' · ') : ''
+  // Only translated text is shown: the server's English `error` is for logs. Unknown codes fall back to the generic line.
+  const codes: Record<string, string | undefined> = m.api.errors
+  const reasons: Record<string, string | undefined> = m.order.gate.reasons
+  const detail = error instanceof ApiError
+    ? [error.body.code ? codes[error.body.code] : undefined, ...(error.body.reasons ?? []).map((r) => reasons[r] ?? m.api.unknownReason)].filter(Boolean).join(' ')
+    : ''
   return (
     <span role="alert" className="text-xs text-status-red-fg">
       {refused ? m.api.changeRefused : m.api.changeFailed}{detail && <> <span className="opacity-80">{detail}</span></>}
@@ -39,18 +45,34 @@ function StatusMenu<T extends string>(p: {
   current: T; options: readonly T[]; labels: Record<T, string>; tones: Record<T, Tone>; pending: boolean; onPick: (to: T) => void; name: string
 }) {
   const { m } = useI18n()
-  if (p.options.length === 0) return <Chip tone={p.tones[p.current]}>{p.labels[p.current]}</Chip>
+  const wrap = useRef<HTMLSpanElement>(null)
+  const trigger = useRef<HTMLButtonElement>(null)
+  const wasPending = useRef(false)
+  // Keyboard users stay where they were: after a save, focus goes back to the trigger, or to the
+  // wrapper when the status has no further moves and the trigger is gone. The trigger is never
+  // disabled while saving (a disabled element drops focus); aria-busy says it is working instead.
+  useEffect(() => {
+    if (wasPending.current && !p.pending) {
+      const a = document.activeElement
+      if (!a || a === document.body || wrap.current?.contains(a)) (trigger.current ?? wrap.current)?.focus()
+    }
+    wasPending.current = p.pending
+  })
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <ChipTrigger tone={p.tones[p.current]} disabled={p.pending} aria-label={`${p.name}: ${p.labels[p.current]}. ${m.order.changeStatus}`}>
-          {p.pending ? m.order.changing : p.labels[p.current]}
-        </ChipTrigger>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-auto min-w-44">
-        {p.options.map((o) => <DropdownMenuItem key={o} onSelect={() => p.onPick(o)}>{p.labels[o]}</DropdownMenuItem>)}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <span ref={wrap} tabIndex={-1} role="group" aria-label={p.name} className="outline-none">
+      {p.options.length === 0 ? <Chip tone={p.tones[p.current]}>{p.labels[p.current]}</Chip> : (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <ChipTrigger ref={trigger} tone={p.tones[p.current]} aria-busy={p.pending || undefined} aria-label={`${p.name}: ${p.labels[p.current]}. ${m.order.changeStatus}`}>
+              {p.pending ? m.order.changing : p.labels[p.current]}
+            </ChipTrigger>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-auto min-w-44">
+            {p.options.map((o) => <DropdownMenuItem key={o} disabled={p.pending} onSelect={() => p.onPick(o)}>{p.labels[o]}</DropdownMenuItem>)}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+    </span>
   )
 }
 
@@ -244,7 +266,7 @@ function ProductionTab({ d, c, moves }: { d: Detail; c: Controls; moves: ReturnT
         <span className="text-muted-foreground">{m.order.production.moves}</span>
         {moves.production.length === 0 && <span className={MUTED}>{m.order.production.none}</span>}
         {moves.production.map((to) => (
-          <button key={to} type="button" disabled={c.prod.isPending} onClick={() => c.prod.mutate(to)} className={BTN}>{m.labels.productionStatus[to]}</button>
+          <button key={to} type="button" aria-busy={c.prod.isPending || undefined} onClick={() => !c.prod.isPending && c.prod.mutate(to)} className={cn(BTN, 'aria-busy:opacity-60')}>{m.labels.productionStatus[to]}</button>
         ))}
       </div>
       <MoveError error={c.prod.error} />
@@ -265,7 +287,7 @@ function ActivityTab({ d }: { d: Detail }) {
       {d.activity.map((a) => {
         const text =
           a.action === 'created' ? m.order.activity.created
-          : a.action.startsWith('production_status') ? m.order.activity.production(prod(field(a.before, 'production_status')), prod(field(a.after, 'production_status')))
+          : a.action === 'production_status_changed' ? m.order.activity.production(prod(field(a.before, 'production_status')), prod(field(a.after, 'production_status')))
           : a.action === 'po_status_changed' ? m.order.activity.po(po(field(a.before, 'po_status')), po(field(a.after, 'po_status')))
           : m.activity.other('')
         return (
@@ -362,29 +384,22 @@ function Order({ d }: { d: Detail }) {
       <GateBanner d={d} c={c} openPo={() => setTab('po')} />
       <div className="flex flex-wrap items-start gap-4">
         <section className={`${CARD} min-w-0 flex-[999_1_600px]`}>
-          <div role="tablist" aria-label={m.order.tabsLabel} className="flex gap-0.5 overflow-x-auto border-b border-border px-2">
-            {TABS.map((k) => (
-              <button
-                key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
-                className={cn('-mb-px h-10 whitespace-nowrap border-b-2 px-2.5 text-[13px] font-medium', tab === k ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground')}
-              >
-                {m.order.tabs[k]}
-              </button>
-            ))}
-          </div>
-          <div role="tabpanel">
-            {tab === 'items' && <ItemsTab d={d} />}
-            {tab === 'artwork' && (
+          <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
+            <TabsList aria-label={m.order.tabsLabel}>
+              {TABS.map((k) => <TabsTrigger key={k} value={k}>{m.order.tabs[k]}</TabsTrigger>)}
+            </TabsList>
+            <TabsContent value="items"><ItemsTab d={d} /></TabsContent>
+            <TabsContent value="artwork">
               <div className="flex flex-col gap-3 p-4 text-[13px]">
                 <div className="flex items-center gap-2"><span className="text-muted-foreground">{m.order.artwork.status}</span><Chip tone={ARTWORK_TONE[d.order.artworkStatus]}>{m.labels.artworkStatus[d.order.artworkStatus]}</Chip></div>
                 <p className={MUTED}>{m.order.artwork.body}</p>
               </div>
-            )}
-            {tab === 'quote' && <QuoteTab d={d} />}
-            {tab === 'po' && <PoTab d={d} c={c} />}
-            {tab === 'production' && <ProductionTab d={d} c={c} moves={moves} />}
-            {tab === 'activity' && <ActivityTab d={d} />}
-          </div>
+            </TabsContent>
+            <TabsContent value="quote"><QuoteTab d={d} /></TabsContent>
+            <TabsContent value="po"><PoTab d={d} c={c} /></TabsContent>
+            <TabsContent value="production"><ProductionTab d={d} c={c} moves={moves} /></TabsContent>
+            <TabsContent value="activity"><ActivityTab d={d} /></TabsContent>
+          </Tabs>
         </section>
         <Side d={d} />
       </div>

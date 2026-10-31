@@ -1,4 +1,4 @@
-import type { ActivityAction, AttentionReason, GateReasonCode, OrderView } from '../api'
+import type { ActivityAction, ApiErrorCode, AttentionReason, GateReasonCode, OrderView } from '../api'
 import type {
   ApprovalStatus, ArtworkStatus, CustomerKind, EstimateStatus, InquiryStatus, Method,
   OrderSource, OrderState, PoStatus, ProductionStatus, Role,
@@ -67,6 +67,17 @@ export const en = {
     failed: { title: 'Could not load this page', body: 'Something went wrong on the server. Try again in a moment.' },
     changeRefused: 'That change was not applied.',
     changeFailed: 'The change could not be saved. Try again.',
+    // Shown for the API's `code`; the server's English `error` text is never displayed.
+    errors: {
+      transition_not_allowed: 'That production move is not allowed from the current status.',
+      gate_failed: 'Production is locked until the requirements are met.',
+      conflict_retry: 'Someone else changed this order. It has been reloaded; try again.',
+      po_transition_not_allowed: 'That purchase order status change is not allowed.',
+      not_found: 'This record no longer exists.',
+      invalid_request: 'The request was not valid.',
+    } satisfies Record<ApiErrorCode, string>,
+    unknownReason: 'A requirement is not met.',
+    staleNotice: 'Could not refresh. You are seeing the last data we loaded.',
   },
   dash: {
     greeting: { morning: 'Good morning', afternoon: 'Good afternoon', evening: 'Good evening' },
@@ -88,6 +99,8 @@ export const en = {
       noOverdue: 'None overdue',
       oldest: (n: number) => (n === 0 ? 'oldest since today' : `oldest ${n} ${n === 1 ? 'day' : 'days'}`),
       none: 'Nothing waiting',
+      newThisWeek: (n: number) => `${n} new this week`,
+      waitingOver5Days: (n: number) => `${n} waiting 5+ days`,
     },
     attention: 'Needs attention',
     allOrders: 'All orders',
@@ -110,7 +123,6 @@ export const en = {
   activity: {
     // `n` is the order number; the sentence is built around it so it can be shown in bold.
     created: (n: string) => `Order ${n} created`,
-    production_status: (n: string) => `Production status changed on ${n}`,
     production_status_changed: (n: string) => `Production status changed on ${n}`,
     po_status_changed: (n: string) => `Purchase order status changed on ${n}`,
     other: (n: string) => (n ? `Update on ${n}` : 'Update'),

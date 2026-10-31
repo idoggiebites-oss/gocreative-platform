@@ -12,6 +12,8 @@ export type DashOrder = {
   latestPoStatus: PoStatus | null
   latestPoAmountCents: number | null
   latestEstimateStatus: string | null
+  createdAt: string
+  latestEstimateCreatedAt: string | null
 }
 export type DashInquiry = { id: number; contactName: string | null }
 export type AttentionCandidate = {
@@ -48,7 +50,11 @@ export function buildDashboard(orders: DashOrder[], readyAt: Map<number, string>
 
   const metrics: DashboardMetrics = {
     activeOrders: orders.length,
+    activeOrdersNewThisWeek: orders.filter((o) => o.createdAt.slice(0, 10) >= addDays(today, -7)).length,
     pendingQuotes: orders.filter((o) => o.latestEstimateStatus === 'draft' || o.latestEstimateStatus === 'sent').length,
+    pendingQuotesWaitingOver5Days: orders.filter(
+      (o) => o.latestEstimateStatus === 'sent' && o.latestEstimateCreatedAt !== null && o.latestEstimateCreatedAt.slice(0, 10) < addDays(today, -5),
+    ).length,
     artworkAwaitingApproval: {
       pending: orders.filter((o) => o.artworkStatus === 'pending').length,
       changesRequested: orders.filter((o) => o.artworkStatus === 'changes_requested').length,

@@ -21,6 +21,8 @@ type BaseRow = {
   latest_po_status: PoStatus | null
   latest_po_amount: number | null
   latest_estimate_status: string | null
+  latest_estimate_created_at: string | null
+  created_at: string
   methods: string | null
   total_qty: number
 }
@@ -31,6 +33,8 @@ const BASE = `SELECT o.id, o.number, c.name AS customer_name, c.kind AS customer
   (SELECT p.status FROM purchase_orders p WHERE p.order_id = o.id ORDER BY p.id DESC LIMIT 1) AS latest_po_status,
   (SELECT p.amount_cents FROM purchase_orders p WHERE p.order_id = o.id ORDER BY p.id DESC LIMIT 1) AS latest_po_amount,
   (SELECT e.status FROM estimates e WHERE e.order_id = o.id ORDER BY e.version DESC LIMIT 1) AS latest_estimate_status,
+  (SELECT e.created_at FROM estimates e WHERE e.order_id = o.id ORDER BY e.version DESC LIMIT 1) AS latest_estimate_created_at,
+  o.created_at,
   (SELECT group_concat(DISTINCT i.method) FROM order_items i WHERE i.order_id = o.id) AS methods,
   (SELECT COALESCE(SUM(i.quantity), 0) FROM order_items i WHERE i.order_id = o.id) AS total_qty
   FROM orders o JOIN customers c ON c.id = o.customer_id`
@@ -120,6 +124,8 @@ export async function listActiveDashOrders(db: D1Database): Promise<DashOrder[]>
     latestPoStatus: r.latest_po_status,
     latestPoAmountCents: r.latest_po_amount,
     latestEstimateStatus: r.latest_estimate_status,
+    createdAt: r.created_at,
+    latestEstimateCreatedAt: r.latest_estimate_created_at,
   }))
 }
 

@@ -3,7 +3,7 @@ import { describe, expect, test } from 'vitest'
 import { Hono } from 'hono'
 import { appRoutes } from '../../worker/routes/app'
 import type { AppEnv } from '../../worker/auth'
-import type { DashboardResponse, OrderDetailResponse, OrdersListResponse } from '../../shared/api'
+import { ACTIVITY_ACTIONS, type DashboardResponse, type OrderDetailResponse, type OrdersListResponse } from '../../shared/api'
 import { buildDashboard, addDays } from '../../worker/domain/dashboard'
 import * as dbo from '../../worker/db/orders'
 import { createTestD1 } from './d1'
@@ -294,11 +294,66 @@ describe('dashboard due window', () => {
   const o = (id: number, dueDate: string) => ({
     id, number: `N${id}`, customerName: 'c', title: 't', artworkStatus: 'approved' as const, productionStatus: 'ready' as const,
     dueDate, latestPoStatus: null, latestPoAmountCents: null, latestEstimateStatus: null,
+    createdAt: '2026-10-01T00:00:00.000Z', latestEstimateCreatedAt: null,
   })
   test('half-open [today, today+7) for dueIn7Days and dueThisWeek', () => {
     const today = '2026-10-30'
     const d = buildDashboard([o(1, today), o(2, addDays(today, 6)), o(3, addDays(today, 7))], new Map(), [], today)
     expect(d.metrics.dueIn7Days.count).toBe(2)
     expect(d.dueThisWeek.map((x) => x.number)).toEqual(['N1', 'N2'])
+  })
+})
+
+describe('dashboard sub-line metrics', () => {
+  test('newThisWeek and waitingOver5Days match direct SQL and move with the data', async () => {
+    const t = setup()
+    const get = async () => (await t.json<DashboardResponse>(await t.call('GET', '/dashboard'))).metrics
+    const n = (sql: string) => t.one<{ n: number }>(sql).n
+    const m = await get()
+    expect(m.activeOrdersNewThisWeek).toBe(n(`SELECT COUNT(*) AS n FROM orders WHERE state = 'active' AND date(created_at) >= date('now', '-7 days')`))
+    expect(m.pendingQuotesWaitingOver5Days).toBe(
+      n(`SELECT COUNT(*) AS n FROM orders o WHERE state = 'active' AND (SELECT status FROM estimates e WHERE e.order_id = o.id ORDER BY version DESC LIMIT 1) = 'sent'
+         AND date((SELECT created_at FROM estimates e WHERE e.order_id = o.id ORDER BY version DESC LIMIT 1)) < date('now', '-5 days')`),
+    )
+    // The seed backdates so neither is trivially 0 or all.
+    expect(m.activeOrdersNewThisWeek).toBeGreaterThan(0)
+    expect(m.activeOrdersNewThisWeek).toBeLessThan(m.activeOrders)
+    expect(m.pendingQuotesWaitingOver5Days).toBeGreaterThan(0)
+    // An active order made 8 days ago stops counting; a 'sent' quote made today does not count as waiting.
+    t.sqlite.exec(`UPDATE orders SET created_at = strftime('%Y-%m-%dT%H:%M:%fZ','now','-8 days') WHERE number = '2026-0013'`)
+    t.sqlite.exec(`UPDATE estimates SET created_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = 2`)
+    const m2 = await get()
+    expect(m2.activeOrdersNewThisWeek).toBe(m.activeOrdersNewThisWeek - 1)
+    expect(m2.pendingQuotesWaitingOver5Days).toBe(m.pendingQuotesWaitingOver5Days - 1)
+  })
+})
+
+describe('error codes', () => {
+  const code = async (t: ReturnType<typeof setup>, res: Response) => t.json<{ code?: string; error: string; reasons?: string[] }>(res)
+  test('every 4xx carries a stable code next to the English error', async () => {
+    const t = setup()
+    expect(await code(t, await t.call('GET', '/orders/2026-9999'))).toMatchObject({ code: 'not_found', error: 'Order not found' })
+    expect(await code(t, await t.call('GET', '/orders/abc'))).toMatchObject({ code: 'invalid_request' })
+    expect(await code(t, await t.call('GET', '/orders?view=nope'))).toMatchObject({ code: 'invalid_request' })
+    expect(await code(t, await t.call('PATCH', '/orders/2026-9999/production', { to: 'ready' }))).toMatchObject({ code: 'not_found' })
+    expect(await code(t, await t.call('PATCH', '/orders/2026-0005/production', { to: 'nonsense' }))).toMatchObject({ code: 'invalid_request' })
+    expect(await code(t, await t.call('PATCH', '/orders/2026-0005/production', { to: 'quality_control' }))).toMatchObject({ code: 'transition_not_allowed' })
+    expect(await code(t, await t.call('PATCH', '/orders/2026-0011/purchase-orders/99999', { to: 'approved' }))).toMatchObject({ code: 'not_found' })
+    // PO 12 is 'received'; received -> approved is not a legal move
+    expect(await code(t, await t.call('PATCH', '/orders/2026-0011/purchase-orders/12', { to: 'approved' }))).toMatchObject({ code: 'po_transition_not_allowed' })
+  })
+  test('a closed gate is gate_failed with reason codes', async () => {
+    const t = setup()
+    t.sqlite.exec(`UPDATE purchase_orders SET status = 'under_review' WHERE id = 12`)
+    expect(await code(t, await t.call('PATCH', '/orders/2026-0011/production', { to: 'ready' }))).toMatchObject({ code: 'gate_failed', reasons: ['po_not_approved'] })
+  })
+})
+
+describe('activity vocabulary', () => {
+  test('seed and API write only codes from ACTIVITY_ACTIONS', async () => {
+    const t = setup()
+    await t.call('PATCH', '/orders/2026-0005/production', { to: 'in_production' })
+    const rows = t.sqlite.prepare('SELECT DISTINCT action FROM activity_log').all() as { action: string }[]
+    for (const r of rows) expect(ACTIVITY_ACTIONS as readonly string[]).toContain(r.action)
   })
 })

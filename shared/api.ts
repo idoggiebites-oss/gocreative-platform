@@ -9,7 +9,11 @@ export type AttentionReason = 'overdue' | 'artwork_changes_requested' | 'po_wait
 
 export type DashboardMetrics = {
   activeOrders: number
+  /** Active orders created in the last 7 days (a sibling of activeOrders, which stays a plain number). */
+  activeOrdersNewThisWeek: number
   pendingQuotes: number
+  /** Pending quotes whose latest estimate is 'sent' and was created more than 5 days ago. */
+  pendingQuotesWaitingOver5Days: number
   artworkAwaitingApproval: { pending: number; changesRequested: number }
   posAwaitingApproval: { count: number; amountCents: number }
   inProduction: { count: number; qc: number }
@@ -99,10 +103,13 @@ export type ProductionChangeRequest = { to: ProductionStatus }
 export type ProductionChangeResponse = { number: string; productionStatus: ProductionStatus; state: OrderState }
 export type PoChangeRequest = { to: PoStatus }
 export type PoChangeResponse = { poId: number; status: PoStatus; productionStatus: ProductionStatus }
-export type ApiError = { error: string; reasons?: string[] }
+// `error` is English text for logs; the UI shows a translation of `code` (and of each gate reason code in `reasons`).
+export const API_ERROR_CODES = ['transition_not_allowed', 'gate_failed', 'conflict_retry', 'po_transition_not_allowed', 'not_found', 'invalid_request'] as const
+export type ApiErrorCode = (typeof API_ERROR_CODES)[number]
+export type ApiError = { error: string; code?: ApiErrorCode; reasons?: string[] }
 
 // Codes the UI translates. Unknown codes fall back to a generic label, so the API can add one first.
-export const ACTIVITY_ACTIONS = ['created', 'production_status', 'production_status_changed', 'po_status_changed'] as const
+export const ACTIVITY_ACTIONS = ['created', 'production_status_changed', 'po_status_changed'] as const
 export type ActivityAction = (typeof ACTIVITY_ACTIONS)[number]
 export const GATE_REASON_CODES = ['order_not_active', 'artwork_not_approved', 'po_missing', 'po_not_approved', 'not_authorized'] as const
 export type GateReasonCode = (typeof GATE_REASON_CODES)[number]

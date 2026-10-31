@@ -3,7 +3,7 @@ import type { Context } from 'hono'
 import { z } from 'zod'
 import type { AppEnv } from '../auth'
 import { ORDER_VIEWS } from '../../shared/api'
-import type { DashboardResponse, OrderDetailResponse, OrdersListResponse } from '../../shared/api'
+import type { ApiErrorCode, DashboardResponse, OrderDetailResponse, OrdersListResponse } from '../../shared/api'
 import { PO_STATUSES, PRODUCTION_STATUSES } from '../../shared/enums'
 import { buildDashboard } from '../domain/dashboard'
 import { parseOrderNumber } from '../domain/orderNumber'
@@ -19,7 +19,7 @@ const listQuery = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(100),
 })
 
-const bad = (c: Context, e: z.ZodError) => c.json({ error: `Invalid request: ${e.issues[0]?.path.join('.') || 'input'} ${e.issues[0]?.message ?? ''}`.trim() }, 400)
+const bad = (c: Context, e: z.ZodError) => c.json({ error: `Invalid request: ${e.issues[0]?.path.join('.') || 'input'} ${e.issues[0]?.message ?? ''}`.trim(), code: 'invalid_request' satisfies ApiErrorCode }, 400)
 
 // ponytail: "today" is the UTC date; the shop's local timezone is a later refinement.
 const todayUtc = () => new Date().toISOString().slice(0, 10)
@@ -48,7 +48,7 @@ export function orderRoutes() {
       const n = number.safeParse(c.req.param('number'))
       if (!n.success) return bad(c, n.error)
       const detail = await db.getOrderDetail(c.env.DB, n.data)
-      if (!detail) return c.json({ error: 'Order not found' }, 404)
+      if (!detail) return c.json({ error: 'Order not found', code: 'not_found' satisfies ApiErrorCode }, 404)
       const { gateInput, ...rest } = detail
       return c.json<OrderDetailResponse>({ ...rest, gate: canEnterProduction(gateInput.order, gateInput.latestPo) })
     })
@@ -58,14 +58,15 @@ export function orderRoutes() {
       if (!n.success) return bad(c, n.error)
       if (!body.success) return bad(c, body.error)
       const loaded = await db.loadForProductionChange(c.env.DB, n.data)
-      if (!loaded) return c.json({ error: 'Order not found' }, 404)
+      if (!loaded) return c.json({ error: 'Order not found', code: 'not_found' satisfies ApiErrorCode }, 404)
       const check = checkProductionTransition(loaded.from, body.data.to, loaded.order, loaded.latestPo)
       if (!check.ok) {
         const gate = canEnterProduction(loaded.order, loaded.latestPo)
-        return c.json({ error: check.error, ...(gate.ok ? {} : { reasons: gate.reasons }) }, 409)
+        const code: ApiErrorCode = !gate.ok && check.error.startsWith('Production gate failed') ? 'gate_failed' : 'transition_not_allowed'
+        return c.json({ error: check.error, code, ...(gate.ok ? {} : { reasons: gate.reasons }) }, 409)
       }
       const changed = await db.applyProductionChange(c.env.DB, { orderId: loaded.id, actorId: c.get('user').id, from: loaded.from, to: body.data.to })
-      if (!changed) return c.json({ error: 'Order changed, reload and retry' }, 409)
+      if (!changed) return c.json({ error: 'Order changed, reload and retry', code: 'conflict_retry' satisfies ApiErrorCode }, 409)
       return c.json({ number: n.data, productionStatus: body.data.to, state: body.data.to === 'completed' ? 'completed' : loaded.order.state })
     })
     .patch('/orders/:number/purchase-orders/:poId', async (c) => {
@@ -76,9 +77,9 @@ export function orderRoutes() {
       if (!id.success) return bad(c, id.error)
       if (!body.success) return bad(c, body.error)
       const loaded = await db.loadForPoChange(c.env.DB, n.data, id.data)
-      if (!loaded) return c.json({ error: 'Purchase order not found' }, 404)
+      if (!loaded) return c.json({ error: 'Purchase order not found', code: 'not_found' satisfies ApiErrorCode }, 404)
       const check = checkPoTransition(loaded.po.status, body.data.to)
-      if (!check.ok) return c.json({ error: check.error }, 409)
+      if (!check.ok) return c.json({ error: check.error, code: 'po_transition_not_allowed' satisfies ApiErrorCode }, 409)
       // The order's latest PO after this change: the edited one if it is the latest, else unchanged.
       const latestAfter = loaded.latestPoId === loaded.po.id ? { status: body.data.to } : loaded.latestPo
       const syncTo = syncAwaitingStatus(loaded.productionStatus, loaded.order, latestAfter)
@@ -86,7 +87,7 @@ export function orderRoutes() {
         orderId: loaded.orderId, poId: loaded.po.id, actorId: c.get('user').id, from: loaded.po.status, to: body.data.to,
         productionFrom: loaded.productionStatus, sync: syncTo !== null,
       })
-      if (!changed) return c.json({ error: 'Purchase order changed, reload and retry' }, 409)
+      if (!changed) return c.json({ error: 'Purchase order changed, reload and retry', code: 'conflict_retry' satisfies ApiErrorCode }, 409)
       return c.json({ poId: loaded.po.id, status: body.data.to, productionStatus })
     })
 }

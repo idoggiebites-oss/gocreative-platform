@@ -3,7 +3,7 @@ import type { AttentionReason, DashboardMetrics, NeedsAttentionRow } from '@shar
 import { useI18n } from '@/i18n'
 import { useDashboard } from '@/lib/api'
 import QueryBoundary from './QueryBoundary'
-import { CARD, Chip, MUTED, PAGE, Sentence, TD, TH, useRowLink, type Tone } from './ui'
+import { CARD, Chip, MUTED, PAGE, Sentence, StackedRows, TD, TH, useRowLink, type Tone } from './ui'
 
 const REASON_TONE: Record<AttentionReason, Tone> = {
   overdue: 'red', artwork_changes_requested: 'red', po_waiting: 'amber', new_inquiry: 'blue', ready_waiting: 'green', quote_waiting: 'amber',
@@ -15,8 +15,8 @@ function Kpis({ metrics: k }: { metrics: DashboardMetrics }) {
   const artwork = k.artworkAwaitingApproval
   // [label, value, subline, subline is a warning]
   const cells: [string, number, string, boolean][] = [
-    [m.dash.kpi.active, k.activeOrders, s.active, false],
-    [m.dash.kpi.quotes, k.pendingQuotes, s.quotes, false],
+    [m.dash.kpi.active, k.activeOrders, k.activeOrdersNewThisWeek > 0 ? s.newThisWeek(k.activeOrdersNewThisWeek) : s.active, false],
+    [m.dash.kpi.quotes, k.pendingQuotes, k.pendingQuotesWaitingOver5Days > 0 ? s.waitingOver5Days(k.pendingQuotesWaitingOver5Days) : s.quotes, false],
     [m.dash.kpi.artwork, artwork.pending + artwork.changesRequested, artwork.changesRequested > 0 ? s.changesRequested(artwork.changesRequested) : s.noChangesRequested, artwork.changesRequested > 0],
     [m.dash.kpi.pos, k.posAwaitingApproval.count, k.posAwaitingApproval.count > 0 ? s.held(fmt.money(k.posAwaitingApproval.amountCents)) : s.noPoAmount, false],
     [m.dash.kpi.production, k.inProduction.count, k.inProduction.qc > 0 ? s.qc(k.inProduction.qc) : s.noQc, false],
@@ -49,7 +49,17 @@ function Attention({ rows }: { rows: NeedsAttentionRow[] }) {
       {rows.length === 0 ? (
         <p className="px-4 pb-4 text-[13px] text-muted-foreground">{m.dash.nothingAttention}</p>
       ) : (
-        <div className="overflow-x-auto">
+        <>
+          <StackedRows rows={rows.map((r) => ({
+            key: r.number ?? `inq-${r.inquiryId}`,
+            to: r.number ? `/app/orders/${r.number}` : '/app/orders?view=inquiries',
+            number: r.number ?? m.dash.inquiry,
+            who: r.customerName || m.common.dash,
+            sub: r.itemsSummary || r.title,
+            chip: <Chip tone={REASON_TONE[r.reason]}>{m.dash.reason[r.reason](r.reasonDays)}</Chip>,
+            due: r.dueDate ? <span className={r.dueDate < today ? 'font-medium text-status-red-fg' : ''}>{fmt.date(r.dueDate)}</span> : <span className="text-muted-foreground">{m.common.dash}</span>,
+          }))} />
+        <div className="hidden overflow-x-auto sm:block">
           <table className="w-full border-collapse text-[13px]">
             <thead><tr>
               <th className={TH}>{m.dash.cols.order}</th><th className={TH}>{m.dash.cols.customer}</th><th className={TH}>{m.dash.cols.why}</th><th className={TH}>{m.dash.cols.due}</th>
@@ -74,6 +84,7 @@ function Attention({ rows }: { rows: NeedsAttentionRow[] }) {
             </tbody>
           </table>
         </div>
+        </>
       )}
     </section>
   )

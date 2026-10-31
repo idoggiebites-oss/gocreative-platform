@@ -3,12 +3,13 @@ import type {
   DashboardResponse, OrderDetailResponse, OrdersListResponse, OrderView, PoChangeResponse, ProductionChangeResponse,
 } from '@shared/api'
 import type { PoStatus, ProductionStatus } from '@shared/enums'
+import type { ApiError as ApiErrorBody } from '@shared/api'
 
 /** A non-2xx answer from /api/app. `body.error` is the server's message; 409 means a business rule refused it. */
 export class ApiError extends Error {
   status: number
-  body: { error?: string; reasons?: string[] }
-  constructor(status: number, body: { error?: string; reasons?: string[] }) {
+  body: Partial<ApiErrorBody>
+  constructor(status: number, body: Partial<ApiErrorBody>) {
     super(body.error ?? `HTTP ${status}`)
     this.status = status
     this.body = body
@@ -21,7 +22,7 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { Accept: 'application/json', ...(init?.body ? { 'Content-Type': 'application/json' } : {}) },
   })
   const body: unknown = await res.json().catch(() => ({}))
-  if (!res.ok) throw new ApiError(res.status, (body && typeof body === 'object' ? body : {}) as ApiError['body'])
+  if (!res.ok) throw new ApiError(res.status, (body && typeof body === 'object' ? body : {}) as ApiErrorBody)
   return body as T
 }
 

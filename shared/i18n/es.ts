@@ -60,6 +60,16 @@ export const es: Messages = {
     failed: { title: 'No se pudo cargar esta página', body: 'Algo salió mal en el servidor. Inténtalo de nuevo en un momento.' },
     changeRefused: 'No se aplicó ese cambio.',
     changeFailed: 'No se pudo guardar el cambio. Inténtalo de nuevo.',
+    errors: {
+      transition_not_allowed: 'Ese cambio de producción no está permitido desde el estado actual.',
+      gate_failed: 'La producción está bloqueada hasta que se cumplan los requisitos.',
+      conflict_retry: 'Alguien más modificó este pedido. Se recargó; inténtalo de nuevo.',
+      po_transition_not_allowed: 'Ese cambio de estado de la orden de compra no está permitido.',
+      not_found: 'Este registro ya no existe.',
+      invalid_request: 'La solicitud no es válida.',
+    },
+    unknownReason: 'No se cumple un requisito.',
+    staleNotice: 'No se pudo actualizar. Estás viendo los últimos datos cargados.',
   },
   dash: {
     greeting: { morning: 'Buenos días', afternoon: 'Buenas tardes', evening: 'Buenas noches' },
@@ -81,6 +91,8 @@ export const es: Messages = {
       noOverdue: 'Ninguno atrasado',
       oldest: (n) => (n === 0 ? 'el más antiguo, desde hoy' : `el más antiguo, ${n} ${n === 1 ? 'día' : 'días'}`),
       none: 'Nada en espera',
+      newThisWeek: (n) => `${n} ${n === 1 ? 'nuevo' : 'nuevos'} esta semana`,
+      waitingOver5Days: (n) => `${n} esperando más de 5 días`,
     },
     attention: 'Requiere atención',
     allOrders: 'Todos los pedidos',
@@ -102,7 +114,6 @@ export const es: Messages = {
   },
   activity: {
     created: (n) => `Pedido ${n} creado`,
-    production_status: (n) => `Cambió el estado de producción de ${n}`,
     production_status_changed: (n) => `Cambió el estado de producción de ${n}`,
     po_status_changed: (n) => `Cambió el estado de la orden de compra de ${n}`,
     other: (n) => (n ? `Actualización en ${n}` : 'Actualización'),
