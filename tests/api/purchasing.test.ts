@@ -265,7 +265,7 @@ test('the SQL itself refuses a stale version: every writer called directly write
 test('a purchase is never deleted or re-keyed, so DELETE + INSERT cannot undo a cancellation; quantities are capped', () => {
   const t = setup()
   expect(() => t.sqlite.exec('DELETE FROM order_purchases WHERE id = 1')).toThrow(/never deleted/)
-  expect(() => t.sqlite.exec('UPDATE order_purchases SET id = 99 WHERE id = 1')).toThrow(/purchase_order_fixed/)
+  for (const alias of ['id', 'rowid', 'oid', '_rowid_']) expect(() => t.sqlite.exec(`UPDATE order_purchases SET ${alias} = 99 WHERE id = 1`), alias).toThrow(/purchase_order_fixed/)
   expect(() => t.sqlite.exec("INSERT OR REPLACE INTO order_purchases (id, order_id, supplier_id, description, quantity, status, ordered_on) VALUES (1, 16, 1, 'x', 1, 'ordered', '2026-10-31')")).toThrow()
   expect(t.one('SELECT status FROM order_purchases WHERE id = 1')).toEqual({ status: 'cancelled' })
   expect(() => t.sqlite.exec("INSERT INTO order_purchases (order_id, supplier_id, description, quantity) VALUES (16, 1, 'x', 1000001)")).toThrow(/CHECK/)

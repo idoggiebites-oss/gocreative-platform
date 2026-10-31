@@ -46,7 +46,7 @@ WHEN NEW.status IS NOT OLD.status
 BEGIN SELECT RAISE(ABORT, 'purchase_transition_not_allowed'); END;
 -- A purchase never moves to another order or changes id, and is never deleted (a mistake is cancelled):
 -- otherwise DELETE + INSERT with the same id would undo a cancellation (Codex review of 6c6b7b5).
-CREATE TRIGGER order_purchases_order_fixed BEFORE UPDATE OF id, order_id ON order_purchases
+CREATE TRIGGER order_purchases_order_fixed BEFORE UPDATE ON order_purchases
 WHEN NEW.order_id IS NOT OLD.order_id OR NEW.id IS NOT OLD.id
 BEGIN SELECT RAISE(ABORT, 'purchase_order_fixed'); END;
 CREATE TRIGGER order_purchases_no_delete BEFORE DELETE ON order_purchases
