@@ -1,7 +1,10 @@
 import { Link } from 'react-router'
-import type { AttentionReason, DashboardMetrics, NeedsAttentionRow } from '@shared/api'
+import type { ActionRequired as ActionRequiredData, ActionRow, AttentionReason, DashboardMetrics, NeedsAttentionRow, ProductionJob } from '@shared/api'
 import { useI18n } from '@/i18n'
 import { useDashboard } from '@/lib/api'
+import { H2, SEC } from './form'
+import { CurrentJob } from './Production'
+import { useJobSummary } from './ProductionControls'
 import QueryBoundary from './QueryBoundary'
 import { CARD, Chip, MUTED, PAGE, Sentence, StackedRows, TD, TH, useRowLink, type Tone } from './ui'
 
@@ -144,6 +147,92 @@ function Activity({ rows }: { rows: { actor: string; action: string; orderNumber
   )
 }
 
+function CurrentProduction({ jobs }: { jobs: ProductionJob[] }) {
+  const { m } = useI18n()
+  return (
+    <section aria-labelledby="cur" className={`${CARD} border-[#C9D4F2]`}>
+      <div className={SEC}>
+        <h2 id="cur" className={H2}>{m.dash.current.title}</h2>
+        <Link to="/app/production" className="text-[13px] text-primary no-underline hover:text-(--brand-hover)">{m.production.productionPage}</Link>
+      </div>
+      {jobs.length === 0 ? <p className="px-4 pb-4 text-[13px] text-muted-foreground">{m.dash.current.none}</p> : (
+        <ul aria-label={m.dash.current.title}>{jobs.map((j) => <CurrentJob key={j.number} job={j} running={jobs} readOnly />)}</ul>
+      )}
+    </section>
+  )
+}
+
+function Upcoming({ jobs }: { jobs: ProductionJob[] }) {
+  const { m } = useI18n()
+  const sum = useJobSummary()
+  return (
+    <section aria-labelledby="upn" className={CARD}>
+      <div className={SEC}>
+        <h2 id="upn" className={H2}>{m.dash.upcoming.title}</h2>
+        <Link to="/app/production" className="text-[13px] text-primary no-underline hover:text-(--brand-hover)">{m.production.productionPage}</Link>
+      </div>
+      {jobs.length === 0 ? <p className="px-4 pb-4 text-[13px] text-muted-foreground">{m.dash.upcoming.empty}</p> : (
+        <ol aria-label={m.dash.upcoming.title}>
+          {jobs.map((j, i) => (
+            <li key={j.number} className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-secondary px-4 py-2.5 text-[13px] first:border-t-0">
+              <span className="num w-4 flex-none text-muted-foreground">{i + 1}</span>
+              <div className="flex min-w-0 flex-[1_1_220px] flex-col">
+                <span className="flex flex-wrap items-baseline gap-x-2"><Link to={`/app/orders/${j.number}`} className="num font-medium text-foreground no-underline hover:text-primary hover:underline">{j.number}</Link><span>{j.customerName}</span></span>
+                <span className={MUTED}>{j.title} · {sum.what(j)}</span>
+              </div>
+              <span className="num">{sum.due(j)}</span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+  )
+}
+
+const MORE_ROWS = 3
+
+/** The groups the server lists; an empty group renders nothing (the M5 groups stay hidden until they have rows). */
+function ActionRequired({ data }: { data: ActionRequiredData }) {
+  const { m, fmt } = useI18n()
+  const t = m.dash.action
+  const groups: { key: keyof ActionRequiredData; rows: (ActionRow & { why?: string })[] }[] = [
+    { key: 'quotes', rows: data.quotes.map((r) => ({ ...r, why: r.quoteStatus ? m.labels.quoteStatus[r.quoteStatus] : t.noQuote })) },
+    { key: 'missingArtwork', rows: data.missingArtwork.map((r) => ({ ...r, why: m.labels.artworkStatus[r.artworkStatus] })) },
+    { key: 'pendingPos', rows: data.pendingPos.map((r) => ({ ...r, why: r.poStatus ? m.labels.poStatus[r.poStatus] : t.noPo })) },
+    { key: 'materialsAwaiting', rows: data.materialsAwaiting.map((r) => ({ ...r, why: t.materials })) },
+    { key: 'awaitingPickup', rows: data.awaitingPickup },
+    { key: 'checksToCollect', rows: data.checksToCollect },
+  ]
+  const shown = groups.filter((g) => g.rows.length > 0)
+  if (shown.length === 0) return null
+  return (
+    <section aria-labelledby="req" className={CARD}>
+      <div className={SEC}><h2 id="req" className={H2}>{t.title}</h2></div>
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,300px),1fr))]">
+        {shown.map((g) => (
+          <div key={g.key} role="group" aria-label={t.groups[g.key]} className="flex min-w-0 flex-col gap-2 border-t border-secondary px-4 py-3">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-[13px] font-semibold">{t.groups[g.key]}</h3>
+              <Chip tone="gray">{t.count(g.rows.length)}</Chip>
+            </div>
+            <ul className="flex flex-col gap-1.5 text-[13px]">
+              {g.rows.slice(0, MORE_ROWS).map((r) => (
+                <li key={r.number}>
+                  <Link to={`/app/orders/${r.number}`} className="flex min-w-0 flex-col text-foreground no-underline hover:text-primary">
+                    <span className="truncate"><b className="num font-medium">{r.number}</b> {r.customerName}</span>
+                    <span className={MUTED}>{[r.why, r.dueDate ? m.production.due(fmt.date(r.dueDate)) : null].filter(Boolean).join(' · ')}</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+            {g.rows.length > MORE_ROWS && <Link to="/app/orders" className="text-xs text-primary no-underline hover:text-(--brand-hover)">{t.more(g.rows.length - MORE_ROWS)}</Link>}
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
 export default function Overview() {
   const { m, fmt } = useI18n()
   const query = useDashboard()
@@ -159,6 +248,9 @@ export default function Overview() {
             <span className="text-[13px] text-muted-foreground">{fmt.longDate(now)}</span>
           </div>
           <Kpis metrics={d.metrics} />
+          <CurrentProduction jobs={d.currentJobs} />
+          <Upcoming jobs={d.upcoming} />
+          <ActionRequired data={d.actionRequired} />
           <div className="flex flex-wrap items-start gap-5">
             <Attention rows={d.needsAttention} />
             <div className="flex min-w-0 flex-[1_1_300px] flex-col gap-5">
