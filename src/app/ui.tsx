@@ -1,7 +1,7 @@
 import type { MouseEvent, ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { ChevronDown } from 'lucide-react'
-import type { OrderArtworkStatus, PoStatus, ProductionStatus, QuoteStatus } from '@shared/enums'
+import type { OrderArtworkStatus, PoStatus, ProductionStatus, PurchaseStatus, QuoteStatus } from '@shared/enums'
 import { cn } from '@/lib/utils'
 
 export type Tone = 'amber' | 'blue' | 'green' | 'red' | 'gray'
@@ -22,6 +22,7 @@ export const PRODUCTION_TONE: Record<ProductionStatus, Tone> = {
   awaiting_quote: 'amber', awaiting_authorization: 'amber', awaiting_artwork: 'amber', awaiting_materials: 'amber', awaiting_preparation: 'amber',
   ready: 'gray', in_production: 'blue', quality_control: 'blue', production_complete: 'green',
 }
+export const PURCHASE_TONE: Record<PurchaseStatus, Tone> = { not_ordered: 'gray', ordered: 'blue', partially_received: 'amber', received: 'green', cancelled: 'red' }
 export const QUOTE_TONE: Record<QuoteStatus, Tone> = { draft: 'gray', sent: 'amber', accepted: 'green', declined: 'red', superseded: 'gray' }
 
 export function Chip({ tone, children, className }: { tone: Tone; children: ReactNode; className?: string }) {

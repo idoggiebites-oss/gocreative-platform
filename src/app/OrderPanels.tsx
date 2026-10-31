@@ -2,9 +2,9 @@ import { useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router'
 import { Lock, Info } from 'lucide-react'
 import type { OrderDetailResponse, OrderItem, OrderWriteResponse } from '@shared/api'
-import { AUTHORIZATION_METHODS, ORDER_SOURCES, PAYMENT_TERMS, type AuthorizationMethod, type OrderSource, type PaymentTerms, type QuoteStatus } from '@shared/enums'
+import { AUTHORIZATION_METHODS, ORDER_SOURCES, PAYMENT_TERMS, type AuthorizationMethod, type OrderSource, type PaymentTerms, type PrepStatus, type QuoteStatus } from '@shared/enums'
 import { useI18n } from '@/i18n'
-import { isConflict, send, useCustomer, useSend, useUsers } from '@/lib/api'
+import { isConflict, send, useChangePrep, useCustomer, useSend, useUsers } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { acceptBlockCode, quoteActionsOpen } from '../../worker/domain/quotes'
 import { BTN, BTN_PRIMARY, BTN_SM, Check, ConflictNotice, Field, FormDialog, H2, INPUT, MutationError, SEC, TEXTAREA, useEditSession } from './form'
@@ -137,13 +137,13 @@ export function OrderActions({ d }: { d: Detail }) {
 
 // ---------------------------------------------------------------- readiness
 
-const SOON: Record<string, string> = { materials: 'M3', preparation: 'M3' }
 const STATE_TONE: Record<'complete' | 'pending' | 'not_required', Tone> = { complete: 'green', pending: 'amber', not_required: 'gray' }
 
-export function ReadinessCard({ d, po, goTab }: { d: Detail; po: ReactNode; goTab: (t: 'po' | 'artwork') => void }) {
+export function ReadinessCard({ d, po, goTab, addPurchase }: { d: Detail; po: ReactNode; goTab: (t: 'po' | 'artwork') => void; addPurchase: () => void }) {
   const { m, fmt } = useI18n()
   const t = m.order.readiness
   const w = useOrderWrite(d)
+  const prep = useChangePrep(d.order.number)
   const [dialog, setDialog] = useState<'auth' | 'nopurchasing' | null>(null)
   const { order, quote } = d
   const active = order.state === 'active'
@@ -152,9 +152,6 @@ export function ReadinessCard({ d, po, goTab }: { d: Detail; po: ReactNode; goTa
   const done = d.readiness.items.filter((i) => i.state !== 'pending').length
   const run = (method: 'POST' | 'PATCH', sub: string | undefined, body?: object) => w.mutate({ method, sub, body })
   const busy = w.isPending || undefined
-  const soon = (key: string, label: string) => (
-    <span className="inline-flex items-center gap-2"><button type="button" className={sm} disabled title={t.soon(SOON[key] ?? '')}>{label}</button><span className={MUTED}>{t.soon(SOON[key] ?? '')}</span></span>
-  )
 
   const actions = (key: string, state: string, reason?: string): ReactNode => {
     if (!active) return null
@@ -180,8 +177,13 @@ export function ReadinessCard({ d, po, goTab }: { d: Detail; po: ReactNode; goTa
       if (state === 'pending') return <>{btn(t.artworkNotRequired, () => run('PATCH', undefined, { artworkRequired: false }))}{btn(t.uploadArtwork, () => goTab('artwork'), true)}</>
       if (state === 'not_required') return btn(t.artworkRequired, () => run('PATCH', undefined, { artworkRequired: true }))
     }
-    if (key === 'materials' && state === 'pending') return <>{btn(t.noPurchasing, () => setDialog('nopurchasing'))}{soon('materials', t.recordPurchase)}</>
-    if (key === 'preparation' && state === 'pending') return soon('preparation', t.startPrep)
+    if (key === 'materials' && state === 'pending') return <>{btn(t.noPurchasing, () => setDialog('nopurchasing'))}{btn(t.addPurchase, addPurchase, true)}</>
+    if (key === 'preparation') {
+      const setPrep = (prepStatus: PrepStatus) => !prep.isPending && prep.mutate({ prepStatus, expectedVersion: order.version })
+      const pb = (label: string, to: PrepStatus, primary = false) => <button type="button" className={primary ? smPrimary : sm} aria-busy={prep.isPending || undefined} onClick={() => setPrep(to)}>{label}</button>
+      if (state === 'pending') return <>{order.prepStatus === 'in_progress' ? null : pb(t.startPrep, 'in_progress')}{pb(t.markReady, 'ready', true)}{pb(t.prepNotRequired, 'not_required')}</>
+      if (state === 'not_required') return pb(t.prepRequired, 'not_started')
+    }
     return null
   }
 
@@ -212,7 +214,7 @@ export function ReadinessCard({ d, po, goTab }: { d: Detail; po: ReactNode; goTa
           </span>
         </div>
       ))}
-      <div className="px-4 py-2 empty:hidden"><MutationError error={w.error} /></div>
+      <div className="px-4 py-2 empty:hidden"><MutationError error={w.error} /><MutationError error={prep.error} /></div>
       {dialog === 'auth' && <AuthorizeDialog d={d} onClose={() => setDialog(null)} />}
       {dialog === 'nopurchasing' && <NoPurchasingDialog d={d} onClose={() => setDialog(null)} />}
     </section>

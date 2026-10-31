@@ -3,18 +3,19 @@ import { Link, useParams } from 'react-router'
 import { Lock, SearchX } from 'lucide-react'
 import type { UseMutationResult } from '@tanstack/react-query'
 import type { GateReasonCode, OrderDetailResponse } from '@shared/api'
-import { PRODUCTION_STATUSES, type PoStatus, type ProductionStatus } from '@shared/enums'
+import { PREP_STATUSES, PRODUCTION_STATUSES, type PoStatus, type ProductionStatus } from '@shared/enums'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useI18n } from '@/i18n'
-import { useChangePo, useChangeProduction, useOrder, useUsers } from '@/lib/api'
+import { useChangePo, useChangePrep, useChangeProduction, useOrder, useUsers } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { checkOrderProductionMove } from '../../worker/domain/productionFlow'
 import { allowedPoTransitions } from '../../worker/domain/purchaseOrder'
-import { BTN, BTN_PRIMARY, MutationError as MoveError } from './form'
+import { BTN, BTN_PRIMARY, MutationError as MoveError, Segmented } from './form'
 import { ItemsQuoteTab, NoteComposer, OrderActions, ReadinessCard, DetailsEditor } from './OrderPanels'
 import { ArtworkTab } from './ArtworkTab'
 import { PoTab } from './PoTab'
+import { PurchasingTab } from './PurchasingTab'
 import QueryBoundary from './QueryBoundary'
 import { CARD, Chip, ChipTrigger, MUTED, PAGE, PO_TONE, PRODUCTION_TONE, ARTWORK_TONE, type Tone } from './ui'
 
@@ -133,8 +134,14 @@ function GateBanner({ d, c, openPo }: { d: Detail; c: Controls; openPo: () => vo
 function ProductionTab({ d, c, moves }: { d: Detail; c: Controls; moves: ReturnType<typeof useMoves> }) {
   const { m } = useI18n()
   const s = d.order.productionStatus
+  const prep = useChangePrep(d.order.number)
   return (
     <div className="flex flex-col gap-3 p-4 text-[13px]">
+      <div className="flex flex-col gap-1.5">
+        <Segmented label={m.order.prep.label} value={d.order.prepStatus} options={PREP_STATUSES} labels={m.labels.prepStatus} onChange={(prepStatus) => !prep.isPending && prepStatus !== d.order.prepStatus && prep.mutate({ prepStatus, expectedVersion: d.order.version })} />
+        <span className={MUTED}>{m.order.prep.hint}</span>
+        <MoveError error={prep.error} />
+      </div>
       <div className="flex flex-wrap items-center gap-2"><span className="text-muted-foreground">{m.order.production.current}</span><Chip tone={PRODUCTION_TONE[s]}>{m.labels.productionStatus[s]}</Chip></div>
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-muted-foreground">{m.order.production.moves}</span>
@@ -235,7 +242,7 @@ function Side({ d }: { d: Detail }) {
   )
 }
 
-const TABS = ['items', 'artwork', 'po', 'production', 'activity'] as const
+const TABS = ['items', 'artwork', 'po', 'purchasing', 'production', 'activity'] as const
 type Tab = (typeof TABS)[number]
 
 function Order({ d }: { d: Detail }) {
@@ -243,6 +250,7 @@ function Order({ d }: { d: Detail }) {
   const c: Controls = { po: useChangePo(d.order.number, d.order.version), prod: useChangeProduction(d.order.number, d.order.version) }
   const moves = useMoves(d)
   const [tab, setTab] = useState<Tab>('items')
+  const [autoAdd, setAutoAdd] = useState(false)
   // Products only: charge and discount lines carry a quantity too, but aren't items.
   const qty = d.items.filter((i) => i.kind === 'product').reduce((s, i) => s + i.quantity, 0)
   return (
@@ -276,7 +284,7 @@ function Order({ d }: { d: Detail }) {
       </div>
       <StatusStrip d={d} c={c} moves={moves} />
       <GateBanner d={d} c={c} openPo={() => setTab('po')} />
-      <ReadinessCard d={d} goTab={setTab} po={d.purchaseOrders[0] ? <><PoMenu po={d.purchaseOrders[0]} status={d.purchaseOrders[0].status} mut={c.po} /><MoveError error={c.po.error} /></> : null} />
+      <ReadinessCard d={d} goTab={setTab} addPurchase={() => { setAutoAdd(true); setTab('purchasing') }} po={d.purchaseOrders[0] ? <><PoMenu po={d.purchaseOrders[0]} status={d.purchaseOrders[0].status} mut={c.po} /><MoveError error={c.po.error} /></> : null} />
       <div className="flex flex-wrap items-start gap-4">
         <section className={`${CARD} min-w-0 flex-[999_1_600px]`}>
           <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
@@ -289,6 +297,7 @@ function Order({ d }: { d: Detail }) {
               <ArtworkTab d={d} />
             </TabsContent>
             <TabsContent value="po"><PoTab d={d} menu={(p) => <><PoMenu po={p} status={p.status} mut={c.po} /></>} /><div className="px-4 pb-3 empty:hidden"><MoveError error={c.po.error} /></div></TabsContent>
+            <TabsContent value="purchasing"><PurchasingTab d={d} autoAdd={autoAdd} onAutoAdd={() => setAutoAdd(false)} /></TabsContent>
             <TabsContent value="production"><ProductionTab d={d} c={c} moves={moves} /></TabsContent>
             <TabsContent value="activity"><ActivityTab d={d} /></TabsContent>
           </Tabs>
