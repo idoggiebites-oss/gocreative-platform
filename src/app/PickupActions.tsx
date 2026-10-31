@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { NOTIFICATION_METHODS, type NotificationMethod } from '@shared/enums'
+import { businessToday } from '@shared/businessDate'
 import type { PickupResponse } from '@shared/api'
 import { useI18n } from '@/i18n'
 import { isConflict, useCollectPickup, useMe, useNotifyPickup, usePickup } from '@/lib/api'
@@ -14,10 +15,10 @@ const smPrimary = cn(BTN, BTN_SM, BTN_PRIMARY)
 type Live = { p: PickupResponse; fetching: boolean; onClose: () => void }
 
 function NotifyDialog({ p, fetching, onClose }: Live) {
-  const { m, fmt } = useI18n()
+  const { m } = useI18n()
   const t = m.pickup
   const w = useNotifyPickup(p.number)
-  const ed = useEditSession(p.version, () => ({ on: p.pickup.notifiedOn ?? fmt.todayIso(), method: p.pickup.notificationMethod ?? ('phone' as NotificationMethod), notes: p.pickup.notes ?? '' }), !fetching)
+  const ed = useEditSession(p.version, () => ({ on: p.pickup.notifiedOn ?? businessToday(new Date()), method: p.pickup.notificationMethod ?? ('phone' as NotificationMethod), notes: p.pickup.notes ?? '' }), !fetching)
   const f = ed.values
   const set = (x: Partial<typeof f>) => ed.setValues({ ...f, ...x })
   const st = p.pickup.fulfilmentStatus
@@ -46,7 +47,7 @@ function CollectDialog({ p, fetching, onClose }: Live) {
   const t = m.pickup
   const me = useMe()
   const w = useCollectPickup(p.number)
-  const ed = useEditSession(p.version, () => ({ on: fmt.todayIso(), name: '', notes: p.pickup.notes ?? '', override: false, reason: '' }), !fetching)
+  const ed = useEditSession(p.version, () => ({ on: businessToday(new Date()), name: '', notes: p.pickup.notes ?? '', override: false, reason: '' }), !fetching)
   const f = ed.values
   const set = (x: Partial<typeof f>) => ed.setValues({ ...f, ...x })
   const st = p.pickup.fulfilmentStatus

@@ -81,7 +81,7 @@ function Outstanding({ rows }: { rows: OutstandingRow[] }) {
                     <td className={`${TD} num`}>{fmt.money(r.receivedCents)}</td>
                     <td className={`${TD} num font-semibold`}>{money(r.outstandingCents)}</td>
                     <td className={TD}>{m.labels.paymentTerms[r.paymentTerms]}</td>
-                    <td className={`${TD} num`}>{r.paymentDueOn ? fmt.date(r.paymentDueOn) : t.atPickup}</td>
+                    <td className={`${TD} num`}>{r.paymentDueOn ? fmt.date(r.paymentDueOn) : t.notSet}</td>
                     <td className={`${TD} num`}>{r.daysOutstanding ?? m.common.dash}</td>
                     <td className={TD}>{r.collectionStatus ? <Chip tone={CHECK_TONE[r.collectionStatus]}>{m.labels.checkStatus[r.collectionStatus]}</Chip> : <span className="text-muted-foreground">{t.noCollection}</span>}</td>
                     <td className={TD}>{m.labels.paymentNextAction[r.nextAction]}</td>

@@ -288,7 +288,7 @@ test('phone: the Payments tab, the Payments page and the dashboard fit 390px and
     await expect(page.getByRole('region', { name: lang === 'en' ? 'Ready for pickup' : 'Listos para entrega', exact: true })).toBeVisible()
     await fits(page)
     await page.goto('/app/payments')
-    await expect(page.getByRole('heading', { name: lang === 'en' ? 'Checks to collect' : 'Cheques por cobrar' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: lang === 'en' ? 'Checks to collect' : 'Cheques por recoger' })).toBeVisible()
     await fits(page)
     await open(page, regular, lang === 'en' ? 'Payments' : 'Pagos')
     await expect(page.getByRole('list', { name: lang === 'en' ? 'Payments received' : 'Pagos recibidos' })).toBeVisible()
@@ -325,4 +325,180 @@ test('Spanish: the Pickup and Payments tabs and the pickup dialog', async ({ pag
   await page.getByRole('button', { name: 'Registrar pago', exact: true }).click()
   await expect(dialog(page).getByLabel('Monto')).toBeVisible()
   await expect(dialog(page).getByLabel('Método')).toBeVisible()
+})
+
+// Codex review of the M5 UI.
+/** POSTs to an order's /payments: records each request body; `lose(n)` true means the server gets the request but the page sees a network failure. */
+async function watchPayments(page: Page, n: string, lose: (call: number) => boolean) {
+  const bodies: { requestId: string; amountCents: number }[] = []
+  await page.route(`**/api/app/orders/${n}/payments`, async (route) => {
+    if (route.request().method() !== 'POST') return route.fallback()
+    bodies.push(route.request().postDataJSON())
+    if (lose(bodies.length)) { await route.fetch(); return route.abort('failed') }
+    return route.continue()
+  })
+  return bodies
+}
+const payOnce = async (page: Page, amount: string) => {
+  await page.getByRole('button', { name: 'Record payment', exact: true }).click()
+  await dialog(page).getByLabel('Amount').fill(amount)
+  await submit(page, 'Record payment').click()
+}
+
+test('a lost response keeps the retry identity across close and reopen: one payment, same requestId', async ({ page }, info) => {
+  desktopOnly(info)
+  const n = await completeOrder(page, 'Lost response')
+  await open(page, n, 'Payments')
+  const bodies = await watchPayments(page, n, (c) => c === 1)
+  await payOnce(page, '5.00')
+  await expect(dialog(page).getByRole('alert')).toBeVisible()
+  await dialog(page).getByRole('button', { name: 'Cancel' }).click()
+  await payOnce(page, '5.00')
+  await expect(dialog(page)).toHaveCount(0)
+  expect(bodies).toHaveLength(2)
+  expect(bodies[1].requestId).toBe(bodies[0].requestId)
+  const p = await paymentsOf(page, n)
+  expect(p.payments).toHaveLength(1)
+  expect(p.balance.receivedCents).toBe(500)
+})
+
+test('the Payments page quick action shares the retry identity with the tab', async ({ page }, info) => {
+  desktopOnly(info)
+  const n = await completeOrder(page, 'Lost via page', { paymentTerms: 'due_at_pickup' })
+  await open(page, n, 'Payments')
+  const bodies = await watchPayments(page, n, (c) => c === 1)
+  await payOnce(page, '5.00')
+  await expect(dialog(page).getByRole('alert')).toBeVisible()
+  await dialog(page).getByRole('button', { name: 'Cancel' }).click()
+  await page.getByRole('link', { name: 'Payments', exact: true }).first().click() // in-app navigation: a full reload would drop the pending submission, as it should
+  await expect(page).toHaveURL(/\/app\/payments$/)
+  await btn(page, 'Record payment', n).click()
+  await dialog(page).getByLabel('Amount').fill('5.00')
+  await submit(page, 'Record payment').click()
+  await expect(dialog(page)).toHaveCount(0)
+  expect(bodies[1].requestId).toBe(bodies[0].requestId)
+  expect((await paymentsOf(page, n)).payments).toHaveLength(1)
+})
+
+test('changed details after a lost response are a new submission', async ({ page }, info) => {
+  desktopOnly(info)
+  const n = await completeOrder(page, 'New id')
+  await open(page, n, 'Payments')
+  const bodies = await watchPayments(page, n, (c) => c === 1)
+  await payOnce(page, '5.00')
+  await expect(dialog(page).getByRole('alert')).toBeVisible()
+  await dialog(page).getByLabel('Amount').fill('6.00')
+  await submit(page, 'Record payment').click()
+  // The lost 5.00 was saved, so the order moved on under this dialog: a conflict notice, not a duplicate.
+  await expect(dialog(page).getByRole('status').filter({ hasText: 'Someone else changed this' })).toBeVisible()
+  expect(bodies).toHaveLength(2)
+  expect(bodies[1].amountCents).toBe(600)
+  expect(bodies[1].requestId).not.toBe(bodies[0].requestId)
+  expect((await paymentsOf(page, n)).payments).toHaveLength(1)
+})
+
+test('two identical successful payments are both recorded, each with its own requestId', async ({ page }, info) => {
+  desktopOnly(info)
+  const n = await completeOrder(page, 'Twice')
+  await open(page, n, 'Payments')
+  const bodies = await watchPayments(page, n, () => false)
+  await payOnce(page, '3.00')
+  await expect(dialog(page)).toHaveCount(0)
+  await payOnce(page, '3.00')
+  await expect(dialog(page)).toHaveCount(0)
+  expect(bodies).toHaveLength(2)
+  expect(bodies[1].requestId).not.toBe(bodies[0].requestId)
+  const p = await paymentsOf(page, n)
+  expect(p.payments).toHaveLength(2)
+  expect(p.balance.receivedCents).toBe(600)
+})
+
+test('conflict recovery waits for a SUCCESSFUL payments refresh: a failed one keeps Save blocked', async ({ page }, info) => {
+  desktopOnly(info)
+  const n = await completeOrder(page, 'Failed refetch')
+  await open(page, n, 'Payments')
+  await page.getByRole('button', { name: 'Record payment', exact: true }).click()
+  await dialog(page).getByLabel('Amount').fill('3.00')
+  const other = await page.context().newPage()
+  await payViaApi(other, n, 500)
+  await other.close()
+  await page.route(`**/api/app/orders/${n}/payments`, (r) => (r.request().method() === 'GET' ? r.fulfill({ status: 500, body: '{}' }) : r.fallback()))
+  await submit(page, 'Record payment').click()
+  await expect(dialog(page).getByRole('status').filter({ hasText: 'Someone else changed this' })).toBeVisible()
+  await page.waitForTimeout(1500)
+  await expect(submit(page, 'Record payment')).toBeDisabled()
+  await page.unroute(`**/api/app/orders/${n}/payments`)
+  await page.evaluate("window.dispatchEvent(new Event('visibilitychange'))")
+  await expect(dialog(page).getByLabel('Amount')).toHaveValue('15.00')
+  await expect(submit(page, 'Record payment')).toBeEnabled()
+})
+
+test('Record collection is offered straight from awaiting payment', async ({ page }, info) => {
+  desktopOnly(info)
+  const n = await completeOrder(page, 'Direct collect', { paymentTerms: 'due_after_pickup' })
+  const id = await checkViaApi(page, n, 2000, false)
+  await open(page, n, 'Payments')
+  const row = page.getByRole('list', { name: 'Checks' }).getByRole('listitem')
+  await expect(row.getByText('Awaiting payment')).toBeVisible()
+  await row.getByRole('button', { name: /^Record collection:/ }).click()
+  await submit(page, 'Record collection').click()
+  await expect(row.getByText('Collected', { exact: true }).first()).toBeVisible()
+  expect((await paymentsOf(page, n)).checks.find((k) => k.id === id)!.status).toBe('collected')
+})
+
+test('a failed one-click check move shows its error', async ({ page }, info) => {
+  desktopOnly(info)
+  const n = await completeOrder(page, 'Deposit fails', { paymentTerms: 'due_after_pickup' })
+  const id = await checkViaApi(page, n, 2000, true)
+  expect((await page.request.post(`/api/app/checks/${id}/collect`, { data: { amountReceivedCents: 2000 } })).ok()).toBe(true)
+  await page.route(`**/api/app/checks/${id}/deposit`, (r) => r.fulfill({ status: 500, body: '{}' }))
+  await open(page, n, 'Payments')
+  const row = page.getByRole('list', { name: 'Checks' }).getByRole('listitem')
+  await row.getByRole('button', { name: /^Mark deposited:/ }).click()
+  await expect(row.getByRole('alert')).toBeVisible()
+  await expect(row.getByText('Collected', { exact: true }).first()).toBeVisible()
+})
+
+test('an order with no due date shows a dash-style "Not set" on the Payments page, not "At pickup"', async ({ page }, info) => {
+  desktopOnly(info)
+  const n = await completeOrder(page, 'No due date', { paymentTerms: 'due_after_pickup' })
+  await page.goto('/app/payments')
+  const row = page.getByRole('region', { name: 'Outstanding', exact: true }).locator(`[data-order="${n}"]`)
+  await expect(row.locator('td').nth(6)).toHaveText('Not set')
+  await expect(row).not.toContainText('At pickup')
+})
+
+test('phone: the override and check-collection dialogs keep Save and Cancel reachable, and Escape returns focus to the opener', async ({ page }, info) => {
+  test.skip(info.project.name !== 'phone')
+  const reachable = async (name: string) => {
+    for (const b of [submit(page, name), dialog(page).getByRole('button', { name: 'Cancel' })]) {
+      await b.scrollIntoViewIfNeeded()
+      const box = (await b.boundingBox())!
+      const vp = page.viewportSize()!
+      expect(box.y).toBeGreaterThanOrEqual(0)
+      expect(box.y + box.height).toBeLessThanOrEqual(vp.height)
+      expect(box.x + box.width).toBeLessThanOrEqual(vp.width)
+    }
+  }
+  const n = await completeOrder(page, 'Phone override', { paymentTerms: 'due_at_pickup' })
+  await open(page, n, 'Pickup')
+  const opener = btn(page, 'Record pickup', n)
+  await opener.click()
+  await dialog(page).getByRole('button', { name: 'Release anyway (override)' }).click()
+  await dialog(page).getByLabel('Reason for releasing it unpaid').fill('Customer will pay by mail. '.repeat(18))
+  await reachable('Record pickup')
+  await fits(page)
+  await page.keyboard.press('Escape')
+  await expect(dialog(page)).toHaveCount(0)
+  await expect(opener).toBeFocused()
+
+  const district = await completeOrder(page, 'Phone check', { paymentTerms: 'due_after_pickup' })
+  await checkViaApi(page, district, 2000, true)
+  await open(page, district, 'Payments')
+  const collect = page.getByRole('button', { name: /^Record collection:/ })
+  await collect.click()
+  await reachable('Record collection')
+  await page.keyboard.press('Escape')
+  await expect(dialog(page)).toHaveCount(0)
+  await expect(collect).toBeFocused()
 })

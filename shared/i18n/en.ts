@@ -663,7 +663,7 @@ export const en = {
       check: 'Check #', expected: 'Expected', available: 'Available', status: 'Status',
     },
     noCollection: 'No check yet',
-    atPickup: 'At pickup',
+    notSet: 'Not set',
     checksToCollect: 'Checks to collect',
     checksToCollectEmpty: 'No check is ready to collect.',
     awaiting: 'Awaiting payment',

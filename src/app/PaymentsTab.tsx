@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { businessToday } from '@shared/businessDate'
 import type { CheckRecord, PaymentRecord, PaymentsResponse } from '@shared/api'
 import { PAYMENT_METHODS, type PaymentMethod } from '@shared/enums'
 import { formatCentsPlain, parseDollarsToCents } from '@shared/money'
@@ -16,11 +17,11 @@ type Live = { d: PaymentsResponse; fetching: boolean; onClose: () => void }
 const cents = (v: string) => { const c = parseDollarsToCents(v); return c !== null && c >= 1 ? c : null }
 
 function PaymentForm({ d, fetching, onClose }: Live) {
-  const { m, fmt } = useI18n()
+  const { m } = useI18n()
   const t = m.pay
   const w = useRecordPayment(d.number)
   const ed = useEditSession(d.version, () => ({
-    amount: d.balance.outstandingCents ? formatCentsPlain(d.balance.outstandingCents) : '', method: 'check' as PaymentMethod, on: fmt.todayIso(), notes: '',
+    amount: d.balance.outstandingCents ? formatCentsPlain(d.balance.outstandingCents) : '', method: 'check' as PaymentMethod, on: businessToday(new Date()), notes: '',
   }), !fetching)
   const f = ed.values
   const set = (x: Partial<typeof f>) => ed.setValues({ ...f, ...x })
