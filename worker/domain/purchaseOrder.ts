@@ -17,3 +17,6 @@ export function checkPoTransition(from: PoStatus, to: PoStatus): { ok: true } | 
     ? { ok: true }
     : { ok: false, error: `Invalid PO transition: ${from} to ${to}` }
 }
+
+/** The targets checkPoTransition would accept from `from`; the UI lists these in its status menu. */
+export const allowedPoTransitions = (from: PoStatus): readonly PoStatus[] => transitions[from]

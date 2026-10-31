@@ -100,3 +100,9 @@ export type ProductionChangeResponse = { number: string; productionStatus: Produ
 export type PoChangeRequest = { to: PoStatus }
 export type PoChangeResponse = { poId: number; status: PoStatus; productionStatus: ProductionStatus }
 export type ApiError = { error: string; reasons?: string[] }
+
+// Codes the UI translates. Unknown codes fall back to a generic label, so the API can add one first.
+export const ACTIVITY_ACTIONS = ['created', 'production_status', 'production_status_changed', 'po_status_changed'] as const
+export type ActivityAction = (typeof ACTIVITY_ACTIONS)[number]
+export const GATE_REASON_CODES = ['order_not_active', 'artwork_not_approved', 'po_missing', 'po_not_approved', 'not_authorized'] as const
+export type GateReasonCode = (typeof GATE_REASON_CODES)[number]

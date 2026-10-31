@@ -25,6 +25,22 @@ export function makeFormat(lang: Lang) {
       const [y, m, d] = isoDate.slice(0, 10).split('-').map(Number)
       return new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' }).format(new Date(y, m - 1, d))
     },
+    /** Today as a local 'YYYY-MM-DD', the same shape as an order's due date. */
+    todayIso: () => {
+      const n = new Date()
+      return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`
+    },
+    longDate: (d: Date) => new Intl.DateTimeFormat(locale, { weekday: 'long', month: 'long', day: 'numeric' }).format(d),
+    weekdayDate: (isoDate: string) => {
+      const [y, m, d] = isoDate.slice(0, 10).split('-').map(Number)
+      return new Intl.DateTimeFormat(locale, { weekday: 'short', month: 'short', day: 'numeric' }).format(new Date(y, m - 1, d))
+    },
+    /** 'Sun 1': weekday and day of month, for grouping a week. */
+    dayLabel: (isoDate: string) => {
+      const [y, m, d] = isoDate.slice(0, 10).split('-').map(Number)
+      const date = new Date(y, m - 1, d)
+      return `${new Intl.DateTimeFormat(locale, { weekday: 'short' }).format(date)} ${d}`
+    },
     relative: (iso: string) => {
       const s = (new Date(iso).getTime() - Date.now()) / 1000
       const steps: [Intl.RelativeTimeFormatUnit, number][] = [['day', 86400], ['hour', 3600], ['minute', 60]]
