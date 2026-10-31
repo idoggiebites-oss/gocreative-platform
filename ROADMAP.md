@@ -38,8 +38,7 @@ Codex reviews the phase diff read-only before merge.
 - An order's contact and an artwork's order must belong to the same customer.
   Enforce this in the order and artwork routes, with negative tests. (Codex
   review of 1.2; ownership triggers were deliberately not added.)
-- Before real orders go in: wipe the sample data from the remote DB (keep the
-  `users` rows for ids 1 and 2).
+- Done 2026-10-30: the sample data was wiped from the remote DB (users kept).
 - Polish: in Spanish at 1440px the orders table's Estimate column overflows its card
   by a few pixels (scrolls inside it). Shorten the long ES chip labels or tighten columns.
 - Focus is lost after the "Record approval" button or a production-tab button

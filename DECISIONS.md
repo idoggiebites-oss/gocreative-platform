@@ -123,3 +123,8 @@ Production and Payments, plus a Payments item in the sidebar. Source is in
 "Phase 2 — for review" row). M1–M5 UI is built to them. They are static drafts:
 drag-to-reorder, toggles and live totals are shown in one state and get their
 real behaviour in the build.
+
+### 2026-10-30 — Remote sample data wiped (Arturo: "go ahead with the wipe")
+Done per PHASE2_PLAN §4.6: backup and evidence first, counts re-checked, users
+kept. Details are in [notes/remote-sample-wipe.md](notes/remote-sample-wipe.md).
+The live dashboard is empty until M1 lets staff create customers and orders.

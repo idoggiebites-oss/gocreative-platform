@@ -1,6 +1,6 @@
 # Wiping the remote sample data (PHASE2_PLAN §4.6)
 
-**Status:** evidence gathered 2026-10-30. **Not wiped.** Waiting for Arturo's explicit go.
+**Status:** wiped 2026-10-30 after Arturo's explicit go ("go ahead with the wipe").
 
 ## Backup taken (2026-10-30, 19:56 CT)
 
@@ -29,3 +29,14 @@ Re-check the counts first (a row created after this note means real use began), 
 delete every table except `users`, children before parents, in one `--file` run, with
 the `activity_log_no_delete` trigger dropped and recreated around its delete (as
 `scripts/seed.sql` does). Then reset `counters`.
+
+## Done (2026-10-30)
+
+Counts were re-checked just before the wipe and were identical to the evidence (2/8/24/40,
+newest row = the seed run). One `--file` run, 15 statements, `success: true`. After:
+users 2, every other table 0, `counters` empty. All three `activity_log` triggers are present
+(`no_update`, `no_replace`, `no_delete`). Live `/app` still redirects anonymous visitors to
+Access.
+
+`counters` is empty on purpose: the M1 order-creation write must create the year's
+row on first use (INSERT … ON CONFLICT DO UPDATE … RETURNING), not assume it exists.
