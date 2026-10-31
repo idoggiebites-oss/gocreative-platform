@@ -173,8 +173,8 @@ describe('the SQL guards', () => {
     t.sqlite.exec(`INSERT INTO payments (order_id, amount_cents, method, paid_on, recorded_by, request_id) VALUES (19, 156600, 'cash', '2026-10-30', 1, 'full')`)
     t.sqlite.exec(`INSERT INTO pickups (order_id, ready_on, picked_up_on, collected_by_name, completed_by) VALUES (19, '2026-10-30', '2026-10-31', 'X', 1)`)
     // …but a void (not counted) leaves it owing again: the same insert on an unpaid order is refused.
+    t.sqlite.exec(`UPDATE orders SET payment_terms = 'due_at_pickup' WHERE id = 4`) // terms first: they lock at production_complete (0007)
     t.sqlite.exec(`UPDATE orders SET production_status = 'production_complete' WHERE id = 4`)
-    t.sqlite.exec(`UPDATE orders SET payment_terms = 'due_at_pickup' WHERE id = 4`)
     t.sqlite.exec(`INSERT INTO payments (order_id, amount_cents, method, paid_on, recorded_by, request_id) VALUES (4, 73000, 'cash', '2026-10-30', 1, 'void-me')`)
     t.sqlite.exec(`UPDATE payments SET voided_at = 'now', voided_by = 1, void_reason = 'bounced' WHERE request_id = 'void-me'`)
     expect(() => t.sqlite.exec(`INSERT INTO pickups (order_id, ready_on, picked_up_on, collected_by_name, completed_by) VALUES (4, '2026-10-30', '2026-10-31', 'X', 1)`)).toThrow(/payment_required/)
@@ -187,5 +187,20 @@ describe('the SQL guards', () => {
     expect(() => t.sqlite.exec(`UPDATE pickups SET notified_on = '2026-02-30', notification_method = 'phone' WHERE order_id = 20`)).toThrow(/CHECK constraint failed/)
     expect(() => t.sqlite.exec(`UPDATE pickups SET notified_on = '2026-10-30', notification_method = NULL WHERE order_id = 20`)).toThrow(/CHECK constraint failed/)
     expect(() => t.sqlite.exec(`UPDATE pickups SET notification_method = 'pigeon' WHERE order_id = 20`)).toThrow(/CHECK constraint failed/)
+  })
+})
+
+describe('payment terms can\'t be used to skip the owner\'s release override (Codex Phase 2 security review)', () => {
+  test('staff can\'t relax an order to pay-after-pickup; nobody can change terms once production is complete, at the route or in SQL', async () => {
+    const t = setup()
+    // 2026-0020: pay at pickup, production complete, unpaid.
+    const v = () => t.o('2026-0020').version
+    const before = t.footprint()
+    expect(await t.call('PATCH', '/orders/2026-0020', { paymentTerms: 'due_after_pickup', expectedVersion: v() }, STAFF)).toMatchObject({ status: 403, body: { code: 'payment_terms_owner_only' } })
+    expect(await t.call('PATCH', '/orders/2026-0020', { paymentTerms: 'due_after_pickup', expectedVersion: v() })).toMatchObject({ status: 409, body: { code: 'payment_terms_locked' } })
+    expect(t.footprint()).toEqual(before)
+    expect(() => t.sqlite.exec(`UPDATE orders SET payment_terms = 'due_after_pickup' WHERE number = '2026-0020'`)).toThrow(/payment_terms_locked/)
+    // Staff pickup of the unpaid order is still refused.
+    expect((await t.call('POST', '/orders/2026-0020/pickup/collect', { collectedByName: 'X', expectedVersion: v() }, STAFF)).status).toBe(409)
   })
 })
