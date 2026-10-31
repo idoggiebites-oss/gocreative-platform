@@ -15,8 +15,8 @@ import { fileRoutes } from '../files'
 /**
  * Writes must come from this site (Codex Phase 2 security review). The Access cookie rides along on a cross-site
  * request, so a valid JWT proves who, not intent: any unsafe method whose Origin is another site, or whose
- * Sec-Fetch-Site says cross-site/same-site, is refused before auth. Browsers always send Origin on a cross-origin
- * POST; requests without either header (curl, tests) aren't a browser riding a cookie.
+ * Sec-Fetch-Site says cross-site/same-site, is refused before auth. Browsers send Origin on a cross-origin POST (as
+ * `null` when the page hides it, refused too); requests without either header (curl, tests) aren't a browser riding a cookie.
  */
 const sameOriginWrites: MiddlewareHandler = async (c, next) => {
   if (!/^(GET|HEAD|OPTIONS)$/.test(c.req.method)) {
