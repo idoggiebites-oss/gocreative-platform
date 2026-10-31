@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import { ARTWORK_APPROVAL, ORDER_STATES, PO_STATUSES, PREP_STATUSES, QUOTE_STATUSES } from '../../shared/enums'
-import type { ArtworkApproval, OrderState, PoStatus, PrepStatus, QuoteStatus } from '../../shared/enums'
+import type { ArtworkApproval, OrderState, PoStatus, PrepStatus, PurchaseStoredStatus, QuoteStatus } from '../../shared/enums'
 import { orderArtworkStatus, readiness, type ReadinessInput } from '../../worker/domain/readiness'
 import { ARTWORK_STATUS, GATE_OK, PRE_PRODUCTION, getOrderByNumber, readinessInput } from '../../worker/db/orders'
 import { createTestD1 } from './d1'
@@ -17,7 +17,10 @@ import { createTestD1 } from './d1'
 type Quote = { status: QuoteStatus; match: boolean; products: 0 | 1; prior: boolean } | null
 type Artwork = { required: boolean; designs: ArtworkApproval[][] } // each design: its versions, oldest first
 type Auth = { poRequired: boolean; po: PoStatus | null; authorized: boolean }
-type Case = { state: OrderState; quote: Quote; artwork: Artwork; auth: Auth; materialsRequired: boolean; prep: PrepStatus }
+// Each purchase: its stored status, quantity and receipt quantities (recorded while ordered, then cancelled if so).
+type Purchase = { status: PurchaseStoredStatus; quantity: number; receipts: number[] }
+type Materials = { required: boolean; purchases: Purchase[] }
+type Case = { state: OrderState; quote: Quote; artwork: Artwork; auth: Auth; materials: Materials; prep: PrepStatus }
 
 const quotes: Quote[] = [null]
 for (const status of QUOTE_STATUSES) for (const match of [true, false]) for (const products of [0, 1] as const) for (const prior of [false, true]) quotes.push({ status, match, products, prior })
@@ -30,18 +33,30 @@ const designSets: ArtworkApproval[][][] = [
 const artworks: Artwork[] = [true, false].flatMap((required) => designSets.map((designs) => ({ required, designs })))
 const auths: Auth[] = [false, true].flatMap((poRequired) => [null, ...PO_STATUSES].flatMap((po) => [false, true].map((authorized) => ({ poRequired, po, authorized }))))
 
+const P = (status: PurchaseStoredStatus, quantity: number, ...receipts: number[]): Purchase => ({ status, quantity, receipts })
+const purchaseSets: Purchase[][] = [
+  [], [P('not_ordered', 10)],
+  [P('ordered', 10)], [P('ordered', 10, 4)], [P('ordered', 10, 4, 6)], [P('ordered', 10, 12)],
+  // Cancelled-only counts as no purchase; a cancelled one's receipts never satisfy anything else.
+  [P('cancelled', 10)], [P('cancelled', 10, 3)],
+  [P('cancelled', 10), P('ordered', 5, 5)], [P('cancelled', 10, 2), P('ordered', 5, 2, 3)], [P('cancelled', 10, 10), P('ordered', 5, 4)],
+  // One unmet purchase blocks the rest, including one not ordered yet.
+  [P('ordered', 5, 5), P('not_ordered', 3)], [P('ordered', 5, 5), P('ordered', 5, 1)], [P('ordered', 5, 9), P('ordered', 5, 1)],
+]
+const materialsSets: Materials[] = [true, false].flatMap((required) => purchaseSets.map((purchases) => ({ required, purchases })))
+
 const ok = { quote: { status: 'accepted', match: true, products: 1, prior: false } as Quote, artwork: { required: true, designs: [['approved']] } as Artwork,
-  auth: { poRequired: false, po: null, authorized: true } as Auth, materialsRequired: false, prep: 'ready' as PrepStatus }
+  auth: { poRequired: false, po: null, authorized: true } as Auth, materials: { required: true, purchases: [P('ordered', 10, 10)] } as Materials, prep: 'ready' as PrepStatus }
 const bad = { quote: null as Quote, artwork: { required: true, designs: [] } as Artwork,
-  auth: { poRequired: true, po: null, authorized: true } as Auth, materialsRequired: true, prep: 'not_started' as PrepStatus }
-const options = { quote: quotes, artwork: artworks, auth: auths, materialsRequired: [false, true], prep: [...PREP_STATUSES] }
+  auth: { poRequired: true, po: null, authorized: true } as Auth, materials: { required: true, purchases: [] } as Materials, prep: 'not_started' as PrepStatus }
+const options = { quote: quotes, artwork: artworks, auth: auths, materials: materialsSets, prep: [...PREP_STATUSES] }
 
 const cases: Case[] = []
 for (const state of ORDER_STATES) {
   for (const background of [ok, bad]) for (const [key, values] of Object.entries(options)) for (const v of values) cases.push({ state, ...background, [key]: v })
   for (let mask = 0; mask < 32; mask++) {
     const pick = <K extends keyof typeof ok>(bit: number, k: K) => ((mask >> bit) & 1 ? ok[k] : bad[k])
-    cases.push({ state, quote: pick(0, 'quote'), artwork: pick(1, 'artwork'), auth: pick(2, 'auth'), materialsRequired: pick(3, 'materialsRequired'), prep: pick(4, 'prep') })
+    cases.push({ state, quote: pick(0, 'quote'), artwork: pick(1, 'artwork'), auth: pick(2, 'auth'), materials: pick(3, 'materials'), prep: pick(4, 'prep') })
   }
 }
 
@@ -55,8 +70,8 @@ const domainInput = (c: Case): ReadinessInput => ({
   poRequired: c.auth.poRequired,
   latestPo: c.auth.po && { status: c.auth.po },
   authorizedAt: c.auth.authorized ? '2026-10-01T00:00:00Z' : null,
-  materialsRequired: c.materialsRequired,
-  purchases: [],
+  materialsRequired: c.materials.required,
+  purchases: c.materials.purchases.map((p) => ({ storedStatus: p.status, quantity: p.quantity, receivedQuantity: p.receipts.reduce((a, b) => a + b, 0) })),
   prepStatus: c.prep,
 })
 
@@ -80,7 +95,7 @@ test('SQL readiness, the DB loader and readiness() agree across the input space'
     const number = `T-${n}`
     const orderId = Number(run(`INSERT INTO orders (number, customer_id, source, title, state, po_required, authorized_at, artwork_required, materials_required, prep_status, items_revision)
       VALUES (?, 1, 'phone', 't', ?, ?, ?, ?, ?, ?, ?)`, number, c.state, c.auth.poRequired ? 1 : 0, c.auth.authorized ? '2026-10-01T00:00:00Z' : null,
-      c.artwork.required ? 1 : 0, c.materialsRequired ? 1 : 0, c.prep, REVISION).lastInsertRowid)
+      c.artwork.required ? 1 : 0, c.materials.required ? 1 : 0, c.prep, REVISION).lastInsertRowid)
     if (c.quote) {
       // An older version that would satisfy readiness on its own, so "current = highest version" is what's tested.
       if (c.quote.prior) addQuote(orderId, 1, REVISION, ['product'], c.quote.status === 'accepted' ? 'superseded' : 'accepted')
@@ -107,6 +122,13 @@ test('SQL readiness, the DB loader and readiness() agree across the input space'
       run("INSERT INTO purchase_orders (order_id, po_number, status) VALUES (?, 'NEW', ?)", orderId, c.auth.po)
     }
 
+    for (const p of c.materials.purchases) {
+      const id = Number(run("INSERT INTO order_purchases (order_id, supplier_id, description, quantity) VALUES (?, 1, 'Tees', ?)", orderId, p.quantity).lastInsertRowid)
+      if (p.status === 'not_ordered') continue
+      run("UPDATE order_purchases SET status = 'ordered', ordered_on = '2026-10-01' WHERE id = ?", id)
+      for (const q of p.receipts) run("INSERT INTO purchase_receipts (purchase_id, quantity, received_on) VALUES (?, ?, '2026-10-02')", id, q)
+      if (p.status === 'cancelled') run("UPDATE order_purchases SET status = 'cancelled' WHERE id = ?", id)
+    }
     const input = domainInput(c)
     const expected = readiness(input)
     const row = read.get(orderId) as { ok: number; pre: string; art: string }
@@ -116,6 +138,7 @@ test('SQL readiness, the DB loader and readiness() agree across the input space'
     expect(row.art, label).toBe(orderArtworkStatus(input.artworkRequired, input.designs))
     const loaded = await readinessInput(db, (await getOrderByNumber(db, number))!)
     expect(loaded.quote, label).toEqual(input.quote)
+    expect(loaded.purchases, label).toEqual(input.purchases)
     expect(readiness(loaded), label).toEqual(expected)
     checked++
   }

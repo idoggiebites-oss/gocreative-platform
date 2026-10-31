@@ -25,3 +25,22 @@ export function purchaseStatus(purchase: Purchase, receipts: readonly { quantity
     : receivedQuantity >= purchase.quantity ? 'received' : receivedQuantity > 0 ? 'partially_received' : 'ordered'
   return { ok: true, status, receivedQuantity, overReceived: receivedQuantity > purchase.quantity }
 }
+
+// Which fields staff may change, by stored status. Before ordering everything is a draft; once ordered only what is
+// learned afterwards (the invoice's actual cost, a new arrival date, notes); a cancelled purchase is closed.
+export const PURCHASE_FIELDS = ['supplierId', 'description', 'quantity', 'sizes', 'estimatedUnitCostCents', 'actualUnitCostCents', 'expectedOn', 'notes'] as const
+export type PurchaseField = (typeof PURCHASE_FIELDS)[number]
+const EDITABLE: Record<PurchaseStoredStatus, readonly PurchaseField[]> = {
+  not_ordered: PURCHASE_FIELDS,
+  ordered: ['actualUnitCostCents', 'expectedOn', 'notes'],
+  cancelled: [],
+}
+export function checkPurchaseEdit(storedStatus: PurchaseStoredStatus, fields: readonly PurchaseField[]): { ok: true } | Failure {
+  return fields.every(f => EDITABLE[storedStatus].includes(f)) ? { ok: true } : { ok: false, error: 'purchase_locked' }
+}
+// The app never buys anything: 'ordered' is staff confirming they bought it. Mirrors the order_purchases_status_move trigger.
+export function checkPurchaseTransition(from: PurchaseStoredStatus, to: 'ordered' | 'cancelled'): { ok: true } | Failure {
+  return from === 'not_ordered' || (from === 'ordered' && to === 'cancelled') ? { ok: true } : { ok: false, error: 'purchase_transition_not_allowed' }
+}
+/** quantity × unit cost, or null while the unit cost is unknown. */
+export const purchaseTotal = (quantity: number, unitCents: number | null) => (unitCents === null ? null : quantity * unitCents)

@@ -3,7 +3,7 @@
 import { METHODS, PRODUCTION_STATUSES } from '../../shared/enums'
 import type {
   ArtworkApproval, AuthorizationMethod, CustomerKind, ItemKind, Method, OrderArtworkStatus, OrderSource, OrderState,
-  PaymentTerms, PoStatus, PrepStatus, ProductionStatus, QuoteStatus,
+  PaymentTerms, PoStatus, PrepStatus, ProductionStatus, PurchaseStoredStatus, QuoteStatus,
 } from '../../shared/enums'
 import type { ActivityAction, InquiryListRow, OrderCounts, OrderDetailResponse, OrderListRow, OrderView } from '../../shared/api'
 import type { DashInquiry, DashOrder } from '../domain/dashboard'
@@ -34,8 +34,11 @@ export const ARTWORK_STATUS = `(CASE WHEN orders.artwork_required = 0 THEN 'not_
   WHEN EXISTS (SELECT 1 FROM ${CURRENT_ARTWORK} AND a.approval_status = 'under_review') THEN 'under_review'
   ELSE 'approved' END)`
 const ARTWORK_OK = `(${ARTWORK_STATUS} IN ('approved','not_required'))`
-// ponytail: purchases arrive in M3 (migration 0003); until then materials are met only when not required.
-const MATERIALS_OK = `(orders.materials_required = 0)`
+// Materials: not required ("No purchasing needed"), or at least one non-cancelled purchase and every non-cancelled
+// purchase received in full (receipts summed; a not_ordered purchase has none, so it blocks). Over-receiving counts as met.
+const LIVE_PURCHASE = `order_purchases p WHERE p.order_id = orders.id AND p.status <> 'cancelled'`
+const MATERIALS_OK = `(orders.materials_required = 0 OR (EXISTS (SELECT 1 FROM ${LIVE_PURCHASE})
+  AND NOT EXISTS (SELECT 1 FROM ${LIVE_PURCHASE} AND (SELECT COALESCE(SUM(r.quantity), 0) FROM purchase_receipts r WHERE r.purchase_id = p.id) < p.quantity)))`
 const PREP_OK = `(orders.prep_status IN ('ready','not_required'))`
 /** SQL twin of readiness().ready. */
 export const GATE_OK = `(orders.state = 'active' AND ${QUOTE_OK} AND ${AUTH_OK} AND ${ARTWORK_OK} AND ${MATERIALS_OK} AND ${PREP_OK})`
@@ -99,7 +102,8 @@ const VIEW_WHERE: Record<Exclude<OrderView, 'inquiries'>, string> = {
 const ACTIVITY_KEYS = ['production_status', 'state', 'po_status', 'po_id', 'artwork_status', 'reason', 'items_revision', 'quote_version',
   'quote_status', 'order_number', 'repeat_of', 'authorization_method', 'fields',
   'title', 'due_date', 'contact_id', 'source', 'po_required', 'payment_terms', 'artwork_required', 'materials_required', 'assignee_id',
-  'artwork_id', 'lineage_id', 'artwork_version', 'design_name', 'approval_status', 'approved_via', 'po_number', 'amount_cents']
+  'artwork_id', 'lineage_id', 'artwork_version', 'design_name', 'approval_status', 'approved_via', 'po_number', 'amount_cents',
+  'purchase_id', 'purchase_status', 'supplier_name', 'description', 'quantity', 'ordered_on', 'received_on', 'prep_status']
 
 const likeEscape = (q: string) => q.replace(/[\\%_]/g, (ch) => `\\${ch}`)
 
@@ -243,7 +247,7 @@ const latestPoFor = async (db: D1Database, orderId: number) =>
 
 /** Everything readiness() needs, read from the database with the same definitions as the SQL twin above. */
 export async function readinessInput(db: D1Database, o: OrderRow): Promise<ReadinessInput> {
-  const [quote, designs, po] = await Promise.all([
+  const [quote, designs, po, purchases] = await Promise.all([
     db.prepare(`SELECT q.status, q.items_revision,
         (SELECT COUNT(*) FROM quote_items qi WHERE qi.quote_id = q.id AND qi.kind = 'product') AS product_lines
         FROM quotes q WHERE q.order_id = ? ORDER BY q.version DESC LIMIT 1`).bind(o.id)
@@ -252,6 +256,9 @@ export async function readinessInput(db: D1Database, o: OrderRow): Promise<Readi
         AND a.version = (SELECT MAX(b.version) FROM artwork b WHERE b.lineage_id = a.lineage_id AND b.order_id = ?1) ORDER BY a.lineage_id`).bind(o.id)
       .all<{ id: number; file_id: number; approval_status: ArtworkApproval }>(),
     latestPoFor(db, o.id),
+    db.prepare(`SELECT p.status, p.quantity, (SELECT COALESCE(SUM(r.quantity), 0) FROM purchase_receipts r WHERE r.purchase_id = p.id) AS received
+        FROM order_purchases p WHERE p.order_id = ? ORDER BY p.id`).bind(o.id)
+      .all<{ status: PurchaseStoredStatus; quantity: number; received: number }>(),
   ])
   return {
     state: o.state,
@@ -264,7 +271,7 @@ export async function readinessInput(db: D1Database, o: OrderRow): Promise<Readi
     latestPo: po ? { status: po.status } : null,
     authorizedAt: o.authorized_at,
     materialsRequired: o.materials_required === 1,
-    purchases: [], // ponytail: order purchases arrive in M3
+    purchases: purchases.results.map((p) => ({ storedStatus: p.status, quantity: p.quantity, receivedQuantity: p.received })),
     prepStatus: o.prep_status,
   }
 }

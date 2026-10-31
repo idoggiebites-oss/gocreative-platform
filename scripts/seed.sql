@@ -1,5 +1,5 @@
--- Deterministic, fictional dev data for the Phase 2 schema (migrations 0001 + 0002). Re-runnable: wipes
--- child tables first. activity_log is append-only and frozen quotes can't be deleted, so those delete
+-- Deterministic, fictional dev data for the Phase 2 schema (migrations 0001 … 0004). Re-runnable: wipes
+-- child tables first. activity_log and purchase receipts are append-only and frozen quotes can't be deleted, so those delete
 -- triggers are dropped around the wipe and recreated identically to the migrations
 -- (tests/api/seed.test.ts fails if they drift).
 -- Every order's production_status is what readiness() derives, or a later stage reached with every
@@ -7,7 +7,10 @@
 DROP TRIGGER IF EXISTS activity_log_no_delete;
 DROP TRIGGER IF EXISTS quote_items_delete_draft_only;
 DROP TRIGGER IF EXISTS quotes_delete_draft_only;
+DROP TRIGGER IF EXISTS purchase_receipts_no_delete;
 DELETE FROM activity_log;
+DELETE FROM purchase_receipts;
+DELETE FROM order_purchases;
 DELETE FROM quote_items;
 DELETE FROM quotes;
 CREATE TRIGGER activity_log_no_delete BEFORE DELETE ON activity_log
@@ -18,6 +21,8 @@ BEGIN SELECT RAISE(ABORT, 'quote_not_draft'); END;
 CREATE TRIGGER quotes_delete_draft_only BEFORE DELETE ON quotes
 WHEN OLD.status <> 'draft'
 BEGIN SELECT RAISE(ABORT, 'quote_not_draft'); END;
+CREATE TRIGGER purchase_receipts_no_delete BEFORE DELETE ON purchase_receipts
+BEGIN SELECT RAISE(ABORT, 'purchase_receipts are write-once'); END;
 DELETE FROM notes;
 DELETE FROM artwork;
 DELETE FROM po_documents;
@@ -57,8 +62,8 @@ INSERT INTO customer_contacts (id, customer_id, name, email, phone, title, is_pr
   (7, 4, 'Lee Carver', 'person7@example.com', '555-0207', 'Club Manager', 1),
   (8, 5, 'Mina Park', 'person8@example.com', '555-0208', 'Owner', 0);
 
--- Materials can only be met by "not required" until purchasing lands in M3, so every order past
--- awaiting_materials has materials_required = 0.
+-- Orders past awaiting_materials have materials_required = 0 ("No purchasing needed"); order 16 shows purchasing
+-- in progress (see the purchases below) and order 10 has a purchase drafted before authorization.
 INSERT INTO orders (id, number, customer_id, contact_id, source, title, due_date, po_required, payment_terms,
   authorized_at, authorized_by, authorization_method, authorization_notes,
   artwork_required, materials_required, prep_status, items_revision, production_status, assignee_id, state, created_by) VALUES
@@ -280,6 +285,18 @@ INSERT INTO activity_log (actor_kind, actor_id, entity_type, entity_id, action, 
   ('user', 2, 'order', 23, 'created', NULL, '{"production_status":"awaiting_quote"}'),
   ('user', 1, 'order', 24, 'created', NULL, '{"production_status":"awaiting_quote"}'),
   ('user', 1, 'order', 25, 'created', NULL, '{"production_status":"awaiting_quote"}');
+
+-- Suppliers come from migration 0004 (JDS, the default, id 1) and are never wiped here.
+-- Order 16: a cancelled purchase (wrong colour), the replacement ordered and 30 of 40 received, and acrylic blanks not
+-- ordered yet, so it stays awaiting_materials. Order 10: a purchase drafted before authorization.
+INSERT INTO order_purchases (id, order_id, supplier_id, description, quantity, sizes, estimated_unit_cost_cents, actual_unit_cost_cents, status, ordered_on, expected_on, notes, created_by) VALUES
+  (1, 16, 1, 'Gildan 5000 tee, Navy', 40, '{"S":6,"M":14,"L":14,"XL":6}', 350, NULL, 'ordered', date('now', '-6 days'), NULL, 'Ordered the wrong colour.', 1),
+  (2, 16, 1, 'Gildan 5000 tee, Black', 40, '{"S":6,"M":14,"L":14,"XL":6}', 350, 365, 'ordered', date('now', '-5 days'), date('now', '+1 days'), NULL, 1),
+  (3, 16, 1, 'Acrylic sign blanks, 8x10', 10, NULL, 600, NULL, 'not_ordered', NULL, date('now', '+4 days'), NULL, 1),
+  (4, 10, 1, 'Gildan 5000 tee, Black', 40, '{"S":6,"M":14,"L":14,"XL":6}', 350, NULL, 'not_ordered', NULL, NULL, 'Order once the PO is approved.', 1);
+INSERT INTO purchase_receipts (id, purchase_id, quantity, sizes, received_on, notes, recorded_by) VALUES
+  (1, 2, 30, '{"S":6,"M":14,"L":10}', date('now', '-1 days'), 'XL and 4 L on back order.', 1);
+UPDATE order_purchases SET status = 'cancelled' WHERE id = 1;
 
 -- Backdate part of the data so the dashboard sub-lines ("new this week", "waiting 5+ days") have something to say.
 UPDATE orders SET created_at = strftime('%Y-%m-%dT%H:%M:%fZ','now','-30 days') WHERE id <= 12;

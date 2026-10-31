@@ -282,3 +282,40 @@ longer be edited, and changes go in 0003+.
   approved status as history.
 - After the M2 deploy: check one real browser upload in production, to confirm
   Cloudflare passes Content-Length through (verified locally over HTTP/1.1 only).
+
+### 2026-10-31 — M3 purchasing and prep (server), Claude; for Arturo to confirm
+Business-rule choices made while building the M3 API. Each can be overturned.
+- **Purchasing is allowed before authorization.** The brief says purchasing
+  "normally" begins after authorization; that is a UI hint, not a server block.
+  The family sometimes drafts a purchase early (seed order 10 shows one).
+- **Purchases can be recorded on an order with "No purchasing needed".** Readiness
+  ignores them while materials aren't required. This lets supplier costs be
+  tracked without forcing the gate.
+- **Materials are met** when at least one non-cancelled purchase exists and every
+  non-cancelled one has received at least its quantity. A not-ordered purchase
+  blocks. A cancelled purchase never counts, even with receipts recorded before
+  it was cancelled. Cancelled-only reads as "not ordered".
+- **Over-receiving is allowed** and reported (`overReceived`), never refused.
+- **Edit lock:** a not-ordered purchase is fully editable. An ordered one changes
+  only actual unit cost, expected date and notes (the invoice cost often comes
+  later). A cancelled purchase is closed. No change to `ordered_on` after the fact.
+- **Status moves:** not ordered → ordered (staff confirm the purchase; the app
+  never buys), not ordered → cancelled, ordered → cancelled. No un-cancel and no
+  back to not ordered: a mistake is a new purchase. A database trigger enforces this.
+- **Receipts are write-once** (UPDATE, DELETE and REPLACE refused). A wrong receipt is
+  corrected by recording what really arrived, not by editing history. Only an
+  ordered purchase takes a receipt, both in the route and in a trigger.
+- **Sizes must add up to the quantity** on purchases and receipts when a size
+  breakdown is given, the same rule as order items.
+- **Defaults:** `orderedOn` and `receivedOn` default to today in shop time. A missing
+  `supplierId` means the default supplier (JDS).
+- **Suppliers:** any signed-in user can add one (the brief says "employees").
+  Names are unique case-insensitively. There is no edit, archive or delete yet.
+- **The cancel reason** lives only in the activity row, like order cancel. Purchase
+  notes' text is never copied into the activity log; only the fact that they changed is.
+- **Prep status can be set to any value at any time** on an active order, including
+  after production started. In that case it re-derives nothing, because the re-derive
+  moves only pre-production orders.
+- **`START_PRODUCTION_SQL` now re-asserts the full gate** (`GATE_OK`). This closes the M0
+  carried-forward item for the start statement; the QC → in-production restart path is
+  still M4's.

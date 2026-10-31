@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type {
   ArtworkListResponse, UploadResponse, CustomerDetailResponse, CustomersListResponse, DashboardResponse, OrderDetailResponse, OrdersListResponse, OrderView, PoChangeResponse, ProductionChangeResponse,
+  OrderWriteResponse, PrepRequest, PurchaseCreateRequest, PurchaseOrderedRequest, PurchasePatchRequest, PurchasesResponse, ReasonRequest, ReceiptCreateRequest,
+  SupplierCreateRequest, SupplierResponse, SuppliersResponse,
 } from '@shared/api'
 import type { CustomerKind, PoStatus, ProductionStatus } from '@shared/enums'
 import type { ApiError as ApiErrorBody } from '@shared/api'
@@ -139,3 +141,37 @@ export const useCustomerArtwork = (id: number) =>
   useQuery({ queryKey: ['customer', id, 'artwork'], queryFn: () => call<ArtworkListResponse>(`/customers/${id}/artwork`), retry })
 
 export const fileUrl = (id: number, download = false) => `/api/app/files/${id}${download ? '?download=1' : ''}`
+
+// ---- purchasing and prep (M3) ----
+export const useSuppliers = () => useQuery({ queryKey: ['suppliers'], queryFn: () => call<SuppliersResponse>('/suppliers'), retry, staleTime: 60_000 })
+
+/** Under ['order', number], so every order write's invalidation refetches it too. */
+export const usePurchases = (number: string) =>
+  useQuery({ queryKey: ['order', number, 'purchases'], queryFn: () => call<PurchasesResponse>(`/orders/${encodeURIComponent(number)}/purchases`), retry })
+
+export function useCreateSupplier() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: SupplierCreateRequest) => send<SupplierResponse>('POST', '/suppliers', body),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['suppliers'] }),
+  })
+}
+
+// The purchase, receipt and prep writes. Each body carries the order version the page was opened with
+// (expectedVersion), so a stale page gets 409 conflict_retry; the order, its purchases and readiness are refetched after.
+function useOrderWrite<V, T = OrderWriteResponse>(number: string, fn: (path: string, v: V) => Promise<T>) {
+  const invalidate = useInvalidate(number)
+  return useMutation({ mutationFn: (v: V) => fn(`/orders/${encodeURIComponent(number)}`, v), onSettled: invalidate })
+}
+export const useCreatePurchase = (number: string) =>
+  useOrderWrite(number, (base, b: PurchaseCreateRequest) => send<UploadResponse>('POST', `${base}/purchases`, b))
+export const useUpdatePurchase = (number: string) =>
+  useOrderWrite(number, (base, { id, ...b }: PurchasePatchRequest & { id: number }) => send<OrderWriteResponse>('PATCH', `${base}/purchases/${id}`, b))
+export const useMarkPurchaseOrdered = (number: string) =>
+  useOrderWrite(number, (base, { id, ...b }: PurchaseOrderedRequest & { id: number }) => send<OrderWriteResponse>('POST', `${base}/purchases/${id}/ordered`, b))
+export const useCancelPurchase = (number: string) =>
+  useOrderWrite(number, (base, { id, ...b }: ReasonRequest & { id: number }) => send<OrderWriteResponse>('POST', `${base}/purchases/${id}/cancel`, b))
+export const useRecordReceipt = (number: string) =>
+  useOrderWrite(number, (base, { id, ...b }: ReceiptCreateRequest & { id: number }) => send<UploadResponse>('POST', `${base}/purchases/${id}/receipts`, b))
+export const useChangePrep = (number: string) =>
+  useOrderWrite(number, (base, b: PrepRequest) => send<OrderWriteResponse>('PATCH', `${base}/prep`, b))

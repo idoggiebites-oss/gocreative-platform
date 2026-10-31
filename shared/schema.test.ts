@@ -9,6 +9,7 @@ const read = (f: string) => readFileSync(new URL(`../migrations/${f}`, import.me
 const M1 = read('0001_init.sql')
 const M2 = read('0002_phase2_core.sql')
 const M3 = read('0003_artwork_po.sql')
+const M4 = read('0004_purchasing.sql')
 // D1 runs a migration in one transaction; defer_foreign_keys checks at its commit.
 const apply = (db: DatabaseSync, sql: string) => db.exec(`BEGIN; ${sql}; COMMIT;`)
 function migrated() {
@@ -16,6 +17,7 @@ function migrated() {
   apply(db, M1)
   apply(db, M2)
   apply(db, M3)
+  apply(db, M4)
   return db
 }
 
@@ -37,10 +39,11 @@ const enumColumns: [table: string, column: string, values: readonly string[]][] 
   ['artwork', 'approval_status', e.ARTWORK_APPROVAL],
   ['artwork', 'approved_via', e.AUTHORIZATION_METHODS],
   ['purchase_orders', 'status', e.PO_STATUSES],
+  ['order_purchases', 'status', e.PURCHASE_STORED_STATUSES],
   ['inquiries', 'status', e.INQUIRY_STATUSES],
 ]
 
-describe('final schema (0001 + 0002 + 0003)', () => {
+describe('final schema (0001 … 0004)', () => {
   const db = migrated()
   const tableSql = (table: string) => (db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(table) as { sql: string } | undefined)?.sql
   function checkList(table: string, column: string): string[] {

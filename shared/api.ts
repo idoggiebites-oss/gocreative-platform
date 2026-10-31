@@ -2,7 +2,7 @@
 // (due_date YYYY-MM-DD, timestamps ISO UTC text); money is integer cents.
 import type {
   ArtworkApproval, AuthorizationMethod, CustomerKind, ItemKind, Method, OrderArtworkStatus, OrderSource, OrderState, PaymentTerms, PoStatus, PrepStatus,
-  ProductionStatus, QuoteStatus,
+  ProductionStatus, PurchaseStatus, QuoteStatus,
 } from './enums'
 
 export const ORDER_VIEWS = ['active', 'inquiries', 'waiting_po', 'waiting_artwork', 'in_production', 'ready', 'completed'] as const
@@ -228,6 +228,44 @@ export type PurchaseOrderCreateRequest = { poNumber?: string | null; amountCents
 export type PurchaseOrderDetailsRequest = { poNumber?: string | null; amountCents?: number | null; expectedVersion: number }
 export type PurchaseOrdersResponse = { purchaseOrders: PurchaseOrderRecord[] }
 
+// ---- purchasing and preparation (M3) ----
+// Every purchase, receipt and prep write takes the order's expectedVersion and answers with OrderWriteResponse
+// (creates: UploadResponse, i.e. plus the new row's id), like every other order write. Business dates are YYYY-MM-DD.
+export type Supplier = { id: number; name: string; isDefault: boolean }
+export type SuppliersResponse = { suppliers: Supplier[] }
+/** 409 supplier_exists when the name is taken (case-insensitive). */
+export type SupplierCreateRequest = { name: string }
+export type SupplierResponse = { supplier: Supplier }
+export type PurchaseReceipt = {
+  id: number; quantity: number; sizes: Record<string, number> | null; receivedOn: string; notes: string | null; recordedBy: string | null; createdAt: string
+}
+export type PurchaseRecord = {
+  id: number; supplierId: number; supplierName: string; description: string; quantity: number; sizes: Record<string, number> | null
+  estimatedUnitCostCents: number | null; actualUnitCostCents: number | null
+  /** quantity × unit cost; null while the unit cost is unknown. Supplier cost, never the customer's price. */
+  estimatedTotalCents: number | null; actualTotalCents: number | null
+  /** Derived from the stored status and the receipts. */
+  status: PurchaseStatus; receivedQuantity: number; overReceived: boolean
+  orderedOn: string | null; expectedOn: string | null; notes: string | null; createdBy: string | null; createdAt: string; updatedAt: string
+  receipts: PurchaseReceipt[]
+}
+export type PurchasesResponse = { purchases: PurchaseRecord[] }
+/** Created as not_ordered. supplierId omitted = the default supplier. sizes, when given, must add up to quantity. */
+export type PurchaseCreateRequest = {
+  supplierId?: number; description: string; quantity: number; sizes?: Record<string, number> | null
+  estimatedUnitCostCents?: number | null; expectedOn?: string | null; notes?: string | null; expectedVersion: number
+}
+/**
+ * A field left out keeps its value; null clears it. Not ordered: every field. Ordered: only actualUnitCostCents,
+ * expectedOn and notes. Cancelled: nothing. Anything else is 409 purchase_locked.
+ */
+export type PurchasePatchRequest = Partial<Omit<PurchaseCreateRequest, 'expectedVersion'>> & { actualUnitCostCents?: number | null; expectedVersion: number }
+/** Staff confirm the purchase was made (the app never buys). orderedOn defaults to today in shop time. */
+export type PurchaseOrderedRequest = { orderedOn?: string; expectedVersion: number }
+/** Only an ordered purchase takes a receipt (409 purchase_not_ordered). Over-receiving is allowed. receivedOn defaults to today. */
+export type ReceiptCreateRequest = { quantity: number; sizes?: Record<string, number> | null; receivedOn?: string; notes?: string | null; expectedVersion: number }
+export type PrepRequest = { prepStatus: PrepStatus; expectedVersion: number }
+
 // `error` is English text for logs; the UI shows a translation of `code` (and of each gate reason code in `reasons`).
 export const API_ERROR_CODES = [
   'transition_not_allowed', 'gate_failed', 'conflict_retry', 'po_transition_not_allowed', 'not_found', 'invalid_request',
@@ -235,6 +273,7 @@ export const API_ERROR_CODES = [
   'quote_frozen', 'quote_not_draft', 'invalid_quote_transition', 'no_product_line', 'discount_exceeds_total', 'po_required',
   'not_authorized', 'file_too_large', 'unsupported_file_type', 'file_type_mismatch', 'not_current_version', 'artwork_unchanged',
   'po_not_required', 'length_required', 'po_approved_locked', 'po_approved_exists',
+  'supplier_exists', 'purchase_locked', 'purchase_transition_not_allowed', 'purchase_not_ordered',
 ] as const
 export type ApiErrorCode = (typeof API_ERROR_CODES)[number]
 export type ApiError = { error: string; code?: ApiErrorCode; reasons?: string[] }
@@ -246,6 +285,7 @@ export const ACTIVITY_ACTIONS = [
   'items_replaced', 'quote_created', 'quote_refreshed', 'quote_status_changed', 'order_repeated', 'authorization_recorded',
   'authorization_revoked', 'order_cancelled', 'order_reopened', 'artwork_uploaded', 'artwork_decided', 'po_created',
   'po_details_updated', 'po_document_added', 'po_replaced',
+  'supplier_created', 'purchase_created', 'purchase_updated', 'purchase_ordered', 'purchase_cancelled', 'purchase_received', 'prep_status_changed',
 ] as const
 export type ActivityAction = (typeof ACTIVITY_ACTIONS)[number]
 export const GATE_REASON_CODES = [

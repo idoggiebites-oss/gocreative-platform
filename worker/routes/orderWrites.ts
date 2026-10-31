@@ -20,7 +20,7 @@ type Order = NonNullable<Awaited<ReturnType<typeof db.getOrderByNumber>>>
 const id = z.number().int().positive()
 const text = (max: number) => z.string().trim().min(1).max(max)
 const optText = (max: number) => z.string().trim().max(max).nullish().transform((v) => v || null)
-const businessDate = z.string().refine((s) => {
+export const businessDate = z.string().refine((s) => {
   try {
     return addDays(s, 0) === s
   } catch {

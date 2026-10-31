@@ -18,15 +18,33 @@ CREATE TABLE activity_log (id INTEGER PRIMARY KEY, actor_kind TEXT NOT NULL CHEC
   at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')));
 `
 const SLOTS = readFileSync(new URL('../../design/sql/production-slots.sql', import.meta.url), 'utf8')
+// START_PRODUCTION_SQL re-asserts the full readiness gate (GATE_OK). These stand-ins carry only the columns it reads,
+// defaulted so every order meets the gate; tests/api/gate-parity.test.ts proves GATE_OK itself on the real schema.
+const READINESS = `
+ALTER TABLE orders ADD COLUMN items_revision INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE orders ADD COLUMN po_required INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE orders ADD COLUMN authorized_at TEXT DEFAULT '2026-10-01T00:00:00Z';
+ALTER TABLE orders ADD COLUMN artwork_required INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE orders ADD COLUMN materials_required INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE orders ADD COLUMN prep_status TEXT NOT NULL DEFAULT 'ready';
+CREATE TABLE quotes (id INTEGER PRIMARY KEY, order_id INTEGER, version INTEGER, status TEXT, items_revision INTEGER);
+CREATE TABLE quote_items (quote_id INTEGER, kind TEXT);
+CREATE TABLE purchase_orders (id INTEGER PRIMARY KEY, order_id INTEGER, status TEXT);
+CREATE TABLE artwork (id INTEGER PRIMARY KEY, order_id INTEGER, lineage_id INTEGER, version INTEGER, approval_status TEXT);
+CREATE TABLE order_purchases (id INTEGER PRIMARY KEY, order_id INTEGER, status TEXT, quantity INTEGER);
+CREATE TABLE purchase_receipts (purchase_id INTEGER, quantity INTEGER);
+`
 const OWNER = 1, STAFF = 2, INACTIVE_OWNER = 3
 
 let t: ReturnType<typeof createTestD1>
 let db: DatabaseSync
 beforeEach(() => {
-  t = createTestD1(BASE + SLOTS)
+  t = createTestD1(BASE + SLOTS + READINESS)
   db = t.sqlite
   db.exec(`INSERT INTO users (id, email, name, role, active) VALUES (1, 'o@x', 'Owner', 'owner', 1), (2, 's@x', 'Staff', 'staff', 1), (3, 'i@x', 'Old', 'owner', 0);
-    INSERT INTO orders (id, production_status) VALUES (1, 'ready'), (2, 'ready'), (3, 'ready'), (4, 'awaiting_artwork')`)
+    INSERT INTO orders (id, production_status) VALUES (1, 'ready'), (2, 'ready'), (3, 'ready'), (4, 'awaiting_artwork');
+    INSERT INTO quotes (id, order_id, version, status, items_revision) SELECT id, id, 1, 'accepted', 1 FROM orders;
+    INSERT INTO quote_items (quote_id, kind) SELECT id, 'product' FROM quotes;`)
 })
 afterEach(() => db.close())
 
@@ -79,7 +97,6 @@ it('rejects the second transactional start after both callers read a free slot',
 })
 
 it('a losing start of the same order changes nothing and logs nothing; only ready, active orders start', async () => {
-  // Full readiness in SQL arrives with M1/M3; today the guard trusts the readiness-derived 'ready'.
   await start(1, 1)
   const [update, log] = await start(1, 1)
   expect([update.meta.changes, log.meta.changes]).toEqual([0, 0])
@@ -141,4 +158,20 @@ it('cancelling releases the slot of a running slot-1 or slot-2 job', async () =>
   expect(row(4)).toMatchObject({ state: 'cancelled', production_status: 'awaiting_artwork' })
   // Both slots are free again.
   await start(3, 1)
+})
+
+it('a stored ready whose readiness no longer holds does not start (the start re-asserts GATE_OK)', async () => {
+  // Prep went back to in progress, but nothing re-derived the status yet.
+  db.exec("UPDATE orders SET prep_status = 'in_progress' WHERE id = 1")
+  // Materials required, one purchase ordered and only partly received.
+  db.exec("UPDATE orders SET materials_required = 1 WHERE id = 2; INSERT INTO order_purchases (id, order_id, status, quantity) VALUES (1, 2, 'ordered', 10); INSERT INTO purchase_receipts VALUES (1, 4)")
+  for (const id of [1, 2]) {
+    const [update, log] = await start(id, 1)
+    expect([update.meta.changes, log.meta.changes]).toEqual([0, 0])
+    expect(row(id)).toMatchObject({ production_status: 'ready', production_slot: null })
+  }
+  expect(activity()).toEqual([])
+  db.exec('INSERT INTO purchase_receipts VALUES (1, 6)')
+  await start(2, 1)
+  expect(row(2)).toMatchObject({ production_status: 'in_production', production_slot: 1 })
 })
