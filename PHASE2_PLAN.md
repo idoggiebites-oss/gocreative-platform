@@ -299,7 +299,7 @@ logic it can test, Claude for design, integration and verification).
       pickup before payment, check collected → deposited → cleared). Together they cover
       acceptance 1–17.
 - [ ] Phase 1 carry-overs: the ES column overflow, focus after "Record approval".
-- [ ] Additive migration: unconditional `BEFORE UPDATE` id guards on `quotes` and `artwork` (their `UPDATE OF` triggers miss `rowid` aliases; direct-DB edits only — Codex, M3 review).
+- [x] Additive migration 0007: unconditional `BEFORE UPDATE` id guards on `quotes` (already covered by quotes_frozen) and `artwork` (their `UPDATE OF` triggers miss `rowid` aliases; direct-DB edits only — Codex, M3 review).
 - [ ] Whole-phase Codex security review; accessibility pass; docs (README setup, ARCHITECTURE
       schema section, DECISIONS, notes); realistic seed for every new state.
 - [ ] Deploy, migrate remote, signed-in smoke test; then the family starts entering real orders.

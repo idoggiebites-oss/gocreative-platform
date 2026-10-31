@@ -65,7 +65,7 @@ export function artworkRoutes() {
     .onError((e, c) => {
       const message = e instanceof Error ? e.message : String(e)
       // Two uploads raced for one version number, or a design / PO vanished between the read and the batch: retry.
-      if (/UNIQUE constraint failed: artwork\.|NOT NULL constraint failed: (artwork|po_documents)\./.test(message)) return conflict(c)
+      if (/UNIQUE constraint failed: artwork\.|artwork_version_exists|NOT NULL constraint failed: (artwork|po_documents)\./.test(message)) return conflict(c)
       console.error(e)
       return c.json({ error: 'Internal error' }, 500)
     })
