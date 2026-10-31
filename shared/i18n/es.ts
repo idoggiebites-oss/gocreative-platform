@@ -101,11 +101,6 @@ export const es: Messages = {
       po_approved_exists: 'Este pedido ya tiene una orden de compra aprobada. Para reemplazarla, confirma el reemplazo e indica el motivo.',
     },
     unknownReason: 'No se cumple un requisito.',
-    moreErrors: {
-      po_approved_locked: 'Las órdenes de compra aprobadas no se pueden cambiar; agrega una OC de reemplazo.',
-      po_approved_exists: 'La última OC ya está aprobada. Agregar una nueva requiere un motivo.',
-      length_required: 'No se pudo enviar el archivo. Vuelve a elegirlo.',
-    },
     staleNotice: 'No se pudo actualizar. Estás viendo los últimos datos cargados.',
   },
   dash: {

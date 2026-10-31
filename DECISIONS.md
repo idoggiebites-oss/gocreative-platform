@@ -262,3 +262,23 @@ longer be edited, and changes go in 0003+.
   and can rise, since memory no longer scales with file size.
 - **A stored file is deleted only on a certain rollback.** On any uncertain outcome
   it is kept: an unreferenced object is harmless, a missing referenced one is not.
+
+### 2026-10-31 — M2a after the security review (supersedes parts of the M2a entry)
+- Uploads **stream**: Content-Length is required (411 `length_required` without
+  it, 413 over the cap). Only the first 4 KB are held, for type sniffing. The
+  body streams into R2 through a FixedLengthStream, with SHA-256 computed as it
+  passes; a body that doesn't match its Content-Length is refused and nothing is
+  stored. This replaces "raw body read into one buffer" and "without
+  Content-Length the read stops at the cap".
+- R2 keys are `orders/<orderId>/<uuid>`; the hash is stored on the files row. This
+  replaces the content-hash key.
+- An SVG must reach its `<svg>` element within the first 4 KB. Later ones are
+  refused (415).
+- The R2 object is deleted only when the batch changed 0 rows or threw a
+  constraint error. On any other error it is kept, logged and rethrown, which
+  replaces "a batch that throws deletes the R2 object". Unreferenced objects can
+  build up harmlessly; there is no sweeper yet.
+- `po_replaced` records the replaced PO and the reason. The old PO keeps its
+  approved status as history.
+- After the M2 deploy: check one real browser upload in production, to confirm
+  Cloudflare passes Content-Length through (verified locally over HTTP/1.1 only).

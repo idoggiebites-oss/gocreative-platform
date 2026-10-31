@@ -61,7 +61,7 @@ export function MutationError({ error }: { error: Error | null }) {
   const { m } = useI18n()
   if (!error) return null
   const refused = error instanceof ApiError && error.status === 409
-  const codes: Record<string, string | undefined> = { ...m.api.moreErrors, ...m.api.errors }
+  const codes: Record<string, string | undefined> = m.api.errors
   const reasons: Record<string, string | undefined> = m.order.gate.reasons
   const detail = error instanceof ApiError
     ? [error.body.code ? codes[error.body.code] : undefined, ...(error.body.reasons ?? []).map((r) => reasons[r] ?? m.api.unknownReason)].filter(Boolean).join(' ')

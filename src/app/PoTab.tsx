@@ -10,8 +10,8 @@ import { FileLinks, fmtSize, UploadDialog } from './uploads'
 
 type Detail = OrderDetailResponse
 type Dialog = { kind: 'request' | 'add' } | { kind: 'edit'; po: PurchaseOrderRecord } | { kind: 'doc'; po: PurchaseOrderRecord }
-// replaceApproved + reason are required by the API when the latest PO is approved (shared/api.ts may not list them yet).
-type CreateBody = PurchaseOrderCreateRequest & { replaceApproved?: true; reason?: string }
+// replaceApproved + reason are required by the API when the latest PO is approved.
+type CreateBody = PurchaseOrderCreateRequest
 
 const sm = cn(BTN, BTN_SM)
 

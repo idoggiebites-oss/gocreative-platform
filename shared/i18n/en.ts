@@ -110,11 +110,6 @@ export const en = {
     } satisfies Record<ApiErrorCode, string>,
     unknownReason: 'A requirement is not met.',
     // Codes the API adds before shared/api.ts lists them; looked up after `errors`.
-    moreErrors: {
-      po_approved_locked: 'Approved purchase orders can’t be changed; add a replacement PO instead.',
-      po_approved_exists: 'The latest PO is already approved. Adding a new one needs a reason.',
-      length_required: 'The upload could not be sent. Try choosing the file again.',
-    } as Record<string, string>,
     staleNotice: 'Could not refresh. You are seeing the last data we loaded.',
   },
   dash: {
