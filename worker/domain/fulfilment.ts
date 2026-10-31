@@ -1,6 +1,6 @@
-import type { FinancialStatus, FulfilmentStatus, PaymentTerms, ProductionStatusNext } from '../../shared/enums-next.ts'
+import type { FinancialStatus, FulfilmentStatus, PaymentTerms, ProductionStatus } from '../../shared/enums.ts'
 
-export function fulfilmentStatus(productionStatus: ProductionStatusNext, pickup: { notifiedAt: string | null; pickedUpAt: string | null } | null): FulfilmentStatus {
+export function fulfilmentStatus(productionStatus: ProductionStatus, pickup: { notifiedAt: string | null; pickedUpAt: string | null } | null): FulfilmentStatus {
   if (productionStatus !== 'production_complete') return 'not_ready'
   if (pickup?.pickedUpAt) return 'picked_up'
   if (pickup?.notifiedAt) return 'customer_notified'

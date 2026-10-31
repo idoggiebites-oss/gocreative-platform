@@ -1,4 +1,4 @@
-import type { PurchaseStatus, PurchaseStoredStatus } from '../../shared/enums-next.ts'
+import type { PurchaseStatus, PurchaseStoredStatus } from '../../shared/enums.ts'
 
 type Purchase = { storedStatus: PurchaseStoredStatus; quantity: number }
 type Failure = { ok: false; error: string }

@@ -1,8 +1,22 @@
-import type { ProductionStatusNext } from '../../shared/enums-next.ts'
+import type { OrderState, ProductionStatus } from '../../shared/enums.ts'
 import type { Readiness } from './readiness.ts'
 
+// Closed and cancelled orders must be reopened before production can change.
+export function checkOrderProductionMove(state: OrderState, from: ProductionStatus, to: ProductionStatus, gate: Pick<Readiness, 'ready' | 'preProductionStatus'>): Result {
+  return state === 'active' ? checkProductionMove(from, to, gate) : { ok: false, error: 'order_not_active' }
+}
+/**
+ * The awaiting_* states follow their prerequisites (e.g. when a PO changes). Returns the new status, or null
+ * when nothing should move: orders at ready or later stay put (the detail's readiness shows why), and
+ * inactive orders are never touched.
+ */
+export function syncAwaitingStatus(current: ProductionStatus, state: OrderState, gate: Pick<Readiness, 'preProductionStatus'>): ProductionStatus | null {
+  if (state !== 'active' || !current.startsWith('awaiting_')) return null
+  return gate.preProductionStatus === current ? null : gate.preProductionStatus
+}
+
 type Result = { ok: true } | { ok: false; error: string }
-export function checkProductionMove(from: ProductionStatusNext, to: ProductionStatusNext, gate: Pick<Readiness, 'ready' | 'preProductionStatus'>): Result {
+export function checkProductionMove(from: ProductionStatus, to: ProductionStatus, gate: Pick<Readiness, 'ready' | 'preProductionStatus'>): Result {
   if (from === to || from === 'production_complete') return { ok: false, error: 'invalid_production_move' }
   // Awaiting states reflect prerequisites, never a way to skip production or QC.
   if ((from.startsWith('awaiting_') || from === 'ready') && (to.startsWith('awaiting_') || to === 'ready')) {

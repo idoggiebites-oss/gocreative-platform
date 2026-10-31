@@ -1,4 +1,4 @@
-import { QUOTE_STATUSES } from '../../shared/enums-next.ts'
+import { QUOTE_STATUSES } from '../../shared/enums.ts'
 import { checkQuoteAcceptable, checkQuoteTransition, currentQuote, itemsChangeRequiresReapproval, lineTotalCents, planNewVersion, quoteSatisfied, quoteTotals, sizesTotal, validateItem, CUSTOMER_FACING_ITEM_FIELDS } from './quotes.ts'
 import type { Item } from './quotes.ts'
 const item: Item = { id: 1, kind: 'product', quantity: 2, unitPriceCents: 150, sizes: { M: 2 } }

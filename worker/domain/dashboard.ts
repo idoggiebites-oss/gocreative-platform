@@ -1,4 +1,4 @@
-import type { ArtworkStatus, PoStatus, ProductionStatus } from '../../shared/enums.ts'
+import type { OrderArtworkStatus, PoStatus, ProductionStatus, QuoteStatus } from '../../shared/enums.ts'
 import type { AttentionReason, DashboardMetrics } from '../../shared/api.ts'
 
 export type DashOrder = {
@@ -6,14 +6,16 @@ export type DashOrder = {
   number: string
   customerName: string
   title: string
-  artworkStatus: ArtworkStatus
+  artworkStatus: OrderArtworkStatus
   productionStatus: ProductionStatus
   dueDate: string | null
   latestPoStatus: PoStatus | null
   latestPoAmountCents: number | null
-  latestEstimateStatus: string | null
+  /** The current (highest-version) quote. */
+  quoteStatus: QuoteStatus | null
   createdAt: string
-  latestEstimateCreatedAt: string | null
+  /** When the current quote was sent (its creation time if it never was). */
+  quoteSentAt: string | null
 }
 export type DashInquiry = { id: number; contactName: string | null }
 export type AttentionCandidate = {
@@ -35,13 +37,13 @@ const dayNumber = (date: string) => Date.parse(date.slice(0, 10)) / DAY
 export const addDays = (date: string, n: number) => new Date(dayNumber(date) * DAY + n * DAY).toISOString().slice(0, 10)
 const PO_WAITING = ['received', 'under_review']
 
-/** Pure: takes ACTIVE orders, when each ready-for-pickup order entered that state, new inquiries, and today (YYYY-MM-DD). */
+/** Pure: takes ACTIVE orders, when each order finished production (production_complete = waiting for pickup until M5), new inquiries, and today (YYYY-MM-DD). */
 export function buildDashboard(orders: DashOrder[], readyAt: Map<number, string>, inquiries: DashInquiry[], today: string) {
   const weekEnd = addDays(today, 7)
-  const notDone = orders.filter((o) => o.productionStatus !== 'completed')
+  const notDone = orders.filter((o) => o.productionStatus !== 'production_complete')
   const overdue = (o: DashOrder) => o.dueDate !== null && o.dueDate < today
   const waitingPo = orders.filter((o) => o.latestPoStatus !== null && PO_WAITING.includes(o.latestPoStatus))
-  const ready = orders.filter((o) => o.productionStatus === 'ready_for_pickup')
+  const ready = orders.filter((o) => o.productionStatus === 'production_complete')
   const readyDays = (o: DashOrder) => {
     const at = readyAt.get(o.id)
     return at === undefined ? undefined : Math.max(0, dayNumber(today) - dayNumber(at))
@@ -51,12 +53,12 @@ export function buildDashboard(orders: DashOrder[], readyAt: Map<number, string>
   const metrics: DashboardMetrics = {
     activeOrders: orders.length,
     activeOrdersNewThisWeek: orders.filter((o) => o.createdAt.slice(0, 10) >= addDays(today, -7)).length,
-    pendingQuotes: orders.filter((o) => o.latestEstimateStatus === 'draft' || o.latestEstimateStatus === 'sent').length,
+    pendingQuotes: orders.filter((o) => o.quoteStatus === 'draft' || o.quoteStatus === 'sent').length,
     pendingQuotesWaitingOver5Days: orders.filter(
-      (o) => o.latestEstimateStatus === 'sent' && o.latestEstimateCreatedAt !== null && o.latestEstimateCreatedAt.slice(0, 10) < addDays(today, -5),
+      (o) => o.quoteStatus === 'sent' && o.quoteSentAt !== null && o.quoteSentAt.slice(0, 10) < addDays(today, -5),
     ).length,
     artworkAwaitingApproval: {
-      pending: orders.filter((o) => o.artworkStatus === 'pending').length,
+      pending: orders.filter((o) => o.artworkStatus === 'under_review').length,
       changesRequested: orders.filter((o) => o.artworkStatus === 'changes_requested').length,
     },
     posAwaitingApproval: { count: waitingPo.length, amountCents: waitingPo.reduce((s, o) => s + (o.latestPoAmountCents ?? 0), 0) },
@@ -75,15 +77,15 @@ export function buildDashboard(orders: DashOrder[], readyAt: Map<number, string>
   for (const o of orders) {
     let reason: AttentionReason | null = null
     let reasonDays: number | undefined
-    if (o.productionStatus !== 'completed' && overdue(o)) {
+    if (o.productionStatus !== 'production_complete' && overdue(o)) {
       reason = 'overdue'
       reasonDays = dayNumber(today) - dayNumber(o.dueDate as string)
     } else if (o.artworkStatus === 'changes_requested') reason = 'artwork_changes_requested'
     else if (o.latestPoStatus !== null && PO_WAITING.includes(o.latestPoStatus)) reason = 'po_waiting'
-    else if (o.productionStatus === 'ready_for_pickup') {
+    else if (o.productionStatus === 'production_complete') {
       reason = 'ready_waiting'
       reasonDays = readyDays(o)
-    } else if (o.latestEstimateStatus === 'sent') reason = 'quote_waiting'
+    } else if (o.quoteStatus === 'sent') reason = 'quote_waiting'
     if (reason) {
       candidates.push({ orderId: o.id, inquiryId: null, number: o.number, customerName: o.customerName, title: o.title, reason, ...(reasonDays === undefined ? {} : { reasonDays }), dueDate: o.dueDate })
     }

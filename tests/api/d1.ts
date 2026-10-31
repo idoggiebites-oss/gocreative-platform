@@ -1,13 +1,30 @@
 // Minimal D1-compatible adapter over node:sqlite, because @cloudflare/vitest-pool-workers
 // (0.23) only supports vitest ^4.1 and this repo runs vitest 5.
 // ponytail: covers prepare/bind/first/all/run/batch only; add exec when a route needs it.
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite'
 
-// schema: replaces migration 0001, for design-only DDL proofs (design/sql/*) that redefine its tables.
+const MIGRATIONS = new URL('../../migrations/', import.meta.url)
+/** The migration files in apply order (what wrangler d1 migrations apply runs). */
+export const migrations = () => readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql')).sort().map((f) => readFileSync(new URL(f, MIGRATIONS), 'utf8'))
+/** Applies one migration the way D1 does: inside one transaction, so defer_foreign_keys checks at commit. */
+export function applyMigration(sqlite: DatabaseSync, sql: string) {
+  sqlite.exec('BEGIN')
+  try {
+    sqlite.exec(sql)
+    sqlite.exec('COMMIT')
+  } catch (e) {
+    sqlite.exec('ROLLBACK')
+    throw e
+  }
+}
+
+// schema: replaces the migrations, for design-only DDL proofs (design/sql/*) that redefine their tables.
+// node:sqlite enforces foreign keys by default, like D1.
 export function createTestD1(schema?: string) {
   const sqlite = new DatabaseSync(':memory:')
-  sqlite.exec(schema ?? readFileSync(new URL('../../migrations/0001_init.sql', import.meta.url), 'utf8'))
+  if (schema !== undefined) sqlite.exec(schema)
+  else for (const sql of migrations()) applyMigration(sqlite, sql)
 
   const run = (sql: string, params: SQLInputValue[]) => {
     const stmt = sqlite.prepare(sql)

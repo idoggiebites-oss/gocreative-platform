@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs'
 import type { DatabaseSync } from 'node:sqlite'
 import { chooseSlot } from '../../worker/domain/productionFlow.ts'
-import { PRODUCTION_STATUSES_NEXT } from '../../shared/enums-next.ts'
+import { PRODUCTION_STATUSES } from '../../shared/enums.ts'
 import { CANCEL_ORDER_SQL, START_PRODUCTION_SQL } from '../../worker/db/productionSql.ts'
 import { createTestD1 } from './d1.ts'
 
@@ -65,7 +65,7 @@ it('enforces status/slot checks and the complete NEXT vocabulary', () => {
   expect(() => db.exec("UPDATE orders SET production_status='in_production' WHERE id=1")).toThrow(/CHECK constraint failed/)
   expect(() => db.exec('UPDATE orders SET production_slot=1 WHERE id=1')).toThrow(/CHECK constraint failed/)
   expect(() => db.exec("UPDATE orders SET production_status='completed' WHERE id=1")).toThrow(/CHECK constraint failed/)
-  for (const status of PRODUCTION_STATUSES_NEXT) {
+  for (const status of PRODUCTION_STATUSES) {
     db.prepare('UPDATE orders SET production_status=?, production_slot=? WHERE id=1').run(status, status === 'in_production' ? 1 : null)
   }
 })

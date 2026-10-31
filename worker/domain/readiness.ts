@@ -1,12 +1,12 @@
-import type { PoStatus } from '../../shared/enums.ts'
-import type { ArtworkApproval, OrderArtworkStatus, OrderStateNext, PrepStatus, ProductionStatusNext, PurchaseStoredStatus, QuoteStatus } from '../../shared/enums-next.ts'
+import type { ArtworkApproval, OrderArtworkStatus, OrderState, PoStatus, PrepStatus, ProductionStatus, PurchaseStoredStatus, QuoteStatus } from '../../shared/enums.ts'
 import { quoteSatisfied } from './quotes.ts'
 
 // currentVersion is null when a design has no uploaded file yet; that counts as not received.
 export type Design = { currentVersion: { id: number; fileId: number; approval: ArtworkApproval } | null }
 export type ReadinessInput = {
-  state: OrderStateNext
-  // lineCount: lines in the accepted snapshot; acceptance requires a product line (checkQuoteAcceptable).
+  state: OrderState
+  // lineCount: PRODUCT lines in the current quote's snapshot (charges and discounts don't count);
+  // acceptance requires one (checkQuoteAcceptable, and the quotes_accept_needs_product trigger).
   quote: { status: QuoteStatus; itemsRevision: number; lineCount: number } | null
   itemsRevision: number
   artworkRequired: boolean
@@ -22,7 +22,7 @@ type Key = 'quote' | 'authorization' | 'artwork' | 'materials' | 'preparation'
 export type Readiness = {
   items: { key: Key; state: 'complete' | 'pending' | 'not_required'; reason?: string }[]
   ready: boolean
-  preProductionStatus: ProductionStatusNext
+  preProductionStatus: ProductionStatus
 }
 export function orderArtworkStatus(artworkRequired: boolean, designs: readonly Design[]): OrderArtworkStatus {
   if (!artworkRequired) return 'not_required'
@@ -51,4 +51,9 @@ export function readiness(input: ReadinessInput): Readiness {
   const pending = items.find(item => item.state === 'pending')
   return { items, ready: input.state === 'active' && !pending,
     preProductionStatus: pending ? `awaiting_${pending.key}` : 'ready' }
+}
+/** The production gate as reason codes (shared/api GATE_REASON_CODES): 'order_not_active', then '<item>.<reason>' per pending item. */
+export function gateResult(state: OrderState, r: Readiness): { ok: true } | { ok: false; reasons: string[] } {
+  const reasons = [...(state === 'active' ? [] : ['order_not_active']), ...r.items.flatMap(i => i.state === 'pending' ? [`${i.key}.${i.reason}`] : [])]
+  return reasons.length ? { ok: false, reasons } : { ok: true }
 }

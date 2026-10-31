@@ -1,10 +1,52 @@
 // All SQL for the order screens. Every value is bound; the only interpolated
-// fragments are the constants in VIEW_WHERE and generated "?,?" placeholder lists.
+// fragments are the constants below (VIEW_WHERE, the readiness SQL) and generated "?,?" placeholder lists.
 import { METHODS, PRODUCTION_STATUSES } from '../../shared/enums'
-import type { ArtworkStatus, CustomerKind, Method, OrderSource, OrderState, PoStatus, ProductionStatus } from '../../shared/enums'
+import type {
+  ArtworkApproval, AuthorizationMethod, CustomerKind, ItemKind, Method, OrderArtworkStatus, OrderSource, OrderState,
+  PaymentTerms, PoStatus, PrepStatus, ProductionStatus, QuoteStatus,
+} from '../../shared/enums'
 import type { InquiryListRow, OrderCounts, OrderDetailResponse, OrderListRow, OrderView } from '../../shared/api'
 import type { DashInquiry, DashOrder } from '../domain/dashboard'
-import type { GateOrder, GatePo } from '../domain/production'
+import type { ReadinessInput } from '../domain/readiness'
+
+// ---- readiness in SQL ----
+// The SQL twin of domain/readiness.ts, correlated on the `orders` row (an UPDATE's target, or `FROM orders`).
+// Re-asserted inside writes because routes read before they write. tests/api/gate-parity.test.ts walks the
+// input space and fails if these and readiness() ever disagree. Every predicate is NULL-safe (IS, EXISTS),
+// because a NULL inside `CASE WHEN NOT …` would silently fall through.
+
+// "Current" quote = highest version; "latest" PO = highest id.
+const CURRENT_QUOTE_ID = `(SELECT cq.id FROM quotes cq WHERE cq.order_id = orders.id ORDER BY cq.version DESC LIMIT 1)`
+const QUOTE_OK = `EXISTS (SELECT 1 FROM quotes q WHERE q.id = ${CURRENT_QUOTE_ID} AND q.status = 'accepted'
+  AND q.items_revision = orders.items_revision
+  AND EXISTS (SELECT 1 FROM quote_items qi WHERE qi.quote_id = q.id AND qi.kind = 'product'))`
+const LATEST_PO_STATUS = `(SELECT status FROM purchase_orders WHERE order_id = orders.id ORDER BY id DESC LIMIT 1)`
+// Direct authorization cannot substitute for a required PO.
+const AUTH_OK = `((orders.po_required = 0 AND orders.authorized_at IS NOT NULL) OR (orders.po_required = 1 AND ${LATEST_PO_STATUS} IS 'approved'))`
+// A design = an artwork lineage on this order; its current version = the highest version attached to the order.
+const CURRENT_ARTWORK = `artwork a WHERE a.order_id = orders.id
+  AND a.version = (SELECT MAX(b.version) FROM artwork b WHERE b.lineage_id = a.lineage_id AND b.order_id = orders.id)`
+/** SQL twin of orderArtworkStatus. A lineage always has a version here, so "missing version" can't occur in SQL. */
+export const ARTWORK_STATUS = `(CASE WHEN orders.artwork_required = 0 THEN 'not_required'
+  WHEN NOT EXISTS (SELECT 1 FROM ${CURRENT_ARTWORK}) THEN 'not_received'
+  WHEN EXISTS (SELECT 1 FROM ${CURRENT_ARTWORK} AND a.approval_status = 'changes_requested') THEN 'changes_requested'
+  WHEN EXISTS (SELECT 1 FROM ${CURRENT_ARTWORK} AND a.approval_status = 'under_review') THEN 'under_review'
+  ELSE 'approved' END)`
+const ARTWORK_OK = `(${ARTWORK_STATUS} IN ('approved','not_required'))`
+// ponytail: purchases arrive in M3 (migration 0003); until then materials are met only when not required.
+const MATERIALS_OK = `(orders.materials_required = 0)`
+const PREP_OK = `(orders.prep_status IN ('ready','not_required'))`
+/** SQL twin of readiness().ready. */
+export const GATE_OK = `(orders.state = 'active' AND ${QUOTE_OK} AND ${AUTH_OK} AND ${ARTWORK_OK} AND ${MATERIALS_OK} AND ${PREP_OK})`
+/** SQL twin of readiness().preProductionStatus: the first unmet item, in readiness's fixed order. */
+export const PRE_PRODUCTION = `(CASE WHEN NOT ${QUOTE_OK} THEN 'awaiting_quote'
+  WHEN NOT ${AUTH_OK} THEN 'awaiting_authorization'
+  WHEN NOT ${ARTWORK_OK} THEN 'awaiting_artwork'
+  WHEN NOT ${MATERIALS_OK} THEN 'awaiting_materials'
+  WHEN NOT ${PREP_OK} THEN 'awaiting_preparation'
+  ELSE 'ready' END)`
+const PRE_PRODUCTION_STATUSES = PRODUCTION_STATUSES.filter((s) => s.startsWith('awaiting_') || s === 'ready')
+const AWAITING_LIST = PRODUCTION_STATUSES.filter((s) => s.startsWith('awaiting_')).map((s) => `'${s}'`).join(',')
 
 type BaseRow = {
   id: number
@@ -12,41 +54,43 @@ type BaseRow = {
   customer_name: string
   customer_kind: CustomerKind
   title: string
-  artwork_status: ArtworkStatus
+  artwork_status: OrderArtworkStatus
   po_required: 0 | 1
   production_status: ProductionStatus
   state: OrderState
   due_date: string | null
-  estimated_total_cents: number | null
   latest_po_status: PoStatus | null
   latest_po_amount: number | null
-  latest_estimate_status: string | null
-  latest_estimate_created_at: string | null
+  quote_status: QuoteStatus | null
+  quote_total_cents: number | null
+  quote_sent_at: string | null
   created_at: string
   methods: string | null
   total_qty: number
 }
 
-// "Latest" PO = highest id; latest estimate = highest version.
-const BASE = `SELECT o.id, o.number, c.name AS customer_name, c.kind AS customer_kind, o.title, o.artwork_status,
-  o.po_required, o.production_status, o.state, o.due_date, o.estimated_total_cents,
-  (SELECT p.status FROM purchase_orders p WHERE p.order_id = o.id ORDER BY p.id DESC LIMIT 1) AS latest_po_status,
-  (SELECT p.amount_cents FROM purchase_orders p WHERE p.order_id = o.id ORDER BY p.id DESC LIMIT 1) AS latest_po_amount,
-  (SELECT e.status FROM estimates e WHERE e.order_id = o.id ORDER BY e.version DESC LIMIT 1) AS latest_estimate_status,
-  (SELECT e.created_at FROM estimates e WHERE e.order_id = o.id ORDER BY e.version DESC LIMIT 1) AS latest_estimate_created_at,
-  o.created_at,
-  (SELECT group_concat(DISTINCT i.method) FROM order_items i WHERE i.order_id = o.id) AS methods,
-  (SELECT COALESCE(SUM(i.quantity), 0) FROM order_items i WHERE i.order_id = o.id) AS total_qty
-  FROM orders o JOIN customers c ON c.id = o.customer_id`
+const CURRENT_QUOTE = (expr: string) => `(SELECT ${expr} FROM quotes cq WHERE cq.order_id = orders.id ORDER BY cq.version DESC LIMIT 1)`
+const BASE = `SELECT orders.id, orders.number, c.name AS customer_name, c.kind AS customer_kind, orders.title, ${ARTWORK_STATUS} AS artwork_status,
+  orders.po_required, orders.production_status, orders.state, orders.due_date,
+  (SELECT p.status FROM purchase_orders p WHERE p.order_id = orders.id ORDER BY p.id DESC LIMIT 1) AS latest_po_status,
+  (SELECT p.amount_cents FROM purchase_orders p WHERE p.order_id = orders.id ORDER BY p.id DESC LIMIT 1) AS latest_po_amount,
+  ${CURRENT_QUOTE('cq.status')} AS quote_status,
+  ${CURRENT_QUOTE('cq.total_cents')} AS quote_total_cents,
+  ${CURRENT_QUOTE('COALESCE(cq.sent_at, cq.created_at)')} AS quote_sent_at,
+  orders.created_at,
+  (SELECT group_concat(DISTINCT i.method) FROM order_items i WHERE i.order_id = orders.id AND i.kind = 'product') AS methods,
+  (SELECT COALESCE(SUM(i.quantity), 0) FROM order_items i WHERE i.order_id = orders.id AND i.kind = 'product') AS total_qty
+  FROM orders JOIN customers c ON c.id = orders.customer_id`
 
 // Predicates over the BASE columns. 'inquiries' is counted from its own table.
 const VIEW_WHERE: Record<Exclude<OrderView, 'inquiries'>, string> = {
   active: `state = 'active'`,
   waiting_po: `state = 'active' AND po_required = 1 AND (latest_po_status IS NULL OR latest_po_status <> 'approved')`,
-  waiting_artwork: `state = 'active' AND artwork_status <> 'approved'`,
+  waiting_artwork: `state = 'active' AND artwork_status NOT IN ('approved','not_required')`,
   in_production: `state = 'active' AND production_status IN ('in_production','quality_control')`,
-  ready: `state = 'active' AND production_status = 'ready_for_pickup'`,
-  completed: `state = 'completed'`,
+  // Pickup records arrive in M5; until then a finished, still-active order is the one waiting for pickup.
+  ready: `state = 'active' AND production_status = 'production_complete'`,
+  completed: `state = 'closed'`,
 }
 
 const ACTIVITY_KEYS = ['production_status', 'state', 'po_status', 'po_id', 'artwork_status', 'reason']
@@ -68,7 +112,7 @@ function toListRow(r: BaseRow): OrderListRow {
     productionStatus: r.production_status,
     state: r.state,
     dueDate: r.due_date,
-    estimatedTotalCents: r.estimated_total_cents,
+    quote: r.quote_status === null ? null : { status: r.quote_status, totalCents: r.quote_total_cents ?? 0 },
   }
 }
 
@@ -123,18 +167,18 @@ export async function listActiveDashOrders(db: D1Database): Promise<DashOrder[]>
     dueDate: r.due_date,
     latestPoStatus: r.latest_po_status,
     latestPoAmountCents: r.latest_po_amount,
-    latestEstimateStatus: r.latest_estimate_status,
+    quoteStatus: r.quote_status,
     createdAt: r.created_at,
-    latestEstimateCreatedAt: r.latest_estimate_created_at,
+    quoteSentAt: r.quote_sent_at,
   }))
 }
 
-/** When each order last entered ready_for_pickup, read from the activity log. */
+/** When each order last finished production (production_complete), read from the activity log. */
 export async function readyForPickupSince(db: D1Database) {
   const { results } = await db
     .prepare(
       `SELECT entity_id, MAX(at) AS at FROM activity_log
-       WHERE entity_type = 'order' AND json_extract(after, '$.production_status') = 'ready_for_pickup' GROUP BY entity_id`,
+       WHERE entity_type = 'order' AND json_extract(after, '$.production_status') = 'production_complete' GROUP BY entity_id`,
     )
     .all<{ entity_id: number; at: string }>()
   return new Map(results.map((r) => [r.entity_id, r.at]))
@@ -151,7 +195,7 @@ export async function itemsSummaries(db: D1Database, orderIds: number[]) {
   const out = new Map<number, string>()
   if (orderIds.length === 0) return out
   const { results } = await db
-    .prepare(`SELECT order_id, product, quantity FROM order_items WHERE order_id IN (${orderIds.map(() => '?').join(',')}) ORDER BY id`)
+    .prepare(`SELECT order_id, product, quantity FROM order_items WHERE kind = 'product' AND order_id IN (${orderIds.map(() => '?').join(',')}) ORDER BY id`)
     .bind(...orderIds)
     .all<{ order_id: number; product: string; quantity: number }>()
   for (const r of results) out.set(r.order_id, [out.get(r.order_id), `${r.quantity} ${r.product}`].filter(Boolean).join(', '))
@@ -175,37 +219,73 @@ export async function recentActivity(db: D1Database) {
 
 type OrderRow = {
   id: number; number: string; customer_id: number; contact_id: number | null; source: OrderSource; title: string
-  due_date: string | null; artwork_status: ArtworkStatus; po_required: 0 | 1; authorized_at: string | null
-  authorized_by: number | null; production_status: ProductionStatus; assignee_id: number | null
-  estimated_total_cents: number | null; invoice_ref: string | null; payment_ref: string | null; state: OrderState
+  due_date: string | null; artwork_required: 0 | 1; po_required: 0 | 1; authorized_at: string | null; authorized_by: number | null
+  authorization_method: AuthorizationMethod | null; authorization_notes: string | null; items_revision: number
+  payment_terms: PaymentTerms; materials_required: 0 | 1; prep_status: PrepStatus
+  production_status: ProductionStatus; assignee_id: number | null
+  invoice_ref: string | null; payment_ref: string | null; state: OrderState
   created_at: string; updated_at: string
+  artwork_status: OrderArtworkStatus // derived (ARTWORK_STATUS), not a column
 }
 
 export const getOrderByNumber = (db: D1Database, number: string) =>
-  db.prepare('SELECT * FROM orders WHERE number = ?').bind(number).first<OrderRow>()
+  db.prepare(`SELECT orders.*, ${ARTWORK_STATUS} AS artwork_status FROM orders WHERE number = ?`).bind(number).first<OrderRow>()
 
 const latestPoFor = async (db: D1Database, orderId: number) =>
   db.prepare('SELECT id, status FROM purchase_orders WHERE order_id = ? ORDER BY id DESC LIMIT 1').bind(orderId).first<{ id: number; status: PoStatus }>()
 
-export const toGateOrder = (o: OrderRow): GateOrder => ({
-  state: o.state,
-  artworkStatus: o.artwork_status,
-  poRequired: o.po_required === 1,
-  authorizedAt: o.authorized_at,
+/** Everything readiness() needs, read from the database with the same definitions as the SQL twin above. */
+export async function readinessInput(db: D1Database, o: OrderRow): Promise<ReadinessInput> {
+  const [quote, designs, po] = await Promise.all([
+    db.prepare(`SELECT q.status, q.items_revision,
+        (SELECT COUNT(*) FROM quote_items qi WHERE qi.quote_id = q.id AND qi.kind = 'product') AS product_lines
+        FROM quotes q WHERE q.order_id = ? ORDER BY q.version DESC LIMIT 1`).bind(o.id)
+      .first<{ status: QuoteStatus; items_revision: number; product_lines: number }>(),
+    db.prepare(`SELECT a.id, a.file_id, a.approval_status FROM artwork a WHERE a.order_id = ?1
+        AND a.version = (SELECT MAX(b.version) FROM artwork b WHERE b.lineage_id = a.lineage_id AND b.order_id = ?1) ORDER BY a.lineage_id`).bind(o.id)
+      .all<{ id: number; file_id: number; approval_status: ArtworkApproval }>(),
+    latestPoFor(db, o.id),
+  ])
+  return {
+    state: o.state,
+    // Product lines only: a charge-only snapshot is an empty quote (M0 review, carried into M1).
+    quote: quote && { status: quote.status, itemsRevision: quote.items_revision, lineCount: quote.product_lines },
+    itemsRevision: o.items_revision,
+    artworkRequired: o.artwork_required === 1,
+    designs: designs.results.map((d) => ({ currentVersion: { id: d.id, fileId: d.file_id, approval: d.approval_status } })),
+    poRequired: o.po_required === 1,
+    latestPo: po ? { status: po.status } : null,
+    authorizedAt: o.authorized_at,
+    materialsRequired: o.materials_required === 1,
+    purchases: [], // ponytail: order purchases arrive in M3
+    prepStatus: o.prep_status,
+  }
+}
+
+type ItemRow = {
+  id: number; kind: ItemKind; description: string | null; product: string | null; garment_color: string | null; method: Method | null
+  sizes: string | null; quantity: number; unit_price_cents: number
+}
+const json = (s: string | null) => (s === null ? null : (JSON.parse(s) as unknown))
+const toItem = (i: ItemRow) => ({
+  id: i.id, kind: i.kind, description: i.description, product: i.product, garmentColor: i.garment_color, method: i.method,
+  sizes: json(i.sizes) as Record<string, number> | null, quantity: i.quantity, unitPriceCents: i.unit_price_cents,
 })
 
-export async function getOrderDetail(db: D1Database, number: string): Promise<(Omit<OrderDetailResponse, 'gate'> & { gateInput: { order: GateOrder; latestPo: GatePo } }) | null> {
+export async function getOrderDetail(db: D1Database, number: string): Promise<(Omit<OrderDetailResponse, 'gate' | 'readiness'> & { readinessInput: ReadinessInput }) | null> {
   const o = await getOrderByNumber(db, number)
   if (!o) return null
-  const [customer, contact, items, estimate, pos, notes, activity] = await Promise.all([
+  const [customer, contact, items, quote, pos, notes, activity, input] = await Promise.all([
     db.prepare('SELECT id, name, kind, email, phone FROM customers WHERE id = ?').bind(o.customer_id).first<OrderDetailResponse['customer']>(),
     o.contact_id === null
       ? null
       : db.prepare('SELECT id, name, email, phone, title FROM customer_contacts WHERE id = ?').bind(o.contact_id).first<NonNullable<OrderDetailResponse['contact']>>(),
-    db.prepare('SELECT id, product, garment_color, method, sizes, quantity, unit_price_cents, notes FROM order_items WHERE order_id = ? ORDER BY id').bind(o.id)
-      .all<{ id: number; product: string; garment_color: string | null; method: Method; sizes: string | null; quantity: number; unit_price_cents: number; notes: string | null }>(),
-    db.prepare('SELECT id, version, inputs, lines, total_cents, status, created_at FROM estimates WHERE order_id = ? ORDER BY version DESC LIMIT 1').bind(o.id)
-      .first<{ id: number; version: number; inputs: string; lines: string; total_cents: number; status: NonNullable<OrderDetailResponse['latestEstimate']>['status']; created_at: string }>(),
+    db.prepare('SELECT id, kind, description, product, garment_color, method, sizes, quantity, unit_price_cents, notes FROM order_items WHERE order_id = ? ORDER BY id').bind(o.id)
+      .all<ItemRow & { notes: string | null }>(),
+    db.prepare(`SELECT id, version, status, items_revision, subtotal_cents, charges_cents, discounts_cents, total_cents, created_at, sent_at, decided_at
+        FROM quotes WHERE order_id = ? ORDER BY version DESC LIMIT 1`).bind(o.id)
+      .first<{ id: number; version: number; status: QuoteStatus; items_revision: number; subtotal_cents: number; charges_cents: number
+        discounts_cents: number; total_cents: number; created_at: string; sent_at: string | null; decided_at: string | null }>(),
     db.prepare('SELECT id, po_number, amount_cents, status, created_at, updated_at FROM purchase_orders WHERE order_id = ? ORDER BY id DESC').bind(o.id)
       .all<{ id: number; po_number: string | null; amount_cents: number | null; status: PoStatus; created_at: string; updated_at: string }>(),
     db.prepare(`SELECT n.id, n.body, u.name AS author_name, n.created_at FROM notes n LEFT JOIN users u ON u.id = n.author_id
@@ -214,36 +294,41 @@ export async function getOrderDetail(db: D1Database, number: string): Promise<(O
     db.prepare(`SELECT a.id, COALESCE(u.name, a.actor_kind) AS actor, a.action, a.before, a.after, a.at FROM activity_log a
         LEFT JOIN users u ON u.id = a.actor_id WHERE a.entity_type = 'order' AND a.entity_id = ? ORDER BY a.id DESC LIMIT 50`).bind(o.id)
       .all<{ id: number; actor: string; action: string; before: string | null; after: string | null; at: string }>(),
+    readinessInput(db, o),
   ])
-  const json = (s: string | null) => (s === null ? null : (JSON.parse(s) as unknown))
+  const quoteItems = quote
+    ? (await db.prepare('SELECT id, kind, description, product, garment_color, method, sizes, quantity, unit_price_cents, line_total_cents FROM quote_items WHERE quote_id = ? ORDER BY position')
+        .bind(quote.id).all<ItemRow & { line_total_cents: number }>()).results
+    : []
   // Activity payloads are an allowlist: anything else stored in the JSON never leaves the server.
   const payload = (s: string | null) => {
     const v = json(s)
     if (v === null || typeof v !== 'object') return null
     return Object.fromEntries(Object.entries(v).filter(([k]) => ACTIVITY_KEYS.includes(k)))
   }
-  const latestPo = pos.results[0] ? { status: pos.results[0].status } : null
   return {
     order: {
-      id: o.id, number: o.number, source: o.source, title: o.title, dueDate: o.due_date, artworkStatus: o.artwork_status,
+      id: o.id, number: o.number, source: o.source, title: o.title, dueDate: o.due_date,
+      artworkStatus: o.artwork_status, artworkRequired: o.artwork_required === 1,
       poRequired: o.po_required === 1, authorizedAt: o.authorized_at, authorizedBy: o.authorized_by,
-      productionStatus: o.production_status, assigneeId: o.assignee_id, estimatedTotalCents: o.estimated_total_cents,
+      authorizationMethod: o.authorization_method, authorizationNotes: o.authorization_notes, itemsRevision: o.items_revision,
+      paymentTerms: o.payment_terms, materialsRequired: o.materials_required === 1, prepStatus: o.prep_status,
+      productionStatus: o.production_status, assigneeId: o.assignee_id,
       invoiceRef: o.invoice_ref, paymentRef: o.payment_ref, state: o.state, createdAt: o.created_at, updatedAt: o.updated_at,
     },
     customer: customer as OrderDetailResponse['customer'],
     contact,
-    items: items.results.map((i) => ({
-      id: i.id, product: i.product, garmentColor: i.garment_color, method: i.method,
-      sizes: json(i.sizes) as Record<string, number> | null, quantity: i.quantity, unitPriceCents: i.unit_price_cents, notes: i.notes,
-    })),
-    latestEstimate: estimate && {
-      id: estimate.id, version: estimate.version, inputs: json(estimate.inputs), lines: json(estimate.lines),
-      totalCents: estimate.total_cents, status: estimate.status, createdAt: estimate.created_at,
+    items: items.results.map((i) => ({ ...toItem(i), notes: i.notes })),
+    quote: quote && {
+      id: quote.id, version: quote.version, status: quote.status, itemsRevision: quote.items_revision,
+      subtotalCents: quote.subtotal_cents, chargesCents: quote.charges_cents, discountsCents: quote.discounts_cents, totalCents: quote.total_cents,
+      createdAt: quote.created_at, sentAt: quote.sent_at, decidedAt: quote.decided_at,
+      items: quoteItems.map((i) => ({ ...toItem(i), lineTotalCents: i.line_total_cents })),
     },
     purchaseOrders: pos.results.map((p) => ({ id: p.id, poNumber: p.po_number, amountCents: p.amount_cents, status: p.status, createdAt: p.created_at, updatedAt: p.updated_at })),
     notes: notes.results.map((n) => ({ id: n.id, body: n.body, authorName: n.author_name, createdAt: n.created_at })),
     activity: activity.results.map((a) => ({ id: a.id, actor: a.actor, action: a.action, before: payload(a.before), after: payload(a.after), createdAt: a.at })),
-    gateInput: { order: toGateOrder(o), latestPo },
+    readinessInput: input,
   }
 }
 
@@ -252,8 +337,7 @@ export async function getOrderDetail(db: D1Database, number: string): Promise<(O
 export async function loadForProductionChange(db: D1Database, number: string) {
   const o = await getOrderByNumber(db, number)
   if (!o) return null
-  const po = await latestPoFor(db, o.id)
-  return { id: o.id, from: o.production_status, order: toGateOrder(o), latestPo: po ? { status: po.status } : null }
+  return { id: o.id, from: o.production_status, state: o.state, input: await readinessInput(db, o) }
 }
 
 const NOW = `strftime('%Y-%m-%dT%H:%M:%fZ','now')`
@@ -261,31 +345,24 @@ const NOW = `strftime('%Y-%m-%dT%H:%M:%fZ','now')`
 const LOG_IF_CHANGED = `INSERT INTO activity_log (actor_kind, actor_id, entity_type, entity_id, action, before, after)
   SELECT 'user', ?, 'order', ?, ?, ?, ? WHERE changes() > 0`
 
-// The single SQL definition of "latest PO" (highest id), correlated on the orders row being updated.
-const LATEST_PO_STATUS = `(SELECT status FROM purchase_orders WHERE order_id = orders.id ORDER BY id DESC LIMIT 1)`
-// SQL twin of canEnterProduction, re-asserted at write time because the route reads before it writes.
-export const GATE_OK = `(state = 'active' AND artwork_status = 'approved' AND ((po_required = 0 AND authorized_at IS NOT NULL) OR (po_required = 1 AND ${LATEST_PO_STATUS} = 'approved')))`
-// SQL twin of preProductionStatus.
-export const PRE_PRODUCTION = `CASE WHEN ${GATE_OK} THEN 'ready'
-  WHEN (po_required = 1 AND (${LATEST_PO_STATUS} IS NULL OR ${LATEST_PO_STATUS} <> 'approved')) OR (po_required = 0 AND authorized_at IS NULL) THEN 'awaiting_authorization'
-  ELSE 'awaiting_artwork' END`
-
 /**
- * THE only writer of orders.production_status for a user-requested change (the PO
- * auto-sync below is the other). Callers must have passed checkProductionTransition.
- * For ready or later the gate is re-asserted in the UPDATE itself. Returns false when
- * the order moved or the gate no longer holds (nothing logged, nothing changed).
+ * THE only writer of orders.production_status for a user-requested change (the PO auto-sync below is the
+ * other). Callers must have passed checkOrderProductionMove. The readiness the move depended on is
+ * re-asserted in the UPDATE itself: a start needs the full gate, a move between pre-production statuses
+ * must land on the derived one. Returns false when the order moved or readiness no longer holds
+ * (nothing logged, nothing changed).
  */
 export async function applyProductionChange(db: D1Database, p: { orderId: number; actorId: number; from: ProductionStatus; to: ProductionStatus }) {
-  const completing = p.to === 'completed'
-  const gated = PRODUCTION_STATUSES.indexOf(p.to) >= PRODUCTION_STATUSES.indexOf('ready')
+  const guard = p.to === 'in_production' ? ` AND ${GATE_OK}`
+    : (PRE_PRODUCTION_STATUSES as readonly string[]).includes(p.to) ? ` AND ${PRE_PRODUCTION} = ?` : ''
+  const binds: (string | number)[] = [p.to, p.orderId, p.from, ...(guard.endsWith('?') ? [p.to] : [])]
   const [update] = await db.batch([
     db
-      .prepare(`UPDATE orders SET production_status = ?, ${completing ? `state = 'completed', ` : ''}updated_at = ${NOW} WHERE id = ? AND production_status = ?${gated ? ` AND ${GATE_OK}` : ''}`)
-      .bind(p.to, p.orderId, p.from),
+      .prepare(`UPDATE orders SET production_status = ?, updated_at = ${NOW} WHERE id = ? AND production_status = ? AND state = 'active'${guard}`)
+      .bind(...binds),
     db
       .prepare(LOG_IF_CHANGED)
-      .bind(p.actorId, p.orderId, 'production_status_changed', JSON.stringify({ production_status: p.from }), JSON.stringify({ production_status: p.to, ...(completing ? { state: 'completed' } : {}) })),
+      .bind(p.actorId, p.orderId, 'production_status_changed', JSON.stringify({ production_status: p.from }), JSON.stringify({ production_status: p.to })),
   ])
   return (update?.meta.changes ?? 0) > 0
 }
@@ -295,13 +372,13 @@ export async function loadForPoChange(db: D1Database, number: string, poId: numb
   if (!o) return null
   const po = await db.prepare('SELECT id, status FROM purchase_orders WHERE id = ? AND order_id = ?').bind(poId, o.id).first<{ id: number; status: PoStatus }>()
   if (!po) return null
-  const latest = await latestPoFor(db, o.id)
-  return { orderId: o.id, productionStatus: o.production_status, order: toGateOrder(o), po, latestPoId: latest?.id ?? po.id, latestPo: latest ? { status: latest.status } : null }
+  const [latest, input] = await Promise.all([latestPoFor(db, o.id), readinessInput(db, o)])
+  return { orderId: o.id, productionStatus: o.production_status, state: o.state, input, po, latestPoId: latest?.id ?? po.id }
 }
 
 /**
- * Updates the PO (guarded by its previous status) with its own activity row. When `sync` is set, the
- * awaiting_* production status is then re-derived in SQL from the latest PO at write time, guarded by the
+ * Updates the PO (guarded by its previous status) with its own activity row. When `sync` is set, an
+ * awaiting_* production status is then re-derived in SQL from readiness at write time, guarded by the
  * production status the caller saw, with its own activity row. Each row exists only if its UPDATE changed one.
  * Returns whether the PO changed, and the persisted production status.
  */
@@ -319,7 +396,7 @@ export async function applyPoChange(
       db
         .prepare(
           `UPDATE orders SET production_status = ${PRE_PRODUCTION}, updated_at = ${NOW}
-           WHERE id = ? AND changes() > 0 AND state = 'active' AND production_status = ? AND production_status IN ('awaiting_authorization','awaiting_artwork')
+           WHERE id = ? AND changes() > 0 AND state = 'active' AND production_status = ? AND production_status IN (${AWAITING_LIST})
            AND production_status <> ${PRE_PRODUCTION}`,
         )
         .bind(p.orderId, p.productionFrom),
