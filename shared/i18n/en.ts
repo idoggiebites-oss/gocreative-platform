@@ -1,7 +1,7 @@
 import type { ActivityAction, ApiErrorCode, AttentionReason, GateReasonCode, OrderView } from '../api'
 import type {
   ArtworkApproval, AuthorizationMethod, CustomerKind, InquiryStatus, ItemKind, Method, OrderArtworkStatus,
-  OrderSource, OrderState, PaymentTerms, PoStatus, PrepStatus, ProductionStatus, QuoteStatus, Role,
+  OrderSource, OrderState, PaymentTerms, PoStatus, PrepStatus, ProductionStatus, PurchaseStatus, QuoteStatus, Role,
 } from '../enums'
 
 export type Lang = 'en' | 'es'
@@ -261,7 +261,8 @@ export const en = {
       recordApproval: 'Record approval',
     },
     tabsLabel: 'Order sections',
-    tabs: { items: 'Items & quote', artwork: 'Artwork', quote: 'Quote', po: 'Purchase order', production: 'Production', activity: 'Activity' },
+    tabs: { items: 'Items & quote', artwork: 'Artwork', quote: 'Quote', po: 'Purchase order', production: 'Production', purchasing: 'Purchasing', activity: 'Activity' },
+    prep: { label: 'Preparation', hint: 'Screens, files, setup. Pick the state that matches the shop floor.' },
     items: {
       product: 'Product', sizes: 'Sizes', qty: 'Qty', unit: 'Unit', total: 'Total', itemsTotal: 'Items total', empty: 'This order has no items yet.',
       edit: 'Edit items', saveItems: 'Save items',
@@ -328,9 +329,26 @@ export const en = {
       createQuote: 'Create quote', acceptQuote: 'Accept quote', newVersion: 'New quote version', recordAuthorization: 'Record authorization',
       artworkNotRequired: 'Mark artwork not required', artworkRequired: 'Require artwork', uploadArtwork: 'Upload artwork',
       noPurchasing: 'Confirm no purchasing needed', recordPurchase: 'Record purchase', startPrep: 'Start preparation',
-      soon: (milestone: string) => `Coming soon (${milestone})`,
+      addPurchase: 'Add purchase', markReady: 'Mark ready', prepNotRequired: 'Mark not required', prepRequired: 'Require preparation',
       noPurchasingTitle: 'No purchasing needed?', noPurchasingBody: 'Confirms that this order needs no materials ordered, so it will not wait on purchasing.', noPurchasingConfirm: 'Confirm',
     },
+  },
+  purchasing: {
+    title: 'Purchasing', add: 'Add purchase', addTitle: 'Add a purchase', addBody: 'Record materials to buy for this order. Nothing is ordered until you mark it ordered.',
+    editTitle: 'Edit purchase', edit: 'Edit', save: 'Save purchase', empty: 'No purchases yet.',
+    hint: 'Purchasing usually starts after authorization.', notNeeded: 'This order is marked "No purchasing needed".',
+    inactive: 'This order is cancelled or closed, so purchases cannot change.',
+    supplier: 'Supplier', addSupplier: 'Add supplier…', newSupplier: 'New supplier name', createSupplier: 'Add supplier', supplierDefault: (n: string) => `${n} (default)`,
+    description: 'Description', quantity: 'Quantity', useSizes: 'Use size breakdown', sizeLabel: (size: string) => `Size ${size}`, sizesSum: (n: number) => `The sizes add up to ${n} and set the quantity.`,
+    estCost: 'Estimated unit cost (USD)', actCost: 'Actual unit cost (USD)', costInvalid: 'Enter an amount like 12.50.', expectedOn: 'Expected date', notes: 'Notes',
+    lockedNote: 'Once ordered, only the actual cost, expected date and notes can change.',
+    totals: (est: string, act: string) => `Estimated ${est} · actual ${act}`, line: (est: string, act: string) => `Estimated ${est} · actual ${act}`,
+    received: (r: number, q: number) => `${r} of ${q} received`, over: (n: number) => `${n} more than ordered`,
+    orderedOn: (d: string) => `Ordered ${d}`, expected: (d: string) => `Expected ${d}`, noCost: 'no cost yet',
+    markOrdered: 'Mark ordered', orderedTitle: 'Mark as ordered', orderedBody: 'Confirms the materials were actually bought. The app does not place orders.', orderedOnLabel: 'Ordered on', orderedConfirm: 'Mark ordered',
+    record: 'Record delivery', recordTitle: 'Record a delivery', recordBody: 'Receipts cannot be edited afterwards. Receiving more than ordered is allowed.', receivedOn: 'Received on', recordConfirm: 'Record delivery',
+    cancel: 'Cancel purchase', cancelTitle: 'Cancel this purchase?', cancelBody: 'A cancelled purchase is closed and no longer counts toward materials.', reason: 'Reason', cancelConfirm: 'Cancel purchase', keep: 'Keep',
+    receipts: 'Deliveries', receipt: (q: number, d: string, who: string | null) => `${q} received ${d}${who ? ` by ${who}` : ''}`,
   },
   files: {
     upload: {
@@ -435,6 +453,7 @@ export const en = {
     authorizationMethod: {
       phone: 'Phone', email: 'Email', in_person: 'In person', signed_form: 'Signed form', other: 'Other',
     } satisfies Record<AuthorizationMethod, string>,
+    purchaseStatus: { not_ordered: 'Not ordered', ordered: 'Ordered', partially_received: 'Partially received', received: 'Received', cancelled: 'Cancelled' } satisfies Record<PurchaseStatus, string>,
     prepStatus: { not_started: 'Not started', in_progress: 'In progress', ready: 'Ready', not_required: 'Not required' } satisfies Record<PrepStatus, string>,
     paymentTerms: { due_at_pickup: 'Due at pickup', due_after_pickup: 'Due after pickup' } satisfies Record<PaymentTerms, string>,
     poStatus: {
