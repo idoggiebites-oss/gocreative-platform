@@ -144,13 +144,13 @@ export function orderWriteRoutes() {
 
     .patch('/orders/:number', withOrder(z.object({
       expectedVersion, title: text(200).optional(), dueDate: businessDate.nullable().optional(), contactId: id.nullable().optional(),
-      source: z.enum(ORDER_SOURCES).optional(), poRequired: z.boolean().optional(), paymentTerms: z.enum(PAYMENT_TERMS).optional(),
+      source: z.enum(ORDER_SOURCES).optional(), poRequired: z.boolean().optional(), paymentTerms: z.enum(PAYMENT_TERMS).optional(), paymentDueOn: businessDate.nullable().optional(),
       artworkRequired: z.boolean().optional(), materialsRequired: z.boolean().optional(), confirmNoPurchasing: z.boolean().optional(),
       assigneeId: id.nullable().optional(),
     }), async (c, o, b) => {
       if (o.state !== 'active') return notActive(c)
       const current: Record<db.HeaderField, string | number | null> = {
-        title: o.title, dueDate: o.due_date, contactId: o.contact_id, source: o.source, poRequired: o.po_required, paymentTerms: o.payment_terms,
+        title: o.title, dueDate: o.due_date, contactId: o.contact_id, source: o.source, poRequired: o.po_required, paymentTerms: o.payment_terms, paymentDueOn: o.payment_due_on,
         artworkRequired: o.artwork_required, materialsRequired: o.materials_required, assigneeId: o.assignee_id,
       }
       const changes: db.HeaderChange = {}

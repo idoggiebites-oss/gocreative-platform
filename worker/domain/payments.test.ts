@@ -1,4 +1,4 @@
-import { balance, checkCheckTransition, matchRetry } from './payments.ts'
+import { balance, checkCheckTransition, daysOutstanding, matchRetry, nextPaymentAction, settledState, takesCheckCollection } from './payments.ts'
 import { CHECK_STATUSES } from '../../shared/enums.ts'
 it.each([
   [null, [], null, 0, 'unpaid'], [null, [100], null, 0, 'partially_paid'],
@@ -31,4 +31,27 @@ it('treats an identical request_id resubmission as a retry and any difference as
   for (const patch of [{ orderId: 2 }, { amountCents: 501 }, { method: 'check' as const }, { paidOn: '2026-10-31' }, { notes: 'different' }]) {
     expect(matchRetry(existing, { ...incoming, ...patch })).toEqual({ ok: false, error: 'request_id_conflict' })
   }
+})
+
+it('a cancelled order stays cancelled; otherwise closed exactly when picked up and paid', () => {
+  for (const state of ['active', 'closed', 'cancelled'] as const) for (const pickedUp of [true, false]) for (const f of ['unpaid', 'partially_paid', 'paid'] as const) {
+    expect(settledState(state, pickedUp, f)).toBe(state === 'cancelled' ? 'cancelled' : pickedUp && f === 'paid' ? 'closed' : 'active')
+  }
+})
+it('next payment action: a ready check first, then an awaited one, then by terms', () => {
+  const base = { paymentTerms: 'due_after_pickup' as const, pickedUp: true, openChecks: [] }
+  expect(nextPaymentAction({ ...base, openChecks: ['awaiting_payment', 'ready_for_collection'] })).toBe('collect_check')
+  expect(nextPaymentAction({ ...base, openChecks: ['awaiting_payment'] })).toBe('await_check')
+  expect(nextPaymentAction(base)).toBe('request_check')
+  expect(nextPaymentAction({ ...base, paymentTerms: 'due_at_pickup', pickedUp: false })).toBe('collect_at_pickup')
+  expect(nextPaymentAction({ ...base, paymentTerms: 'due_at_pickup' })).toBe('record_payment')
+})
+it('days outstanding count from pickup (after-pickup terms) or from ready (at-pickup terms)', () => {
+  const i = { readyOn: '2026-10-01', pickedUpOn: '2026-10-20', today: '2026-10-31' }
+  expect(daysOutstanding({ ...i, paymentTerms: 'due_after_pickup' })).toBe(11)
+  expect(daysOutstanding({ ...i, paymentTerms: 'due_at_pickup' })).toBe(30)
+  expect(daysOutstanding({ ...i, paymentTerms: 'due_after_pickup', pickedUpOn: null })).toBeNull()
+  expect(daysOutstanding({ ...i, paymentTerms: 'due_at_pickup', readyOn: '2026-11-02' })).toBe(0)
+  expect(takesCheckCollection('due_after_pickup')).toBe(true)
+  expect(takesCheckCollection('due_at_pickup')).toBe(false)
 })

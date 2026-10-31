@@ -287,8 +287,9 @@ logic it can test, Claude for design, integration and verification).
       upcoming + action required. *(Sonnet)*
 
 ### M5 — Pickup and payments (brief Step 5) → acceptance 13–16, 17 (payments part)
-- [ ] Migration 0006; pickups (notify, collect, unpaid-release override); payments (multiple,
+- [x] Migration 0006; pickups (notify, collect, unpaid-release override); payments (multiple,
       derived balance/status); check collections (all five statuses, cleared separate). *(Opus; Codex reviews the money)*
+      — server built 2026-10-31 (DECISIONS "M5 pickup, payments and check collection"); Codex review next.
 - [ ] UI: pickup panel (also from the dashboard), payments panel, Payments page with checks
       to collect, dashboard Outstanding payments + Ready for pickup. *(Sonnet)*
 

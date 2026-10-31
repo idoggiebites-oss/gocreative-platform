@@ -1,4 +1,9 @@
+import { useRef } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import type {
+  CheckClearRequest, CheckCollectRequest, CheckCreateRequest, CheckDepositRequest, CheckReadyRequest, CheckWriteResponse, CollectPickupRequest,
+  NotifyPickupRequest, PaymentsPageResponse, PaymentsResponse, PickupResponse, RecordPaymentRequest, RecordPaymentResponse, VoidPaymentRequest,
+} from '@shared/api'
 import type {
   ArtworkListResponse, UploadResponse, CustomerDetailResponse, CustomersListResponse, DashboardResponse, OrderDetailResponse, OrdersListResponse, OrderView, PoChangeResponse, ProductionChangeResponse,
   OrderWriteResponse, PrepRequest, PurchaseCreateRequest, PurchaseOrderedRequest, PurchasePatchRequest, PurchasesResponse, ReasonRequest, ReceiptCreateRequest,
@@ -54,6 +59,7 @@ function useInvalidate(number: string) {
   return () => Promise.all([
     qc.invalidateQueries({ queryKey: ['dashboard'] }),
     qc.invalidateQueries({ queryKey: ['production'] }),
+    qc.invalidateQueries({ queryKey: ['payments'] }),
     qc.invalidateQueries({ queryKey: ['orders'] }),
     qc.invalidateQueries({ queryKey: ['order', number] }),
   ])
@@ -201,6 +207,63 @@ export function useReorderQueue() {
     onSettled: () => Promise.all([qc.invalidateQueries({ queryKey: ['production'] }), qc.invalidateQueries({ queryKey: ['dashboard'] })]),
   })
 }
+
+// ---- pickup and payments (M5) ----
+// Order writes send the order version the page was loaded with (expectedVersion; 409 conflict_retry when stale). The
+// check moves (ready, collect, deposit, clear) need no version: the server guards them by the check's status.
+// Pickup and payment queries live under ['order', number], so every order write's invalidation refetches them.
+export const usePickup = (number: string) =>
+  useQuery({ queryKey: ['order', number, 'pickup'], queryFn: () => call<PickupResponse>(`/orders/${encodeURIComponent(number)}/pickup`), retry })
+export const useNotifyPickup = (number: string) =>
+  useOrderWrite(number, (base, b: NotifyPickupRequest) => send<OrderWriteResponse>('POST', `${base}/pickup/notify`, b))
+/** 409 payment_required means show the unpaid warning; an owner resends with { override: true, reason }. */
+export const useCollectPickup = (number: string) =>
+  useOrderWrite(number, (base, b: CollectPickupRequest) => send<OrderWriteResponse>('POST', `${base}/pickup/collect`, b))
+
+export const usePayments = (number: string) =>
+  useQuery({ queryKey: ['order', number, 'payments'], queryFn: () => call<PaymentsResponse>(`/orders/${encodeURIComponent(number)}/payments`), retry })
+
+/**
+ * One requestId per form submission: made on the first attempt and reused while that same submission is retried after a
+ * failure (network error, double click), so the server records it once. A success, or any change to the details, starts
+ * a new submission, so two identical payments entered one after the other are both recorded. newSubmission() forces one.
+ */
+export function useRecordPayment(number: string) {
+  const submission = useRef<{ key: string; requestId: string } | null>(null)
+  const write = useOrderWrite(number, async (base, b: RecordPaymentRequest) => {
+    const res = await send<RecordPaymentResponse>('POST', `${base}/payments`, b)
+    if (submission.current?.requestId === b.requestId) submission.current = null
+    return res
+  })
+  const requestIdFor = (b: Omit<RecordPaymentRequest, 'requestId'>) => {
+    // The same submission = the same details; anything changed in the form is a new submission with a new id.
+    const key = JSON.stringify([b.amountCents, b.method, b.paidOn ?? null, b.notes ?? null])
+    if (submission.current?.key !== key) submission.current = { key, requestId: crypto.randomUUID() }
+    return submission.current.requestId
+  }
+  return {
+    ...write,
+    mutate: (b: Omit<RecordPaymentRequest, 'requestId'>) => write.mutate({ ...b, requestId: requestIdFor(b) }),
+    mutateAsync: (b: Omit<RecordPaymentRequest, 'requestId'>) => write.mutateAsync({ ...b, requestId: requestIdFor(b) }),
+    newSubmission: () => { submission.current = null },
+  }
+}
+/** Owner only (403 void_requires_owner). */
+export const useVoidPayment = (number: string) =>
+  useOrderWrite(number, (base, { id, ...b }: VoidPaymentRequest & { id: number }) => send<OrderWriteResponse>('POST', `${base}/payments/${id}/void`, b))
+export const useCreateCheck = (number: string) =>
+  useOrderWrite(number, (base, b: CheckCreateRequest) => send<CheckWriteResponse>('POST', `${base}/checks`, b))
+
+/** Check moves refetch everything on screen (order, payments page, dashboard): they are reached from all three. */
+const useCheckMove = <V>(move: 'ready' | 'collect' | 'deposit' | 'clear') =>
+  useSend(({ id, ...b }: V & { id: number }) => send<CheckWriteResponse>('POST', `/checks/${id}/${move}`, b))
+export const useCheckReady = () => useCheckMove<CheckReadyRequest>('ready')
+/** Safe to retry: the same amount answers with the stored collection; a different one is 409 check_collect_conflict. */
+export const useCollectCheck = () => useCheckMove<CheckCollectRequest>('collect')
+export const useDepositCheck = () => useCheckMove<CheckDepositRequest>('deposit')
+export const useClearCheck = () => useCheckMove<CheckClearRequest>('clear')
+
+export const usePaymentsPage = () => useQuery({ queryKey: ['payments'], queryFn: () => call<PaymentsPageResponse>('/payments'), retry })
 
 /** The signed-in user; `role` decides what the UI offers (the server enforces it regardless). */
 export const useMe = () =>

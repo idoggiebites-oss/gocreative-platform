@@ -13,6 +13,7 @@ import { checkPoTransition } from '../domain/purchaseOrder'
 import * as db from '../db/orders'
 import { listProduction, runningJobs } from '../db/production'
 import { businessToday } from '../../shared/businessDate'
+import { loadChecksReady, loadOutstanding } from './payments'
 
 export const number = z.string().refine((s) => parseOrderNumber(s) !== null, 'invalid order number')
 const poId = z.string().regex(/^[1-9]\d{0,14}$/, 'invalid purchase order id').transform(Number)
@@ -28,15 +29,21 @@ export function orderRoutes() {
   return new Hono<AppEnv>()
     .get('/dashboard', async (c) => {
       const d = c.env.DB
-      const [orders, readyAt, inquiries, recentActivity, production] = await Promise.all([
+      const today = businessToday(new Date())
+      const [orders, readyAt, inquiries, recentActivity, production, outstanding, checksReady] = await Promise.all([
         db.listActiveDashOrders(d), db.readyForPickupSince(d), db.listNewInquiriesForDashboard(d), db.recentActivity(d), listProduction(d),
+        loadOutstanding(d, today), loadChecksReady(d),
       ])
-      const { metrics, attention, dueThisWeek } = buildDashboard(orders, readyAt, inquiries, businessToday(new Date()))
+      const { metrics, attention, dueThisWeek } = buildDashboard(orders, readyAt, inquiries, today)
+      const oldest = outstanding.flatMap((r) => (r.daysOutstanding === null ? [] : [r.daysOutstanding]))
+      const outstandingPayments = {
+        count: outstanding.length, totalCents: outstanding.reduce((s, r) => s + (r.outstandingCents ?? 0), 0), ...(oldest.length ? { oldestDays: Math.max(...oldest) } : {}),
+      }
       const items = await db.itemsSummaries(d, attention.flatMap((a) => (a.orderId === null ? [] : [a.orderId])))
       const needsAttention = attention.map(({ orderId, ...a }) => ({ ...a, itemsSummary: orderId === null ? '' : (items.get(orderId) ?? '') }))
       return c.json<DashboardResponse>({
         metrics, needsAttention, dueThisWeek, recentActivity,
-        currentJobs: production.current, upcoming: production.readyToStart.slice(0, 5), actionRequired: buildActionRequired(orders),
+        currentJobs: production.current, upcoming: production.readyToStart.slice(0, 5), actionRequired: buildActionRequired(orders, checksReady), outstandingPayments,
       })
     })
     .get('/orders', async (c) => {

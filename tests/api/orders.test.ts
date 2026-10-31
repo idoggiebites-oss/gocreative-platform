@@ -78,7 +78,9 @@ describe('orders list', () => {
     const sqlNums = (where: string) => (t.sqlite.prepare(`SELECT number FROM orders o WHERE ${where} ORDER BY due_date, number`).all() as { number: string }[]).map((r) => r.number)
     expect(await rowsOf('active')).toEqual(sqlNums(`state='active'`))
     expect(await rowsOf('completed')).toEqual(sqlNums(`state='closed'`))
-    expect(await rowsOf('ready')).toEqual(sqlNums(`state='active' AND production_status='production_complete'`))
+    // Picked up (2026-0006, unpaid) is no longer waiting for pickup, even though it stays active (M5).
+    expect(await rowsOf('ready')).toEqual(sqlNums(`state='active' AND production_status='production_complete' AND NOT EXISTS (SELECT 1 FROM pickups p WHERE p.order_id = o.id AND p.picked_up_on IS NOT NULL)`))
+    expect(await rowsOf('ready')).toEqual(['2026-0020'])
     expect(await rowsOf('in_production')).toEqual(sqlNums(`state='active' AND production_status IN ('in_production','quality_control')`))
     // Derived from the designs' current versions (seed: 7 and 12 under review, 9 changes requested, 8/22/23/25 none; 18 needs none).
     expect((await rowsOf('waiting_artwork')).sort()).toEqual(['2026-0007', '2026-0008', '2026-0009', '2026-0012', '2026-0022', '2026-0023', '2026-0025'])
@@ -95,13 +97,13 @@ describe('orders list', () => {
     const t = setup()
     const before = (await t.json<OrdersListResponse>(await t.call('GET', '/orders'))).counts
     // quality_control (the in_production view), production_complete. A running order can't be cancelled without its slot (0005).
-    t.sqlite.exec(`UPDATE orders SET state = 'cancelled' WHERE number IN ('2026-0004', '2026-0006')`)
+    t.sqlite.exec(`UPDATE orders SET state = 'cancelled' WHERE number IN ('2026-0004', '2026-0020')`)
     const get = async (view: string) => t.json<OrdersListResponse>(await t.call('GET', `/orders?view=${view}&limit=200`))
     const nums = (r: OrdersListResponse) => (r.rows as { number: string }[]).map((x) => x.number)
     const ip = await get('in_production')
     const rd = await get('ready')
     expect(nums(ip)).not.toContain('2026-0004')
-    expect(nums(rd)).not.toContain('2026-0006')
+    expect(nums(rd)).not.toContain('2026-0020')
     expect(ip.counts.in_production).toBe(before.in_production - 1)
     expect(ip.counts.ready).toBe(before.ready - 1)
   })
@@ -402,7 +404,7 @@ describe('dashboard due window', () => {
   const o = (id: number, dueDate: string) => ({
     id, number: `N${id}`, customerName: 'c', title: 't', artworkStatus: 'approved' as const, productionStatus: 'ready' as const,
     dueDate, latestPoStatus: null, latestPoAmountCents: null, quoteStatus: null,
-    createdAt: '2026-10-01T00:00:00.000Z', quoteSentAt: null, poRequired: false, materialsAwaiting: false,
+    createdAt: '2026-10-01T00:00:00.000Z', quoteSentAt: null, poRequired: false, materialsAwaiting: false, pickupStage: null,
   })
   test('half-open [today, today+7) for dueIn7Days and dueThisWeek', () => {
     const today = '2026-10-30'

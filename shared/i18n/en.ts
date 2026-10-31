@@ -1,7 +1,8 @@
 import type { ActivityAction, ApiErrorCode, AttentionReason, GateReasonCode, OrderView } from '../api'
 import type {
-  ArtworkApproval, AuthorizationMethod, CustomerKind, InquiryStatus, ItemKind, Method, OrderArtworkStatus,
-  OrderSource, OrderState, PaymentTerms, PoStatus, PrepStatus, ProductionStatus, PurchaseStatus, QuoteStatus, Role,
+  ArtworkApproval, AuthorizationMethod, CheckStatus, CustomerKind, FinancialStatus, FulfilmentStatus, InquiryStatus, ItemKind, Method,
+  NotificationMethod, OrderArtworkStatus, OrderSource, OrderState, PaymentMethod, PaymentNextAction, PaymentTerms, PoStatus, PrepStatus,
+  ProductionStatus, PurchaseStatus, QuoteStatus, Role,
 } from '../enums'
 
 export type Lang = 'en' | 'es'
@@ -117,6 +118,15 @@ export const en = {
       override_requires_reason: 'Give a reason for starting a second job alongside the one running.',
       invalid_units_completed: 'Units completed must be a whole number between 0 and the order’s total quantity.',
       units_not_editable: 'Units completed can be recorded only while the job is in production or quality control.',
+      pickup_not_ready: 'This order can’t be picked up until its production is complete.',
+      pickup_recorded: 'This order’s pickup is already recorded and can’t change.',
+      payment_required: 'This order is paid at pickup and still has a balance. Record the payment first, or an owner can release it with a reason.',
+      request_id_conflict: 'This payment form was already submitted with different details. Reload the payments and enter it again.',
+      payment_voided: 'This payment is already voided, and a void can’t be undone.',
+      void_requires_owner: 'Only an owner can void a payment.',
+      check_not_allowed: 'Check collection is only for orders paid after pickup.',
+      invalid_check_transition: 'That check status change isn’t allowed from its current status.',
+      check_collect_conflict: 'This check was already collected for a different amount. Reload to see what was recorded.',
     } satisfies Record<ApiErrorCode, string>,
     unknownReason: 'A requirement is not met.',
     // Codes the API adds before shared/api.ts lists them; looked up after `errors`.
@@ -269,6 +279,17 @@ export const en = {
     production_override: (n: string) => `Owner override: ${n} started alongside the running job`,
     units_completed_changed: (n: string) => `Units completed updated on ${n}`,
     queue_reordered: () => 'Production queue reordered',
+    pickup_notified: (n: string) => `Customer notified that ${n} is ready for pickup`,
+    pickup_collected: (n: string) => `Order ${n} picked up`,
+    pickup_release_override: (n: string) => `Owner override: ${n} released before payment`,
+    payment_recorded: (n: string) => `Payment recorded on ${n}`,
+    payment_voided: (n: string) => `Payment voided on ${n}`,
+    check_created: (n: string) => `Check collection added on ${n}`,
+    check_ready: (n: string) => `Check ready for collection on ${n}`,
+    check_collected: (n: string) => `Check collected on ${n}`,
+    check_deposited: (n: string) => `Check deposited on ${n}`,
+    check_cleared: (n: string) => `Check cleared on ${n}`,
+    order_closed: (n: string) => `Order ${n} closed: picked up and paid`,
     note_added: (n?: string) => (n ? `Note added on ${n}` : 'Note added'),
     other: (n: string) => (n ? `Update on ${n}` : 'Update'),
   } satisfies Record<ActivityAction | 'other', (n: string) => string>,
@@ -542,6 +563,19 @@ export const en = {
       in_production: 'In production', quality_control: 'Quality control', production_complete: 'Production complete',
     } satisfies Record<ProductionStatus, string>,
     inquiryStatus: { new: 'New', converted: 'Converted', spam: 'Spam' } satisfies Record<InquiryStatus, string>,
+    notificationMethod: { phone: 'Phone', email: 'Email', text: 'Text message', in_person: 'In person', other: 'Other' } satisfies Record<NotificationMethod, string>,
+    paymentMethod: { check: 'Check', ach: 'ACH', cash: 'Cash', card: 'Card', other: 'Other' } satisfies Record<PaymentMethod, string>,
+    checkStatus: {
+      awaiting_payment: 'Awaiting payment', ready_for_collection: 'Ready for collection', collected: 'Collected', deposited: 'Deposited', cleared: 'Cleared',
+    } satisfies Record<CheckStatus, string>,
+    fulfilmentStatus: {
+      not_ready: 'Not ready', ready_for_pickup: 'Ready for pickup', customer_notified: 'Customer notified', picked_up: 'Picked up',
+    } satisfies Record<FulfilmentStatus, string>,
+    financialStatus: { unpaid: 'Unpaid', partially_paid: 'Partially paid', paid: 'Paid' } satisfies Record<FinancialStatus, string>,
+    paymentNextAction: {
+      collect_check: 'Collect the check', await_check: 'Wait for the district’s check', collect_at_pickup: 'Collect payment at pickup',
+      record_payment: 'Record the payment', request_check: 'Ask the district for a check',
+    } satisfies Record<PaymentNextAction, string>,
   },
 }
 

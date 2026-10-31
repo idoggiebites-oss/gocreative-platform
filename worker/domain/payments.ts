@@ -1,4 +1,5 @@
-import type { CheckStatus, FinancialStatus, PaymentMethod } from '../../shared/enums.ts'
+import type { CheckStatus, FinancialStatus, OrderState, PaymentMethod, PaymentNextAction, PaymentTerms } from '../../shared/enums.ts'
+import { daysBetween } from '../../shared/businessDate.ts'
 
 type Failure = { ok: false; error: string }
 export function balance(agreedTotalCents: number | null, payments: readonly { amountCents: number }[]): {
@@ -32,4 +33,36 @@ export function matchRetry<T extends PaymentFields>(existing: T, incoming: Payme
   return existing.orderId === incoming.orderId && existing.amountCents === incoming.amountCents && existing.method === incoming.method
     && existing.paidOn === incoming.paidOn && notes(existing.notes) === notes(incoming.notes)
     ? { ok: true, payment: existing } : { ok: false, error: 'request_id_conflict' }
+}
+
+// ---- M5 ----
+
+/** Check collection is the district workflow: only orders paid after pickup take one (DECISIONS 2026-10-31). */
+export const takesCheckCollection = (paymentTerms: PaymentTerms) => paymentTerms === 'due_after_pickup'
+
+/** What closing means for an order's state (PHASE2_PLAN §4.2): closed = picked up AND paid; a cancelled order stays cancelled. */
+export function settledState(state: OrderState, pickedUp: boolean, financial: FinancialStatus): OrderState {
+  if (state === 'cancelled') return state
+  return pickedUp && financial === 'paid' ? 'closed' : 'active'
+}
+
+/**
+ * The Payments page's next action for an order that still owes money: a check ready to collect comes first, then one the
+ * district hasn't issued yet; otherwise pay-at-pickup orders are collected at the counter (or, once released, recorded),
+ * and pay-after-pickup orders need a check requested.
+ */
+export function nextPaymentAction(i: { paymentTerms: PaymentTerms; pickedUp: boolean; openChecks: readonly CheckStatus[] }): PaymentNextAction {
+  if (i.openChecks.includes('ready_for_collection')) return 'collect_check'
+  if (i.openChecks.includes('awaiting_payment')) return 'await_check'
+  if (i.paymentTerms === 'due_at_pickup') return i.pickedUp ? 'record_payment' : 'collect_at_pickup'
+  return 'request_check'
+}
+
+/**
+ * Days a balance has been owed, in shop days: from the pickup for pay-after-pickup orders (null until picked up), from the
+ * day production completed for pay-at-pickup ones (null if unknown). Never negative.
+ */
+export function daysOutstanding(i: { paymentTerms: PaymentTerms; readyOn: string | null; pickedUpOn: string | null; today: string }): number | null {
+  const from = i.paymentTerms === 'due_after_pickup' ? i.pickedUpOn : i.readyOn
+  return from === null ? null : Math.max(0, daysBetween(from, i.today))
 }

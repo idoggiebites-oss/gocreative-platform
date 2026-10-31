@@ -183,9 +183,10 @@ test('the dashboard lists an order missing artwork under Action required and lin
   const group = page.getByRole('group', { name: 'Missing artwork' })
   const link = group.getByRole('link', { name: new RegExp(o.number) })
   await expect(link).toBeVisible()
-  // The M5 groups have no rows yet, so they are not rendered at all.
-  await expect(page.getByText('Awaiting pickup', { exact: true })).toHaveCount(0)
-  await expect(page.getByText('Checks to collect', { exact: true })).toHaveCount(0)
+  // M5 fills the pickup and check groups (the seed has 2026-0020 awaiting pickup and 2026-0006's check ready; other
+  // tests may finish more orders, which can push those past the first rows shown).
+  await expect(page.getByRole('group', { name: 'Awaiting pickup' })).toBeVisible()
+  await expect(page.getByRole('group', { name: 'Checks to collect' }).getByRole('link', { name: /2026-0006/ })).toBeVisible()
   await link.click()
   await expect(page).toHaveURL(new RegExp(`/app/orders/${o.number}$`))
 })

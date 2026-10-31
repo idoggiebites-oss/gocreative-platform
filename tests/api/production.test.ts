@@ -379,7 +379,9 @@ describe('dashboard v2', () => {
     expect(nums(d.actionRequired.pendingPos)).toEqual(['2026-0010', '2026-0011', '2026-0012', '2026-0013', '2026-0014'])
     expect(nums(d.actionRequired.materialsAwaiting)).toEqual(['2026-0016'])
     expect(d.actionRequired.pendingPos.find((r) => r.number === '2026-0013')).toMatchObject({ poStatus: 'rejected' })
-    expect([d.actionRequired.awaitingPickup, d.actionRequired.checksToCollect]).toEqual([[], []])
+    // M5 (seed): 2026-0020 finished and notified; 2026-0006 picked up, so only its ready check is listed.
+    expect(d.actionRequired.awaitingPickup).toEqual([expect.objectContaining({ number: '2026-0020', fulfilmentStatus: 'customer_notified' })])
+    expect(d.actionRequired.checksToCollect).toEqual([expect.objectContaining({ number: '2026-0006', checkId: 2, expectedCents: 72000 })])
     // Running (3), QC (4, 19) and cancelled (24) orders with a rejected PO, an unreceived purchase and changes-requested
     // artwork still stay out: only pre-production orders need these actions (Codex review of fcdbb90).
     for (const id of [3, 4, 19, 24]) {

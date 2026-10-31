@@ -1,4 +1,4 @@
-// M0 design statements for design/sql/payments.sql; M5 runs them verbatim.
+// M0 design statements for design/sql/payments.sql; M5 (migration 0006, worker/db/payments.ts) runs COLLECT_CHECK_SQL verbatim.
 
 // Collect a check: one batch, these three statements in this order, adjacent.
 // Bind [0] (amountReceivedCents, collectedAt, collectedBy, checkCollectionId),
@@ -19,8 +19,10 @@ export const COLLECT_CHECK_SQL = [
    FROM payments WHERE check_collection_id = ? AND changes() = 1`,
 ] as const
 
-// Manual payment. Bind (orderId, amountCents, method, paidOn, notes, recordedBy, requestId).
-// On UNIQUE(request_id) failure the route loads the stored payment and calls matchRetry (domain/payments.ts):
-// identical payload -> return the stored payment; different payload -> 409 request_id_conflict.
+// Manual payment. Bind (orderId, amountCents, method, paidOn, notes, recordedBy, requestId, orderId, expectedVersion).
+// M5: inserts only while the order is still at the version the client saw and not cancelled (a stale write inserts
+// nothing), returning the new id. A request_id that already exists aborts (payment_request_id_exists, migration 0006's
+// REPLACE guard): the route loads the stored payment and calls matchRetry (domain/payments.ts): identical payload ->
+// return the stored payment; different payload -> 409 request_id_conflict.
 export const RECORD_PAYMENT_SQL = `INSERT INTO payments (order_id, amount_cents, method, paid_on, notes, recorded_by, request_id)
-  VALUES (?, ?, ?, ?, ?, ?, ?)`
+  SELECT ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM orders g WHERE g.id = ? AND g.version = ? AND g.state <> 'cancelled') RETURNING id`

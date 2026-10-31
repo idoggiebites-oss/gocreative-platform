@@ -3,6 +3,9 @@ import { expect, test } from 'vitest'
 import { PREP_STATUSES, PRODUCTION_STATUSES, QUOTE_STATUSES } from '../../shared/enums'
 import { getOrderByNumber, readinessInput } from '../../worker/db/orders'
 import { readiness } from '../../worker/domain/readiness'
+import { balance, settledState } from '../../worker/domain/payments'
+import { balanceInput } from '../../worker/db/payments'
+import type { OrderState } from '../../shared/enums'
 import { createTestD1 } from './d1'
 
 const seed = readFileSync(new URL('../../scripts/seed.sql', import.meta.url), 'utf8')
@@ -45,4 +48,27 @@ test('the seed covers the vocabulary the screens and the gate need', () => {
   expect(col(`SELECT COUNT(*) AS v FROM orders WHERE po_required = 0 AND authorized_at IS NOT NULL AND authorization_method IS NOT NULL AND authorization_notes IS NOT NULL`)[0]).toBeGreaterThan(0)
   expect(col(`SELECT COUNT(DISTINCT kind) AS v FROM quote_items`)[0]).toBe(3)
   expect(col(`SELECT next AS v FROM counters WHERE name = 'order' AND year = CAST(strftime('%Y','now') AS INTEGER)`)).toHaveLength(1)
+})
+
+test('the seed’s M5 rows: closed exactly when picked up and paid, and every pickup/payment situation the screens show', async () => {
+  const { db, sqlite } = createTestD1()
+  sqlite.exec(seed)
+  const orders = sqlite.prepare(`SELECT id, number, state, production_status, payment_terms FROM orders WHERE state <> 'cancelled'`).all() as
+    { id: number; number: string; state: OrderState; production_status: string; payment_terms: string }[]
+  const summary: Record<string, string> = {}
+  for (const o of orders) {
+    const input = await balanceInput(db, o.id)
+    const b = balance(input.agreedCents, input.payments)
+    if (!b.ok) throw new Error(b.error)
+    const p = sqlite.prepare('SELECT notified_on, picked_up_on FROM pickups WHERE order_id = ?').get(o.id) as { notified_on: string | null; picked_up_on: string | null } | undefined
+    expect(o.state, o.number).toBe(settledState('active', Boolean(p?.picked_up_on), b.status))
+    if (p) summary[o.number] = `${p.picked_up_on ? 'picked_up' : p.notified_on ? 'notified' : 'ready'}/${b.status}`
+  }
+  expect(summary).toEqual({
+    '2026-0001': 'picked_up/paid', '2026-0002': 'picked_up/paid', '2026-0006': 'picked_up/unpaid', '2026-0015': 'picked_up/paid', '2026-0020': 'notified/partially_paid',
+  })
+  const col = (sql: string) => (sqlite.prepare(sql).all() as { v: unknown }[]).map((r) => r.v)
+  expect(col('SELECT status AS v FROM check_collections ORDER BY id')).toEqual(['cleared', 'ready_for_collection'])
+  expect(col('SELECT order_id AS v FROM payments WHERE voided_at IS NOT NULL')).toEqual([15])
+  expect(col(`SELECT COUNT(*) AS v FROM activity_log WHERE action = 'payment_voided'`)).toEqual([1])
 })

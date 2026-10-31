@@ -1,7 +1,8 @@
 // Request/response types for /api/app order screens. Dates are returned as stored
 // (due_date YYYY-MM-DD, timestamps ISO UTC text); money is integer cents.
 import type {
-  ArtworkApproval, AuthorizationMethod, CustomerKind, ItemKind, Method, OrderArtworkStatus, OrderSource, OrderState, PaymentTerms, PoStatus, PrepStatus,
+  ArtworkApproval, AuthorizationMethod, CheckStatus, CustomerKind, FinancialStatus, FulfilmentStatus, ItemKind, Method, NotificationMethod,
+  OrderArtworkStatus, OrderSource, OrderState, PaymentMethod, PaymentNextAction, PaymentTerms, PoStatus, PrepStatus,
   ProductionStatus, PurchaseStatus, QuoteStatus,
 } from './enums'
 
@@ -46,9 +47,10 @@ export type ActionRequired = {
   pendingPos: (ActionRow & { poStatus: PoStatus | null })[]
   /** Purchasing needed and an ordered purchase not fully received. */
   materialsAwaiting: ActionRow[]
-  /** Pickups and check collection arrive in M5; always empty until then. */
-  awaitingPickup: never[]
-  checksToCollect: never[]
+  /** Production complete, not picked up yet (any production stage before that is not a pickup action). */
+  awaitingPickup: (ActionRow & { fulfilmentStatus: 'ready_for_pickup' | 'customer_notified' })[]
+  /** Check collections ready_for_collection; dueDate is the order's. One row per check (an order can have two). */
+  checksToCollect: (ActionRow & { checkId: number; expectedCents: number; availableOn: string | null })[]
 }
 export type DashboardResponse = {
   metrics: DashboardMetrics
@@ -60,6 +62,8 @@ export type DashboardResponse = {
   /** The first five of ProductionResponse.readyToStart. */
   upcoming: ProductionJob[]
   actionRequired: ActionRequired
+  /** PaymentsPageResponse.outstanding summed: orders owing, the total owed (unknown agreed totals count 0), the oldest. */
+  outstandingPayments: { count: number; totalCents: number; oldestDays?: number }
 }
 
 // ---- production (M4) ----
@@ -106,6 +110,122 @@ export type UnitsRequest = { unitsCompleted: number; expectedVersion: number }
  */
 export type QueueReorderRequest = { seen: string[]; orderNumbers: string[] }
 export type QueueReorderResponse = { readyToStart: string[] }
+
+// ---- pickup, payments and check collection (M5) ----
+// Fulfilment (the pickup) and the financial track (payments vs the agreed total) are separate (decision 6). The agreed
+// total is the highest-version ACCEPTED quote's total (null when none: never paid, never a credit). An order closes in
+// the same write that makes it both picked up and paid, and a void that leaves a closed order unpaid makes it active.
+/** Derived from the order's non-voided payments and the agreed total (domain/payments.ts balance()). */
+export type Balance = { agreedCents: number | null; receivedCents: number; outstandingCents: number | null; creditCents: number; status: FinancialStatus }
+export type PickupRecord = {
+  fulfilmentStatus: FulfilmentStatus
+  /** The day production completed (shop time); null before then. */
+  readyOn: string | null
+  notifiedOn: string | null
+  notificationMethod: NotificationMethod | null
+  pickedUpOn: string | null
+  collectedByName: string | null
+  /** The employee who recorded the pickup. */
+  completedBy: string | null
+  /** An owner released an unpaid pay-at-pickup order. */
+  releaseOverride: { by: string; reason: string } | null
+  notes: string | null
+}
+export type PickupResponse = {
+  number: string
+  /** Send back as expectedVersion. */
+  version: number
+  state: OrderState
+  paymentTerms: PaymentTerms
+  pickup: PickupRecord
+  balance: Balance
+  /** True when recording the pickup now would need an owner override (pay at pickup, money still owed): show the warning. */
+  releaseNeedsOverride: boolean
+}
+/**
+ * Production complete and not yet picked up only (409 pickup_not_ready / pickup_recorded). notifiedOn defaults to today
+ * (shop time); notifying again replaces the previous notification. notes, when given, replace the pickup's notes.
+ */
+export type NotifyPickupRequest = { notifiedOn?: string; method: NotificationMethod; notes?: string | null; expectedVersion: number }
+/**
+ * Records the pickup (one per order, final). Pay-at-pickup orders with money owed are 409 payment_required unless an owner
+ * sends override + reason (staff: 403 override_requires_owner; blank reason: 400 override_requires_reason); the database
+ * writes the pickup_release_override audit row. Pay-after-pickup orders (districts) can be picked up unpaid.
+ */
+export type CollectPickupRequest = {
+  pickedUpOn?: string; collectedByName: string; notes?: string | null; override?: boolean; reason?: string; expectedVersion: number
+}
+export type PaymentRecord = {
+  id: number; amountCents: number; method: PaymentMethod; paidOn: string; notes: string | null; recordedBy: string | null
+  /** Set when the payment came from collecting a check. */
+  checkCollectionId: number | null
+  createdAt: string
+  /** A voided payment stays listed and no longer counts. */
+  voided: { at: string; by: string | null; reason: string } | null
+}
+export type CheckRecord = {
+  id: number; orderNumber: string; expectedCents: number; amountReceivedCents: number | null; checkNumber: string | null; status: CheckStatus
+  availableOn: string | null; collectedAt: string | null; collectedBy: string | null; depositedOn: string | null; clearedOn: string | null
+  notes: string | null; createdAt: string
+  /** The payment the collection recorded (null before collection). */
+  paymentId: number | null
+}
+export type PaymentsResponse = {
+  number: string; version: number; state: OrderState; paymentTerms: PaymentTerms; paymentDueOn: string | null
+  /** Oldest first, voided ones included. */
+  payments: PaymentRecord[]
+  /** Oldest first. */
+  checks: CheckRecord[]
+  balance: Balance
+}
+/**
+ * requestId: generated once per form submission (crypto.randomUUID) and reused when that submission is retried. A retry
+ * with the same payload answers 200 with the stored payment (replayed: true); a different payload under the same
+ * requestId is 409 request_id_conflict. paidOn defaults to today (shop time). Not on cancelled orders.
+ */
+export type RecordPaymentRequest = { amountCents: number; method: PaymentMethod; paidOn?: string; notes?: string | null; requestId: string; expectedVersion: number }
+export type RecordPaymentResponse = OrderWriteResponse & { payment: PaymentRecord; replayed: boolean }
+/** Owner only (403 void_requires_owner). The row stays, stops counting, and can't be un-voided (409 payment_voided). */
+export type VoidPaymentRequest = { reason: string; expectedVersion: number }
+/** Pay-after-pickup orders only (409 check_not_allowed). Starts as awaiting_payment; availableOn is when the district expects it. */
+export type CheckCreateRequest = { expectedCents: number; availableOn?: string | null; checkNumber?: string | null; notes?: string | null; expectedVersion: number }
+// The check moves (ready, collect, deposit, clear) are guarded by the check's own status, not the order version: each
+// applies only from its one previous status (409 invalid_check_transition otherwise) and bumps the order's version.
+/** availableOn defaults to today. */
+export type CheckReadyRequest = { availableOn?: string }
+/**
+ * Records the payment (method check) in the same write. Retrying with the same amount (and check number, if sent)
+ * answers 200 with the stored check and records nothing more; a different amount is 409 check_collect_conflict.
+ */
+export type CheckCollectRequest = { amountReceivedCents: number; checkNumber?: string | null; collectedOn?: string }
+/** Deposited and cleared never touch payments or the balance. Dates default to today. */
+export type CheckDepositRequest = { depositedOn?: string }
+export type CheckClearRequest = { clearedOn?: string }
+export type CheckWriteResponse = OrderWriteResponse & { check: CheckRecord }
+/** An active order whose production is complete and that still owes money. */
+export type OutstandingRow = {
+  number: string; customerName: string; customerKind: CustomerKind; title: string; paymentTerms: PaymentTerms
+  fulfilmentStatus: FulfilmentStatus; financialStatus: FinancialStatus
+  agreedCents: number | null; receivedCents: number; outstandingCents: number | null
+  /** orders.payment_due_on, when someone set it. */
+  paymentDueOn: string | null
+  /** From the pickup (pay after pickup; null until picked up) or from ready (pay at pickup). */
+  daysOutstanding: number | null
+  /** The order's most recent check collection's status, if any. */
+  collectionStatus: CheckStatus | null
+  nextAction: PaymentNextAction
+  version: number
+}
+export type PaymentsPageResponse = {
+  /** Most days outstanding first. */
+  outstanding: OutstandingRow[]
+  /** ready_for_collection, longest available first. */
+  checksToCollect: (CheckRecord & { customerName: string })[]
+  /** awaiting_payment: the district hasn't issued them yet. */
+  checksAwaitingPayment: (CheckRecord & { customerName: string })[]
+  /** collected or deposited, not yet confirmed cleared. */
+  checksInHand: (CheckRecord & { customerName: string })[]
+}
 
 export type OrderListRow = {
   number: string
@@ -168,6 +288,8 @@ export type OrderDetailResponse = {
     authorizationNotes: string | null
     itemsRevision: number
     paymentTerms: PaymentTerms
+    /** Set by hand when a payment date is agreed (YYYY-MM-DD). */
+    paymentDueOn: string | null
     materialsRequired: boolean
     prepStatus: PrepStatus
     productionStatus: ProductionStatus
@@ -241,7 +363,7 @@ export type CreateOrderRequest = {
 }
 export type UpdateOrderRequest = {
   expectedVersion: number; title?: string; dueDate?: string | null; contactId?: number | null; source?: OrderSource
-  poRequired?: boolean; paymentTerms?: PaymentTerms; artworkRequired?: boolean
+  poRequired?: boolean; paymentTerms?: PaymentTerms; paymentDueOn?: string | null; artworkRequired?: boolean
   /** false = "No purchasing needed", which needs confirmNoPurchasing: true. */
   materialsRequired?: boolean; confirmNoPurchasing?: boolean; assigneeId?: number | null
 }
@@ -346,6 +468,8 @@ export const API_ERROR_CODES = [
   'po_not_required', 'length_required', 'po_approved_locked', 'po_approved_exists',
   'supplier_exists', 'purchase_locked', 'purchase_transition_not_allowed', 'purchase_not_ordered',
   'production_busy', 'no_slot_available', 'override_requires_owner', 'override_requires_reason', 'invalid_units_completed', 'units_not_editable',
+  'pickup_not_ready', 'pickup_recorded', 'payment_required', 'request_id_conflict', 'payment_voided', 'void_requires_owner',
+  'check_not_allowed', 'invalid_check_transition', 'check_collect_conflict',
 ] as const
 export type ApiErrorCode = (typeof API_ERROR_CODES)[number]
 export type ApiError = { error: string; code?: ApiErrorCode; reasons?: string[]; /** production_busy: the order running in slot 1. */ runningJob?: string }
@@ -359,6 +483,8 @@ export const ACTIVITY_ACTIONS = [
   'po_details_updated', 'po_document_added', 'po_replaced',
   'supplier_created', 'purchase_created', 'purchase_updated', 'purchase_ordered', 'purchase_cancelled', 'purchase_received', 'prep_status_changed',
   'production_started', 'production_override', 'units_completed_changed', 'queue_reordered',
+  'pickup_notified', 'pickup_collected', 'pickup_release_override', 'payment_recorded', 'payment_voided',
+  'check_created', 'check_ready', 'check_collected', 'check_deposited', 'check_cleared', 'order_closed',
 ] as const
 export type ActivityAction = (typeof ACTIVITY_ACTIONS)[number]
 export const GATE_REASON_CODES = [

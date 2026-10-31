@@ -410,7 +410,10 @@ describe('atomicity and vocabulary', () => {
     const customerSide = ['customer_created', 'customer_updated', 'contact_added', 'contact_updated', 'contact_archived', 'contact_unarchived',
       'artwork_uploaded', 'artwork_decided', 'po_created', 'po_details_updated', 'po_document_added', 'po_replaced',
       'supplier_created', 'purchase_created', 'purchase_updated', 'purchase_ordered', 'purchase_cancelled', 'purchase_received', 'prep_status_changed',
-      'production_started', 'production_override', 'units_completed_changed', 'queue_reordered']
+      'production_started', 'production_override', 'units_completed_changed', 'queue_reordered',
+      // M5: pickups.test.ts and payments.test.ts.
+      'pickup_notified', 'pickup_collected', 'pickup_release_override', 'payment_recorded', 'payment_voided',
+      'check_created', 'check_ready', 'check_collected', 'check_deposited', 'check_cleared', 'order_closed']
     expect(ACTIVITY_ACTIONS.filter((a) => !actions.includes(a) && !customerSide.includes(a))).toEqual(['po_status_changed'])
   })
 })

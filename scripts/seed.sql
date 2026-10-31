@@ -1,5 +1,6 @@
--- Deterministic, fictional dev data for the Phase 2 schema (migrations 0001 … 0005). Re-runnable: wipes
--- child tables first. activity_log and purchase receipts are append-only and frozen quotes can't be deleted, so those delete
+-- Deterministic, fictional dev data for the Phase 2 schema (migrations 0001 … 0006). Re-runnable: wipes
+-- child tables first. activity_log, purchase receipts, pickups, check collections and payments are never deleted and
+-- frozen quotes can't be deleted, so those delete
 -- triggers are dropped around the wipe and recreated identically to the migrations
 -- (tests/api/seed.test.ts fails if they drift).
 -- Every order's production_status is what readiness() derives, or a later stage reached with every
@@ -9,6 +10,25 @@ DROP TRIGGER IF EXISTS quote_items_delete_draft_only;
 DROP TRIGGER IF EXISTS quotes_delete_draft_only;
 DROP TRIGGER IF EXISTS purchase_receipts_no_delete;
 DROP TRIGGER IF EXISTS order_purchases_no_delete;
+DROP TRIGGER IF EXISTS pickups_no_delete;
+DROP TRIGGER IF EXISTS check_collections_no_delete;
+DROP TRIGGER IF EXISTS payments_no_delete;
+DROP TRIGGER IF EXISTS payments_linked_no_delete;
+DELETE FROM payments;
+DELETE FROM check_collections;
+DELETE FROM pickups;
+CREATE TRIGGER pickups_no_delete BEFORE DELETE ON pickups
+BEGIN SELECT RAISE(ABORT, 'pickups are never deleted'); END;
+CREATE TRIGGER check_collections_no_delete BEFORE DELETE ON check_collections
+BEGIN SELECT RAISE(ABORT, 'check collections are never deleted'); END;
+CREATE TRIGGER payments_linked_no_delete BEFORE DELETE ON payments
+WHEN OLD.check_collection_id IS NOT NULL
+BEGIN
+  SELECT RAISE(ABORT, 'payment_linked_to_check');
+END;
+CREATE TRIGGER payments_no_delete BEFORE DELETE ON payments
+WHEN OLD.check_collection_id IS NULL
+BEGIN SELECT RAISE(ABORT, 'payments are never deleted'); END;
 DELETE FROM activity_log;
 DELETE FROM purchase_receipts;
 DELETE FROM order_purchases;
@@ -306,6 +326,40 @@ INSERT INTO order_purchases (id, order_id, supplier_id, description, quantity, s
 INSERT INTO purchase_receipts (id, purchase_id, quantity, sizes, received_on, notes, recorded_by) VALUES
   (1, 2, 30, '{"S":6,"M":14,"L":10}', date('now', '-1 days'), 'XL and 4 L on back order.', 1);
 UPDATE order_purchases SET status = 'cancelled' WHERE id = 1;
+
+-- Pickups and payments (0006). Closed = picked up AND paid, so the closed orders are made active while their pickup is
+-- recorded (only an active, production_complete order takes one) and closed again after.
+--   1  district, paid by a check collected, deposited and cleared; picked up.     2  district, paid by ACH; picked up.
+--   15 regular, paid by card at pickup, plus a cash entry voided as a duplicate.  6  district, picked up unpaid, check ready.
+--   20 regular, ready and notified, a cash deposit paid (partially paid).
+UPDATE orders SET state = 'active' WHERE id IN (1, 2, 15);
+INSERT INTO check_collections (id, order_id, expected_cents, check_number, status, available_on, notes, created_by) VALUES
+  (1, 1, 156600, '10442', 'ready_for_collection', date('now', '-12 days'), NULL, 1),
+  (2, 6, 72000, NULL, 'ready_for_collection', date('now', '-2 days'), 'Pick up at the district office, front desk.', 2);
+UPDATE check_collections SET status = 'collected', amount_received_cents = 156600, collected_at = strftime('%Y-%m-%dT%H:%M:%fZ','now','-11 days'), collected_by = 2 WHERE id = 1;
+INSERT INTO payments (id, order_id, amount_cents, method, paid_on, notes, recorded_by, request_id, check_collection_id) VALUES
+  (1, 1, 156600, 'check', date('now', '-11 days'), NULL, 2, NULL, 1),
+  (2, 2, 230300, 'ach', date('now', '-6 days'), 'Remittance from the district office.', 1, 'seed-payment-2', NULL),
+  (3, 15, 1800, 'cash', date('now', '-14 days'), NULL, 2, 'seed-payment-3', NULL),
+  (4, 15, 18000, 'card', date('now', '-14 days'), NULL, 2, 'seed-payment-4', NULL),
+  (5, 20, 50000, 'cash', date('now', '-9 days'), 'Deposit when the order was placed.', 1, 'seed-payment-5', NULL);
+-- The void's activity row comes from the payments_void_log trigger.
+UPDATE payments SET voided_at = strftime('%Y-%m-%dT%H:%M:%fZ','now','-13 days'), voided_by = 1, void_reason = 'Entered by mistake; the card payment covers it.' WHERE id = 3;
+UPDATE check_collections SET status = 'deposited', deposited_on = date('now', '-10 days') WHERE id = 1;
+UPDATE check_collections SET status = 'cleared', cleared_on = date('now', '-7 days') WHERE id = 1;
+INSERT INTO pickups (order_id, ready_on, notified_on, notification_method, picked_up_on, collected_by_name, completed_by) VALUES
+  (1, date('now', '-20 days'), date('now', '-20 days'), 'email', date('now', '-18 days'), 'Helen Marsh', 2),
+  (2, date('now', '-10 days'), date('now', '-10 days'), 'phone', date('now', '-9 days'), 'Tom Eddings', 1),
+  (15, date('now', '-15 days'), date('now', '-15 days'), 'text', date('now', '-14 days'), 'Lee Carver', 2),
+  (6, date('now', '-7 days'), date('now', '-7 days'), 'email', date('now', '-5 days'), 'Sam Okafor', 1),
+  (20, date('now', '-1 days'), date('now', '-1 days'), 'phone', NULL, NULL, NULL);
+UPDATE orders SET state = 'closed' WHERE id IN (1, 2, 15);
+INSERT INTO activity_log (actor_kind, actor_id, entity_type, entity_id, action, before, after) VALUES
+  ('user', 2, 'order', 1, 'check_collected', NULL, '{"payment_id":1,"check_collection_id":1,"amount_cents":156600}'),
+  ('user', 2, 'order', 1, 'pickup_collected', NULL, '{"collected_by_name":"Helen Marsh","override":false}'),
+  ('user', 2, 'order', 1, 'order_closed', '{"state":"active"}', '{"state":"closed","reason":"picked_up"}'),
+  ('user', 1, 'order', 6, 'pickup_collected', NULL, '{"collected_by_name":"Sam Okafor","override":false}'),
+  ('user', 1, 'order', 20, 'pickup_notified', NULL, '{"notification_method":"phone"}');
 
 -- Backdate part of the data so the dashboard sub-lines ("new this week", "waiting 5+ days") have something to say.
 UPDATE orders SET created_at = strftime('%Y-%m-%dT%H:%M:%fZ','now','-30 days') WHERE id <= 12;

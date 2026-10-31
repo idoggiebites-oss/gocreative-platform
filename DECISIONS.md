@@ -371,3 +371,58 @@ Business-rule choices made while building the M4 API. Each can be overturned.
 ## 2026-10-31 — Order identity and slot collisions are refused by the database (Codex review of fcdbb90)
 - An order's id (through `id` or any rowid alias) and number can't change; an INSERT that collides with an existing order (id or number) or a held production slot is refused, so `INSERT/UPDATE OR REPLACE` can't promote a slot-2 job, rewrite an override or evict a running job.
 - A start that loses the slot race now fails on the slot trigger (`production_slot_invalid`) before the unique index; the route maps both to 409 as before.
+
+### 2026-10-31 — M5 pickup, payments and check collection (server), Claude; for Arturo to confirm
+Migration 0006 (additive), `worker/db/{pickups,payments}.ts`, `worker/routes/{pickups,payments}.ts`.
+- **Agreed total** = the highest-version *accepted* quote's total. No accepted quote = unknown: never
+  paid, never a credit (domain `balance()`). If a new quote version supersedes the accepted one after
+  pickup, the order has no agreed total until the new one is accepted. Overpayment = paid, with a credit.
+- **Closing is automatic.** In the same batch as the write that makes an order both picked up and
+  paid (the pickup, a payment, a check collection), `orders.state` becomes `closed`, with an
+  `order_closed` activity row. A void that leaves a closed order unpaid makes it `active` again
+  (`order_reopened`, reason `payment_voided`). Cancelled orders are never closed or reopened by this.
+- **The pickup row** (one per order, decision 11) is created by the first notify or collect, not when
+  production completes, so the production writer is untouched. Before then the order is
+  `ready_for_pickup` (derived). `ready_on` = the shop date of the latest production_complete activity
+  row (today if none). Only an active, production_complete order can be notified or picked up (route,
+  SQL WHERE and trigger). Notifying again replaces the notification. Collecting without notifying first
+  is allowed (walk-ins). **A recorded pickup is final**: no edit and no undo (a mistaken pickup needs a
+  later correction workflow).
+- **Unpaid release:** pay-at-pickup orders that still owe anything need an owner override with a
+  reason (staff 403, blank reason 400), held by the route and by a trigger on `pickups`; the trigger
+  also writes the `pickup_release_override` audit row, so an override can't exist without one. An
+  unknown agreed total counts as owed. An override sent for an order that doesn't need it is ignored
+  (nothing stored, no audit row). Districts (pay after pickup) are released unpaid.
+- **Payments:** any user records them; amounts 1¢ … $10,000,000; `paidOn` defaults to today (shop time);
+  not on cancelled orders, allowed on closed ones (extra money becomes a credit). A `requestId` already
+  seen is resolved *before* the version check, so a retried submission returns the stored payment (200,
+  `replayed: true`) even though the version moved; a different payload under it (or the same id on
+  another order) is 409 `request_id_conflict`. An omitted `paidOn` on a retry matches what the first
+  submission stored. The client makes one requestId per submission and starts a new one after a
+  success or when the details change.
+- **Voids are owner-only** (decision 10), need a reason, keep the row and its request_id, stop counting,
+  and can't be undone or edited; the database enforces the owner and writes the `payment_voided` audit
+  row. Payments are never deleted (also unlinked ones, which the M0 design still allowed). A check's
+  payment can be voided (a bounced check); the check keeps its collected/deposited status.
+- **Check collections** are for pay-after-pickup orders only (not tied to customer kind), any production
+  stage, not cancelled. Several per order are allowed (partial checks). A new one starts at
+  `awaiting_payment` (`availableOn` is when it's expected); **Ready** sets `available_on` (default today).
+  Collect may skip Ready. The moves (ready, collect, deposit, clear) are guarded by the check's own
+  status, not the order version (so a retried collect still answers), and each bumps the order version.
+  Collect creates exactly one payment (method check, `paid_on` = the collected date) via
+  `COLLECT_CHECK_SQL`; a retry with the same amount (and check number, if sent) is 200 with nothing
+  written; a different amount is 409 `check_collect_conflict`, also after reading back a lost race.
+  Deposited and cleared never touch payments; a double-click on deposit/clear is 409, not a no-op.
+  Once collected, the amount, who, when, check number and available date are fixed; deposit and clear
+  dates are fixed once set. Dates are not checked against each other or against today.
+- **Payments page "outstanding"** = active orders whose production is complete and that are not paid
+  (money in progress during production isn't listed). Days outstanding count from the pickup for
+  pay-after-pickup orders (none until picked up) and from the ready date for pay-at-pickup orders.
+  Collection status = the order's most recent check. Next action: a ready check → collect it; an
+  awaited check → wait; pay at pickup → collect at pickup (or record the payment once released); pay
+  after pickup with no open check → ask the district for one.
+- **`orders.payment_due_on`** (new, optional) is set by hand through the ordinary order edit; nothing
+  derives it.
+- **Dashboard:** "Ready for pickup" (KPI, attention reason, Orders "Ready" view, Action required →
+  Awaiting pickup) now excludes picked-up orders; Checks to collect lists `ready_for_collection`
+  checks, one row per check; `outstandingPayments` sums the Payments page rows.

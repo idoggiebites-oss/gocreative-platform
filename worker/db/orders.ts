@@ -93,8 +93,8 @@ const VIEW_WHERE: Record<Exclude<OrderView, 'inquiries'>, string> = {
   waiting_po: `state = 'active' AND po_required = 1 AND (latest_po_status IS NULL OR latest_po_status <> 'approved')`,
   waiting_artwork: `state = 'active' AND artwork_status NOT IN ('approved','not_required')`,
   in_production: `state = 'active' AND production_status IN ('in_production','quality_control')`,
-  // Pickup records arrive in M5; until then a finished, still-active order is the one waiting for pickup.
-  ready: `state = 'active' AND production_status = 'production_complete'`,
+  // Finished and not picked up yet (a picked-up order that still owes money stays active, on the Payments page).
+  ready: `state = 'active' AND production_status = 'production_complete' AND id NOT IN (SELECT order_id FROM pickups WHERE picked_up_on IS NOT NULL)`,
   completed: `state = 'closed'`,
 }
 
@@ -104,7 +104,9 @@ const ACTIVITY_KEYS = ['production_status', 'state', 'po_status', 'po_id', 'artw
   'title', 'due_date', 'contact_id', 'source', 'po_required', 'payment_terms', 'artwork_required', 'materials_required', 'assignee_id',
   'artwork_id', 'lineage_id', 'artwork_version', 'design_name', 'approval_status', 'approved_via', 'po_number', 'amount_cents',
   'purchase_id', 'purchase_status', 'supplier_name', 'description', 'quantity', 'ordered_on', 'received_on', 'prep_status',
-  'slot', 'units_completed', 'running_order_id']
+  'slot', 'units_completed', 'running_order_id', 'payment_due_on',
+  'payment_id', 'check_collection_id', 'check_id', 'check_status', 'method', 'paid_on', 'request_id', 'notified_on', 'notification_method',
+  'picked_up_on', 'collected_by_name', 'override', 'expected_cents', 'available_on', 'deposited_on', 'cleared_on']
 
 const likeEscape = (q: string) => q.replace(/[\\%_]/g, (ch) => `\\${ch}`)
 
@@ -171,9 +173,11 @@ export async function listActiveDashOrders(db: D1Database): Promise<DashOrder[]>
   // materials_awaiting: purchasing is needed and an ordered purchase hasn't fully arrived (receipts summed, as in MATERIALS_OK).
   const { results } = await db.prepare(`WITH base AS (${BASE}) SELECT base.*, (SELECT o.materials_required = 1 AND EXISTS (SELECT 1 FROM order_purchases p
       WHERE p.order_id = o.id AND p.status = 'ordered'
-      AND (SELECT COALESCE(SUM(r.quantity), 0) FROM purchase_receipts r WHERE r.purchase_id = p.id) < p.quantity) FROM orders o WHERE o.id = base.id) AS materials_awaiting
-    FROM base WHERE state = 'active'`).all<BaseRow & { materials_awaiting: 0 | 1 }>()
+      AND (SELECT COALESCE(SUM(r.quantity), 0) FROM purchase_receipts r WHERE r.purchase_id = p.id) < p.quantity) FROM orders o WHERE o.id = base.id) AS materials_awaiting,
+      (SELECT CASE WHEN pk.picked_up_on IS NOT NULL THEN 'picked_up' WHEN pk.notified_on IS NOT NULL THEN 'notified' END FROM pickups pk WHERE pk.order_id = base.id) AS pickup_stage
+    FROM base WHERE state = 'active'`).all<BaseRow & { materials_awaiting: 0 | 1; pickup_stage: DashOrder['pickupStage'] }>()
   return results.map((r) => ({
+    pickupStage: r.pickup_stage ?? null,
     poRequired: r.po_required === 1,
     materialsAwaiting: r.materials_awaiting === 1,
     id: r.id,
@@ -239,7 +243,7 @@ type OrderRow = {
   id: number; number: string; customer_id: number; contact_id: number | null; source: OrderSource; title: string
   due_date: string | null; artwork_required: 0 | 1; po_required: 0 | 1; authorized_at: string | null; authorized_by: number | null
   authorization_method: AuthorizationMethod | null; authorization_notes: string | null; items_revision: number
-  payment_terms: PaymentTerms; materials_required: 0 | 1; prep_status: PrepStatus
+  payment_terms: PaymentTerms; payment_due_on: string | null; materials_required: 0 | 1; prep_status: PrepStatus
   production_status: ProductionStatus; assignee_id: number | null
   production_slot: 1 | 2 | null; production_override_by: number | null; production_override_reason: string | null
   queue_position: number | null; units_completed: number
@@ -337,7 +341,7 @@ export async function getOrderDetail(db: D1Database, number: string): Promise<(O
       artworkStatus: o.artwork_status, artworkRequired: o.artwork_required === 1,
       poRequired: o.po_required === 1, authorizedAt: o.authorized_at, authorizedBy: o.authorized_by,
       authorizationMethod: o.authorization_method, authorizationNotes: o.authorization_notes, itemsRevision: o.items_revision,
-      paymentTerms: o.payment_terms, materialsRequired: o.materials_required === 1, prepStatus: o.prep_status,
+      paymentTerms: o.payment_terms, paymentDueOn: o.payment_due_on, materialsRequired: o.materials_required === 1, prepStatus: o.prep_status,
       productionStatus: o.production_status, assigneeId: o.assignee_id,
       invoiceRef: o.invoice_ref, paymentRef: o.payment_ref, state: o.state, version: o.version, createdAt: o.created_at, updatedAt: o.updated_at,
     },
@@ -369,9 +373,9 @@ export async function loadForProductionChange(db: D1Database, number: string) {
   return { id: o.id, from: o.production_status, state: o.state, version: o.version, input: await readinessInput(db, o) }
 }
 
-const NOW = `strftime('%Y-%m-%dT%H:%M:%fZ','now')`
+export const NOW = `strftime('%Y-%m-%dT%H:%M:%fZ','now')`
 // Inserts only if the statement just before it changed a row (changes()), so a lost race logs nothing.
-const LOG_IF_CHANGED = `INSERT INTO activity_log (actor_kind, actor_id, entity_type, entity_id, action, before, after)
+export const LOG_IF_CHANGED = `INSERT INTO activity_log (actor_kind, actor_id, entity_type, entity_id, action, before, after)
   SELECT 'user', ?, 'order', ?, ?, ?, ? WHERE changes() > 0`
 
 /**
@@ -541,7 +545,7 @@ type Guarded = { orderId: number; version: number; actorId: number }
 
 // Column names here are constants; the values are bound.
 const HEADER_COLUMNS = {
-  title: 'title', dueDate: 'due_date', contactId: 'contact_id', source: 'source', poRequired: 'po_required', paymentTerms: 'payment_terms',
+  title: 'title', dueDate: 'due_date', contactId: 'contact_id', source: 'source', poRequired: 'po_required', paymentTerms: 'payment_terms', paymentDueOn: 'payment_due_on',
   artworkRequired: 'artwork_required', materialsRequired: 'materials_required', assigneeId: 'assignee_id',
 } as const
 export type HeaderField = keyof typeof HEADER_COLUMNS

@@ -20,7 +20,11 @@ export type DashOrder = {
   poRequired: boolean
   /** Purchasing needed and an ordered purchase not fully received. */
   materialsAwaiting: boolean
+  /** From the pickups row (M5): null = not notified yet (or no row). */
+  pickupStage: 'notified' | 'picked_up' | null
 }
+/** A check collection ready_for_collection, with its order. */
+export type DashCheck = { checkId: number; number: string; customerName: string; title: string; dueDate: string | null; expectedCents: number; availableOn: string | null }
 export type DashInquiry = { id: number; contactName: string | null }
 export type AttentionCandidate = {
   orderId: number | null
@@ -43,13 +47,16 @@ export const addDays = (date: string, n: number) => new Date(dayNumber(date) * D
 const shopDate = (timestamp: string) => businessToday(new Date(timestamp))
 const PO_WAITING = ['received', 'under_review']
 
-/** Pure: takes ACTIVE orders, when each order finished production (production_complete = waiting for pickup until M5), new inquiries, and today (the shop's business date, YYYY-MM-DD; shared/businessDate.businessToday). */
+/** Production complete and not picked up yet: waiting for the customer (fulfilment ready_for_pickup or customer_notified). */
+const awaitingPickup = (o: DashOrder) => o.productionStatus === 'production_complete' && o.pickupStage !== 'picked_up'
+
+/** Pure: takes ACTIVE orders, when each order finished production, new inquiries, and today (the shop's business date, YYYY-MM-DD; shared/businessDate.businessToday). */
 export function buildDashboard(orders: DashOrder[], readyAt: Map<number, string>, inquiries: DashInquiry[], today: string) {
   const weekEnd = addDays(today, 7)
   const notDone = orders.filter((o) => o.productionStatus !== 'production_complete')
   const overdue = (o: DashOrder) => o.dueDate !== null && o.dueDate < today
   const waitingPo = orders.filter((o) => o.latestPoStatus !== null && PO_WAITING.includes(o.latestPoStatus))
-  const ready = orders.filter((o) => o.productionStatus === 'production_complete')
+  const ready = orders.filter(awaitingPickup)
   const readyDays = (o: DashOrder) => {
     const at = readyAt.get(o.id)
     return at === undefined ? undefined : Math.max(0, dayNumber(today) - dayNumber(shopDate(at)))
@@ -88,7 +95,7 @@ export function buildDashboard(orders: DashOrder[], readyAt: Map<number, string>
       reasonDays = dayNumber(today) - dayNumber(o.dueDate as string)
     } else if (o.artworkStatus === 'changes_requested') reason = 'artwork_changes_requested'
     else if (o.latestPoStatus !== null && PO_WAITING.includes(o.latestPoStatus)) reason = 'po_waiting'
-    else if (o.productionStatus === 'production_complete') {
+    else if (awaitingPickup(o)) {
       reason = 'ready_waiting'
       reasonDays = readyDays(o)
     } else if (o.quoteStatus === 'sent') reason = 'quote_waiting'
@@ -114,9 +121,9 @@ export function buildDashboard(orders: DashOrder[], readyAt: Map<number, string>
 /**
  * Pure: the dashboard's Action required groups (SPEC-phase2 §12) from ACTIVE orders. Only pre-production orders
  * (awaiting_* or ready) are listed: once a job starts these are no longer actions. An order can be in several groups.
- * Customers awaiting pickup and checks ready for collection arrive with M5 and stay empty until then.
+ * Awaiting pickup lists finished orders not picked up yet; checks to collect are the ready_for_collection checks (M5).
  */
-export function buildActionRequired(orders: DashOrder[]): ActionRequired {
+export function buildActionRequired(orders: DashOrder[], checksReady: DashCheck[] = []): ActionRequired {
   const pre = orders
     .filter((o) => o.productionStatus.startsWith('awaiting_') || o.productionStatus === 'ready')
     .sort((a, b) => (a.dueDate ?? '9999').localeCompare(b.dueDate ?? '9999') || a.number.localeCompare(b.number))
@@ -126,7 +133,10 @@ export function buildActionRequired(orders: DashOrder[]): ActionRequired {
     missingArtwork: pre.filter((o) => o.artworkStatus === 'not_received' || o.artworkStatus === 'changes_requested').map((o) => ({ ...row(o), artworkStatus: o.artworkStatus })),
     pendingPos: pre.filter((o) => o.poRequired && o.latestPoStatus !== 'approved').map((o) => ({ ...row(o), poStatus: o.latestPoStatus })),
     materialsAwaiting: pre.filter((o) => o.materialsAwaiting).map(row),
-    awaitingPickup: [],
-    checksToCollect: [],
+    awaitingPickup: orders.filter(awaitingPickup)
+      .sort((a, b) => (a.dueDate ?? '9999').localeCompare(b.dueDate ?? '9999') || a.number.localeCompare(b.number))
+      .map((o) => ({ ...row(o), fulfilmentStatus: o.pickupStage === 'notified' ? 'customer_notified' : 'ready_for_pickup' })),
+    checksToCollect: checksReady.map(({ checkId, number, customerName, title, dueDate, expectedCents, availableOn }) =>
+      ({ number, customerName, title, dueDate, checkId, expectedCents, availableOn })),
   }
 }
