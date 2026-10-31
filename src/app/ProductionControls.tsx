@@ -67,7 +67,9 @@ export function UnitsEditor({ job, readOnly }: { job: ProductionJob; readOnly?: 
   const [seen, setSeen] = useState(job.version)
   if (!dirty && seen !== job.version) { setSeen(job.version); setEpoch((e) => e + 1) }
   const total = job.totalQuantity
-  const save = (n: number) => !w.isPending && w.mutate({ unitsCompleted: n, expectedVersion: job.version })
+  // The typed draft shows its own ConflictNotice; a ±10 click has none, so its refusal (a conflict too) is shown here.
+  const [clickError, setClickError] = useState<Error | null>(null)
+  const save = (n: number) => { if (w.isPending) return; setClickError(null); w.mutate({ unitsCompleted: n, expectedVersion: job.version }, { onError: setClickError }) }
   const pct = total > 0 ? Math.min(100, Math.round((job.unitsCompleted / total) * 100)) : 0
   return (
     <div className="flex min-w-0 flex-col gap-2.5">
@@ -87,7 +89,7 @@ export function UnitsEditor({ job, readOnly }: { job: ProductionJob; readOnly?: 
         />
         <span id={`uh-${job.number}`} className={MUTED}>{t.hint(total)}</span>
       </div>}
-      <ProdError error={isConflict(w.error) ? null : w.error} />
+      <ProdError error={clickError ?? (isConflict(w.error) ? null : w.error)} />
     </div>
   )
 }

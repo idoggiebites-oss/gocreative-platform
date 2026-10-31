@@ -296,6 +296,22 @@ test('a units draft keeps its typing across a refetch, then a conflict loads the
   await clearRunning(page)
 })
 
+test('a +10 click behind another person\'s save is refused with a message, not silently (Codex review of 10b3d78)', async ({ page }, info) => {
+  test.skip(info.project.name !== 'desktop')
+  await clearRunning(page)
+  const a = await readyOrder(page, 'Units click conflict', {}, 20)
+  await startViaApi(page, a)
+  await page.goto('/app/production')
+  await expect(current(page).getByText('0 of 20').first()).toBeVisible()
+  const job = await jobOf(page, a)
+  expect((await page.request.patch(`/api/app/orders/${a}/units`, { data: { unitsCompleted: 5, expectedVersion: job.version } })).ok()).toBe(true)
+  await page.getByRole('button', { name: `Add 10 units: ${a}` }).click() // still the old version on screen
+  await expect(current(page).getByRole('alert').filter({ hasText: 'Someone else changed this. It has been reloaded; try again.' })).toBeVisible()
+  await expect(current(page).getByText('5 of 20').first()).toBeVisible()
+  expect((await jobOf(page, a)).unitsCompleted).toBe(5)
+  await clearRunning(page)
+})
+
 test('the override dialog sends the version it opened at: a change behind it is a translated conflict and nothing starts', async ({ page }, info) => {
   test.skip(info.project.name !== 'desktop')
   await clearRunning(page)
