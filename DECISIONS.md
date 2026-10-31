@@ -217,3 +217,13 @@ forged-token requests to every page and API route still redirect to Access.
 Signed in, the new Customers page renders. The database is empty, ready for real
 customers and orders. From now on every migration must preserve data: 0002 may no
 longer be edited, and changes go in 0003+.
+
+### 2026-10-31 — M2 scope calls (Claude; Arturo can overturn)
+- **Artwork previews are the browser's own:** PNG, JPEG and SVG (as `<img>`)
+  inline, PDF in the browser viewer, TIFF in Safari only; elsewhere a file card
+  with download. No thumbnail generation, no image libraries. The brief says
+  previews "where supported"; thumbnails can be added if the family wants them.
+- **M2 adds PO creation** (number and amount, editable) next to PO documents.
+  Before this, the app could only change the status of a PO that already existed.
+- From M2 on, schema changes are new additive migrations (0003+) that preserve
+  the live data.
