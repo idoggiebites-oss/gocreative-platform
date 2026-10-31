@@ -76,22 +76,28 @@ export function MutationError({ error }: { error: Error | null }) {
 /**
  * An edit form's session: the field values AND the version they were read at are captured together when editing starts.
  * A background refetch never changes the version that gets sent. After a 409 conflict_retry the stale values are
- * replaced with the fresh ones (once the refetch lands), `conflict` stays true so the notice shows, and
- * `blocked` is true until then so no save can go out with stale values.
- * ponytail: blocked waits for the version to move; a conflict that leaves it unchanged would need the form closed and reopened.
+ * replaced with the fresh ones (once the refetch lands) and `conflict` stays true so the notice shows. `blocked` is true
+ * only while waiting for that refetch, so no save goes out with stale values and Save works again once they're in.
+ * ponytail: waiting ends when the version moves; a conflict that leaves it unchanged would need the form closed and reopened.
  */
 export function useEditSession<T>(current: number, seed: () => T) {
   const [s, setS] = useState(() => ({ version: current, values: seed() }))
+  // conflict = show the notice; waiting = the refetch hasn't landed yet, so saving is blocked.
+  // They are separate so Save works again as soon as the fresh values are in (Codex review of 20692ec).
   const [conflict, setConflict] = useState(false)
+  const [waiting, setWaiting] = useState(false)
   const latest = useRef(seed)
   latest.current = seed
   useEffect(() => {
-    if (conflict && current !== s.version) setS({ version: current, values: latest.current() })
-  }, [conflict, current, s.version])
+    if (waiting && current !== s.version) {
+      setS({ version: current, values: latest.current() })
+      setWaiting(false)
+    }
+  }, [waiting, current, s.version])
   return {
     values: s.values, setValues: (values: T) => setS((x) => ({ ...x, values })), version: s.version, conflict,
-    blocked: conflict && current === s.version,
-    onError: (e: unknown) => { if (isConflict(e)) setConflict(true) },
+    blocked: waiting,
+    onError: (e: unknown) => { if (isConflict(e)) { setConflict(true); setWaiting(true) } },
     clear: () => setConflict(false),
   }
 }

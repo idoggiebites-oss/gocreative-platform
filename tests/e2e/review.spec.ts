@@ -37,6 +37,11 @@ test('a form open behind another browser\'s save keeps its version, then discard
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('From B') // A's edit was never applied
   const now = await (await page.request.get(`/api/app/orders/${number}`)).json()
   expect(now.order.title).toBe('From B')
+  // After recovery A can edit and save again (Save must not stay disabled).
+  await expect(details(page).getByRole('button', { name: 'Save' })).toBeEnabled()
+  await page.getByLabel('Order title').fill('From A, after reload')
+  await details(page).getByRole('button', { name: 'Save' }).click()
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('From A, after reload')
   await b.context().close()
 })
 

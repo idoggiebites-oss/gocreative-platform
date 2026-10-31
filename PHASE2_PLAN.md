@@ -253,14 +253,14 @@ logic it can test, Claude for design, integration and verification).
   Payment corrections are an audited **void** that keeps the row and its `request_id`, never a
   hard delete.
 
-### M1 — Customers, orders, quotes, authorization (brief Step 2) → acceptance 1, 2, 3, 4, 6
-- [ ] Migration 0002 + schema tests. *(Opus; Codex reviews)*
-- [ ] Customers API: list/search, detail, create/edit, contacts. *(Sonnet)*
-- [ ] Orders write API: create from customer defaults, edit header (conflict guard), items
+### M1 — Customers, orders, quotes, authorization (brief Step 2) → acceptance 1, 2, 3, 4, 6 — built and Codex-reviewed 2026-10-31; remote migration + deploy await Arturo's go
+- [x] Migration 0002 + schema tests. *(Opus; Codex reviews)*
+- [x] Customers API: list/search, detail, create/edit, contacts. *(Sonnet)*
+- [x] Orders write API: create from customer defaults, edit header (conflict guard), items
       editor writes, cancel/reopen, assignee, notes, **record/revoke direct authorization**,
       the **cross-customer contact check** carried over from Phase 1. *(Opus)*
-- [ ] Quotes API: new version from items, duplicate, reorder, transitions, immutability. *(Opus, same task as orders: they share `items_revision`)*
-- [ ] UI: customer pages, New order, items + size grid, quote panel, authorization panel, ⌘K results. *(Sonnet)*
+- [x] Quotes API: new version from items, duplicate, reorder, transitions, immutability. *(Opus, same task as orders: they share `items_revision`)*
+- [x] UI: customer pages, New order, items + size grid, quote panel, authorization panel, ⌘K results. *(Sonnet)*
 
 ### M2 — Artwork and PO documents (brief Step 2, artwork) → acceptance 5, 6
 - [ ] Upload API: type allowlist by magic bytes, 50 MB limit, sha256, write-once R2 keys,
