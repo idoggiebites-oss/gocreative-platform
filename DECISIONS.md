@@ -150,3 +150,23 @@ M1, M3/M4 and M5 in PHASE2_PLAN.md ("Carried forward from the M0 review").
 - 0002 drops `estimates`, the stored `artwork_status` and `estimated_total_cents`
   without converting them. That's safe on the wiped remote (users only). Re-check
   the counts before `db:migrate:remote`, and migrate before deploying.
+
+### 2026-10-30 — M1c: order, quote and authorization writes (agent; Codex reviews next)
+- **Re-derive now includes `ready`.** One helper (`rederive()`) runs after every
+  write that applied. When a prerequisite is lost, the order drops from `ready` to
+  the right `awaiting_*`. It never moves `in_production` or later. This replaces
+  M1a's "a ready order with a revoked PO stays ready".
+- **Cancel** moves an in-production order to the re-derived pre-production status
+  (it counts as the re-derive writer, so there are still only two writers of
+  `production_status`). Once migration 0004 exists it also clears the slot.
+- **Order numbers:** the counter upsert and the order INSERT run in one batch. A
+  failed batch uses up no number. The first use creates the year's row.
+- **Repeat order** copies PO, payment terms, the artwork flag and the contact from
+  the source order, not from the customer's current defaults.
+- **Duplicate quote** restores lines by position; internal notes don't come back.
+- New quote versions, duplicates and item edits are refused once production has
+  started.
+- Optimistic concurrency uses an integer `version` on orders and customers. An
+  `updated_at` token can lose updates within a millisecond (Codex review of M1b).
+- Business dates (overdue, due this week, "today") use America/Chicago.
+- An archived contact can't be put on an order (added at the M1b/M1c merge).

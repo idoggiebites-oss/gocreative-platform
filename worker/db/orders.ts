@@ -5,7 +5,7 @@ import type {
   ArtworkApproval, AuthorizationMethod, CustomerKind, ItemKind, Method, OrderArtworkStatus, OrderSource, OrderState,
   PaymentTerms, PoStatus, PrepStatus, ProductionStatus, QuoteStatus,
 } from '../../shared/enums'
-import type { InquiryListRow, OrderCounts, OrderDetailResponse, OrderListRow, OrderView } from '../../shared/api'
+import type { ActivityAction, InquiryListRow, OrderCounts, OrderDetailResponse, OrderListRow, OrderView } from '../../shared/api'
 import type { DashInquiry, DashOrder } from '../domain/dashboard'
 import type { ReadinessInput } from '../domain/readiness'
 
@@ -46,7 +46,7 @@ export const PRE_PRODUCTION = `(CASE WHEN NOT ${QUOTE_OK} THEN 'awaiting_quote'
   WHEN NOT ${PREP_OK} THEN 'awaiting_preparation'
   ELSE 'ready' END)`
 const PRE_PRODUCTION_STATUSES = PRODUCTION_STATUSES.filter((s) => s.startsWith('awaiting_') || s === 'ready')
-const AWAITING_LIST = PRODUCTION_STATUSES.filter((s) => s.startsWith('awaiting_')).map((s) => `'${s}'`).join(',')
+const PRE_PRODUCTION_LIST = PRE_PRODUCTION_STATUSES.map((s) => `'${s}'`).join(',')
 
 type BaseRow = {
   id: number
@@ -65,6 +65,7 @@ type BaseRow = {
   quote_total_cents: number | null
   quote_sent_at: string | null
   created_at: string
+  version: number
   methods: string | null
   total_qty: number
 }
@@ -77,7 +78,7 @@ const BASE = `SELECT orders.id, orders.number, c.name AS customer_name, c.kind A
   ${CURRENT_QUOTE('cq.status')} AS quote_status,
   ${CURRENT_QUOTE('cq.total_cents')} AS quote_total_cents,
   ${CURRENT_QUOTE('COALESCE(cq.sent_at, cq.created_at)')} AS quote_sent_at,
-  orders.created_at,
+  orders.created_at, orders.version,
   (SELECT group_concat(DISTINCT i.method) FROM order_items i WHERE i.order_id = orders.id AND i.kind = 'product') AS methods,
   (SELECT COALESCE(SUM(i.quantity), 0) FROM order_items i WHERE i.order_id = orders.id AND i.kind = 'product') AS total_qty
   FROM orders JOIN customers c ON c.id = orders.customer_id`
@@ -93,7 +94,10 @@ const VIEW_WHERE: Record<Exclude<OrderView, 'inquiries'>, string> = {
   completed: `state = 'closed'`,
 }
 
-const ACTIVITY_KEYS = ['production_status', 'state', 'po_status', 'po_id', 'artwork_status', 'reason']
+// Never note bodies or authorization notes; `reason` is the staff-typed cancel/revoke reason, shown in the history.
+const ACTIVITY_KEYS = ['production_status', 'state', 'po_status', 'po_id', 'artwork_status', 'reason', 'items_revision', 'quote_version',
+  'quote_status', 'order_number', 'repeat_of', 'authorization_method', 'fields',
+  'title', 'due_date', 'contact_id', 'source', 'po_required', 'payment_terms', 'artwork_required', 'materials_required', 'assignee_id']
 
 const likeEscape = (q: string) => q.replace(/[\\%_]/g, (ch) => `\\${ch}`)
 
@@ -112,6 +116,7 @@ function toListRow(r: BaseRow): OrderListRow {
     productionStatus: r.production_status,
     state: r.state,
     dueDate: r.due_date,
+    version: r.version,
     quote: r.quote_status === null ? null : { status: r.quote_status, totalCents: r.quote_total_cents ?? 0 },
   }
 }
@@ -223,7 +228,7 @@ type OrderRow = {
   authorization_method: AuthorizationMethod | null; authorization_notes: string | null; items_revision: number
   payment_terms: PaymentTerms; materials_required: 0 | 1; prep_status: PrepStatus
   production_status: ProductionStatus; assignee_id: number | null
-  invoice_ref: string | null; payment_ref: string | null; state: OrderState
+  invoice_ref: string | null; payment_ref: string | null; state: OrderState; version: number
   created_at: string; updated_at: string
   artwork_status: OrderArtworkStatus // derived (ARTWORK_STATUS), not a column
 }
@@ -314,7 +319,7 @@ export async function getOrderDetail(db: D1Database, number: string): Promise<(O
       authorizationMethod: o.authorization_method, authorizationNotes: o.authorization_notes, itemsRevision: o.items_revision,
       paymentTerms: o.payment_terms, materialsRequired: o.materials_required === 1, prepStatus: o.prep_status,
       productionStatus: o.production_status, assigneeId: o.assignee_id,
-      invoiceRef: o.invoice_ref, paymentRef: o.payment_ref, state: o.state, createdAt: o.created_at, updatedAt: o.updated_at,
+      invoiceRef: o.invoice_ref, paymentRef: o.payment_ref, state: o.state, version: o.version, createdAt: o.created_at, updatedAt: o.updated_at,
     },
     customer: customer as OrderDetailResponse['customer'],
     contact,
@@ -346,7 +351,7 @@ const LOG_IF_CHANGED = `INSERT INTO activity_log (actor_kind, actor_id, entity_t
   SELECT 'user', ?, 'order', ?, ?, ?, ? WHERE changes() > 0`
 
 /**
- * THE only writer of orders.production_status for a user-requested change (the PO auto-sync below is the
+ * THE only writer of orders.production_status for a user-requested change (rederive() below is the
  * other). Callers must have passed checkOrderProductionMove. The readiness the move depended on is
  * re-asserted in the UPDATE itself: a start needs the full gate, a move between pre-production statuses
  * must land on the derived one. Returns false when the order moved or readiness no longer holds
@@ -358,7 +363,7 @@ export async function applyProductionChange(db: D1Database, p: { orderId: number
   const binds: (string | number)[] = [p.to, p.orderId, p.from, ...(guard.endsWith('?') ? [p.to] : [])]
   const [update] = await db.batch([
     db
-      .prepare(`UPDATE orders SET production_status = ?, updated_at = ${NOW} WHERE id = ? AND production_status = ? AND state = 'active'${guard}`)
+      .prepare(`UPDATE orders SET production_status = ?, version = version + 1, updated_at = ${NOW} WHERE id = ? AND production_status = ? AND state = 'active'${guard}`)
       .bind(...binds),
     db
       .prepare(LOG_IF_CHANGED)
@@ -371,45 +376,291 @@ export async function loadForPoChange(db: D1Database, number: string, poId: numb
   const o = await getOrderByNumber(db, number)
   if (!o) return null
   const po = await db.prepare('SELECT id, status FROM purchase_orders WHERE id = ? AND order_id = ?').bind(poId, o.id).first<{ id: number; status: PoStatus }>()
-  if (!po) return null
-  const [latest, input] = await Promise.all([latestPoFor(db, o.id), readinessInput(db, o)])
-  return { orderId: o.id, productionStatus: o.production_status, state: o.state, input, po, latestPoId: latest?.id ?? po.id }
+  return po && { orderId: o.id, po }
 }
 
 /**
- * Updates the PO (guarded by its previous status) with its own activity row. When `sync` is set, an
- * awaiting_* production status is then re-derived in SQL from readiness at write time, guarded by the
- * production status the caller saw, with its own activity row. Each row exists only if its UPDATE changed one.
+ * Updates the PO (guarded by its previous status) with its own activity row, then re-derives the pre-production
+ * status from readiness at write time (rederive). Each row exists only if its UPDATE changed one.
  * Returns whether the PO changed, and the persisted production status.
  */
-export async function applyPoChange(
-  db: D1Database,
-  p: { orderId: number; poId: number; actorId: number; from: PoStatus; to: PoStatus; productionFrom: ProductionStatus; sync: boolean },
-) {
-  const stmts = [
+export async function applyPoChange(db: D1Database, p: { orderId: number; poId: number; actorId: number; from: PoStatus; to: PoStatus }) {
+  const [update] = await db.batch([
     db.prepare(`UPDATE purchase_orders SET status = ?, updated_at = ${NOW} WHERE id = ? AND status = ?`).bind(p.to, p.poId, p.from),
     db.prepare(LOG_IF_CHANGED).bind(p.actorId, p.orderId, 'po_status_changed', JSON.stringify({ po_id: p.poId, po_status: p.from }), JSON.stringify({ po_id: p.poId, po_status: p.to })),
-  ]
-  if (p.sync) {
-    // changes() here is the PO log insert, so the sync only runs when the PO change applied.
-    stmts.push(
-      db
-        .prepare(
-          `UPDATE orders SET production_status = ${PRE_PRODUCTION}, updated_at = ${NOW}
-           WHERE id = ? AND changes() > 0 AND state = 'active' AND production_status = ? AND production_status IN (${AWAITING_LIST})
-           AND production_status <> ${PRE_PRODUCTION}`,
-        )
-        .bind(p.orderId, p.productionFrom),
-      db
-        .prepare(
-          `INSERT INTO activity_log (actor_kind, actor_id, entity_type, entity_id, action, before, after)
-           SELECT 'user', ?, 'order', id, 'production_status_changed', ?, json_object('production_status', production_status, 'reason', 'po_sync')
-           FROM orders WHERE id = ? AND changes() > 0`,
-        )
-        .bind(p.actorId, JSON.stringify({ production_status: p.productionFrom }), p.orderId),
-    )
-  }
-  const [update] = await db.batch(stmts)
+    ...rederive(db, p.orderId, p.actorId, 'po_sync'),
+  ])
   const row = await db.prepare('SELECT production_status FROM orders WHERE id = ?').bind(p.orderId).first<{ production_status: ProductionStatus }>()
-  return { changed: (update?.meta.changes ?? 0) > 0, productionStatus: row?.production_status ?? p.productionFrom }
+  return { changed: (update?.meta.changes ?? 0) > 0, productionStatus: row!.production_status }
+}
+
+// ---- the re-derive ----
+
+// A pre-production order whose stored status isn't what readiness says now.
+const DERIVABLE = `orders.state = 'active' AND orders.production_status IN (${PRE_PRODUCTION_LIST}) AND orders.production_status <> ${PRE_PRODUCTION}`
+type Stmt = ReturnType<D1Database['prepare']>
+type Value = string | number | null
+
+/**
+ * THE awaiting-status re-derive (AGENTS.md's second production_status writer). Every write that can change
+ * readiness appends these two statements right after its own activity INSERT, so they run only when that row
+ * was written (changes() > 0): a refused write moves nothing. A pre-production order (awaiting_* or ready)
+ * moves to what readiness says now, with its own activity row; in_production and later, and inactive orders,
+ * never move. The log goes first so it can read the status before the move; both see the same row.
+ */
+export function rederive(db: D1Database, orderId: number, actorId: number, reason: string): Stmt[] {
+  return [
+    db.prepare(`INSERT INTO activity_log (actor_kind, actor_id, entity_type, entity_id, action, before, after)
+      SELECT 'user', ?, 'order', id, 'production_status_changed', json_object('production_status', production_status),
+        json_object('production_status', ${PRE_PRODUCTION}, 'reason', ?)
+      FROM orders WHERE id = ? AND changes() > 0 AND ${DERIVABLE}`).bind(actorId, reason, orderId),
+    db.prepare(`UPDATE orders SET production_status = ${PRE_PRODUCTION}, version = version + 1, updated_at = ${NOW}
+      WHERE id = ? AND changes() > 0 AND ${DERIVABLE}`).bind(orderId),
+  ]
+}
+
+// ---- order writes (M1c) ----
+// Every write is one batch: [data statements…, the order UPDATE with the version guard, its activity row, the re-derive].
+// The data statements come first and each carries GUARD, so they see the version before the bump and all apply or
+// none do; the order UPDATE then bumps it. A stale version changes nothing, logs nothing, and the caller gets null.
+
+const GUARD = `EXISTS (SELECT 1 FROM orders g WHERE g.id = ? AND g.version = ?)`
+const toJson = (v: object | undefined) => (v === undefined ? null : JSON.stringify(v))
+
+export type OrderStateRow = { number: string; version: number; productionStatus: ProductionStatus; itemsRevision: number; state: OrderState }
+export async function orderState(db: D1Database, by: { id: number } | { number: string }): Promise<OrderStateRow | null> {
+  const r = await db.prepare(`SELECT number, version, production_status, items_revision, state FROM orders WHERE ${'id' in by ? 'id' : 'number'} = ?`)
+    .bind('id' in by ? by.id : by.number)
+    .first<{ number: string; version: number; production_status: ProductionStatus; items_revision: number; state: OrderState }>()
+  return r && { number: r.number, version: r.version, productionStatus: r.production_status, itemsRevision: r.items_revision, state: r.state }
+}
+
+type OrderWrite = {
+  orderId: number; version: number; actorId: number; action: ActivityAction; before?: object; after?: object
+  /** `column = expr` fragments, each a constant from this file (never user input), with their binds. */
+  set?: [sql: string, ...binds: Value[]][]
+  data?: Stmt[]
+}
+async function orderWrite(db: D1Database, w: OrderWrite): Promise<OrderStateRow | null> {
+  const set = w.set ?? []
+  const data = w.data ?? []
+  const results = await db.batch([
+    ...data,
+    db.prepare(`UPDATE orders SET ${set.map(([sql]) => `${sql}, `).join('')}version = version + 1, updated_at = ${NOW} WHERE id = ? AND version = ?`)
+      .bind(...set.flatMap(([, ...binds]) => binds), w.orderId, w.version),
+    db.prepare(LOG_IF_CHANGED).bind(w.actorId, w.orderId, w.action, toJson(w.before), toJson(w.after)),
+    ...rederive(db, w.orderId, w.actorId, w.action),
+  ])
+  return (results[data.length]?.meta.changes ?? 0) > 0 ? orderState(db, { id: w.orderId }) : null
+}
+
+export type ItemWrite = {
+  id?: number; kind: ItemKind; description: string | null; product: string | null; garmentColor: string | null; method: Method | null
+  sizes: Record<string, number> | null; quantity: number; unitPriceCents: number; notes: string | null
+}
+export type QuoteLineWrite = Omit<ItemWrite, 'id' | 'notes'> & { lineTotalCents: number }
+export type QuoteTotals = { subtotalCents: number; chargesCents: number; discountsCents: number; totalCents: number }
+const ITEM_COLS = 'kind, description, product, garment_color, method, sizes, quantity, unit_price_cents'
+const itemBinds = (i: Omit<ItemWrite, 'id' | 'notes'>): Value[] =>
+  [i.kind, i.description, i.product, i.garmentColor, i.method, i.sizes ? JSON.stringify(i.sizes) : null, i.quantity, i.unitPriceCents]
+
+const replaceItemsStmts = (db: D1Database, orderId: number, version: number, items: ItemWrite[]) => [
+  db.prepare(`DELETE FROM order_items WHERE order_id = ? AND ${GUARD}`).bind(orderId, orderId, version),
+  // An existing item keeps its id; a new one gets a fresh id.
+  ...items.map((i) => db.prepare(`INSERT INTO order_items (id, order_id, ${ITEM_COLS}, notes) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${GUARD}`)
+    .bind(i.id ?? null, orderId, ...itemBinds(i), i.notes, orderId, version)),
+]
+const quoteLineStmts = (db: D1Database, quoteIdSql: string, quoteIdBinds: Value[], orderId: number, version: number, lines: QuoteLineWrite[]) =>
+  lines.map((l, position) => db.prepare(`INSERT INTO quote_items (quote_id, position, ${ITEM_COLS}, line_total_cents)
+      SELECT ${quoteIdSql}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${GUARD}`)
+    .bind(...quoteIdBinds, position, ...itemBinds(l), l.lineTotalCents, orderId, version))
+
+type Guarded = { orderId: number; version: number; actorId: number }
+
+// Column names here are constants; the values are bound.
+const HEADER_COLUMNS = {
+  title: 'title', dueDate: 'due_date', contactId: 'contact_id', source: 'source', poRequired: 'po_required', paymentTerms: 'payment_terms',
+  artworkRequired: 'artwork_required', materialsRequired: 'materials_required', assigneeId: 'assignee_id',
+} as const
+export type HeaderField = keyof typeof HEADER_COLUMNS
+export type HeaderChange = Partial<Record<HeaderField, Value>>
+export function updateOrderHeader(db: D1Database, p: Guarded & { changes: HeaderChange; before: HeaderChange; noPurchasing: boolean }) {
+  const keys = Object.keys(p.changes) as HeaderField[]
+  const cols = (o: HeaderChange) => Object.fromEntries(keys.map((k) => [HEADER_COLUMNS[k], o[k] ?? null]))
+  return orderWrite(db, {
+    ...p, action: p.noPurchasing ? 'no_purchasing_confirmed' : 'order_updated',
+    set: keys.map((k) => [`${HEADER_COLUMNS[k]} = ?`, p.changes[k] ?? null]),
+    before: cols(p.before), after: { ...cols(p.changes), fields: keys.map((k) => HEADER_COLUMNS[k]) },
+  })
+}
+
+export function replaceItems(db: D1Database, p: Guarded & { items: ItemWrite[]; itemsRevision: { from: number; to: number } }) {
+  return orderWrite(db, {
+    ...p, action: 'items_replaced', data: replaceItemsStmts(db, p.orderId, p.version, p.items),
+    set: [['items_revision = ?', p.itemsRevision.to]],
+    before: { items_revision: p.itemsRevision.from }, after: { items_revision: p.itemsRevision.to },
+  })
+}
+
+/** A new quote version from `lines` (optionally first replacing the order's items, for a duplicate), superseding `supersedeIds`. */
+export function createQuote(db: D1Database, p: Guarded & {
+  quoteVersion: number; itemsRevision: number; totals: QuoteTotals; lines: QuoteLineWrite[]; supersedeIds: number[]
+  replaceItems?: ItemWrite[]; duplicateOf?: number
+}) {
+  const ids = p.supersedeIds
+  return orderWrite(db, {
+    ...p, action: 'quote_created',
+    data: [
+      ...(p.replaceItems ? replaceItemsStmts(db, p.orderId, p.version, p.replaceItems) : []),
+      ...(ids.length ? [db.prepare(`UPDATE quotes SET status = 'superseded' WHERE id IN (${ids.map(() => '?').join(',')}) AND order_id = ?
+          AND status IN ('draft','sent','accepted') AND ${GUARD}`).bind(...ids, p.orderId, p.orderId, p.version)] : []),
+      db.prepare(`INSERT INTO quotes (order_id, version, items_revision, subtotal_cents, charges_cents, discounts_cents, total_cents, created_by)
+          SELECT ?, ?, ?, ?, ?, ?, ?, ? WHERE ${GUARD}`)
+        .bind(p.orderId, p.quoteVersion, p.itemsRevision, p.totals.subtotalCents, p.totals.chargesCents, p.totals.discountsCents, p.totals.totalCents,
+          p.actorId, p.orderId, p.version),
+      ...quoteLineStmts(db, '(SELECT id FROM quotes WHERE order_id = ? AND version = ?)', [p.orderId, p.quoteVersion], p.orderId, p.version, p.lines),
+    ],
+    set: [['items_revision = ?', p.itemsRevision]],
+    after: { quote_version: p.quoteVersion, items_revision: p.itemsRevision, ...(p.duplicateOf ? { reason: `duplicate_of_v${p.duplicateOf}` } : {}) },
+  })
+}
+
+/** Re-snapshots a draft from the current items. The draft-only triggers back the route's check. */
+export function refreshQuote(db: D1Database, p: Guarded & { quoteId: number; quoteVersion: number; itemsRevision: number; totals: QuoteTotals; lines: QuoteLineWrite[] }) {
+  return orderWrite(db, {
+    ...p, action: 'quote_refreshed',
+    data: [
+      db.prepare(`DELETE FROM quote_items WHERE quote_id = ? AND ${GUARD}`).bind(p.quoteId, p.orderId, p.version),
+      ...quoteLineStmts(db, '?', [p.quoteId], p.orderId, p.version, p.lines),
+      db.prepare(`UPDATE quotes SET items_revision = ?, subtotal_cents = ?, charges_cents = ?, discounts_cents = ?, total_cents = ?
+          WHERE id = ? AND status = 'draft' AND ${GUARD}`)
+        .bind(p.itemsRevision, p.totals.subtotalCents, p.totals.chargesCents, p.totals.discountsCents, p.totals.totalCents, p.quoteId, p.orderId, p.version),
+    ],
+    after: { quote_version: p.quoteVersion, items_revision: p.itemsRevision },
+  })
+}
+
+export function changeQuoteStatus(db: D1Database, p: Guarded & { quoteId: number; quoteVersion: number; from: QuoteStatus; to: QuoteStatus }) {
+  return orderWrite(db, {
+    ...p, action: 'quote_status_changed',
+    data: [db.prepare(`UPDATE quotes SET status = ?1, sent_at = CASE WHEN ?1 = 'sent' THEN ${NOW} ELSE sent_at END,
+        decided_at = CASE WHEN ?1 IN ('accepted','declined') THEN ${NOW} ELSE decided_at END
+        WHERE id = ?2 AND status = ?3 AND EXISTS (SELECT 1 FROM orders g WHERE g.id = ?4 AND g.version = ?5)`)
+      .bind(p.to, p.quoteId, p.from, p.orderId, p.version)],
+    before: { quote_version: p.quoteVersion, quote_status: p.from }, after: { quote_version: p.quoteVersion, quote_status: p.to },
+  })
+}
+
+export function recordAuthorization(db: D1Database, p: Guarded & { method: AuthorizationMethod; notes: string | null; previous: AuthorizationMethod | null }) {
+  return orderWrite(db, {
+    ...p, action: 'authorization_recorded',
+    set: [[`authorized_at = ${NOW}`], ['authorized_by = ?', p.actorId], ['authorization_method = ?', p.method], ['authorization_notes = ?', p.notes]],
+    before: { authorization_method: p.previous }, after: { authorization_method: p.method },
+  })
+}
+
+export function revokeAuthorization(db: D1Database, p: Guarded & { reason: string; previous: AuthorizationMethod | null }) {
+  return orderWrite(db, {
+    ...p, action: 'authorization_revoked',
+    set: [['authorized_at = NULL'], ['authorized_by = NULL'], ['authorization_method = NULL'], ['authorization_notes = NULL']],
+    before: { authorization_method: p.previous }, after: { reason: p.reason },
+  })
+}
+
+/**
+ * CANCEL_ORDER_SQL's pattern (productionSql.ts) without the M4 slot columns: a running job drops back to the
+ * pre-production status readiness derives (the re-derive's own expression), so nothing stays "in production".
+ */
+export function cancelOrder(db: D1Database, p: Guarded & { reason: string; productionFrom: ProductionStatus; productionTo: ProductionStatus }) {
+  return orderWrite(db, {
+    ...p, action: 'order_cancelled',
+    set: [[`state = 'cancelled'`], [`production_status = CASE WHEN production_status = 'in_production' THEN ${PRE_PRODUCTION} ELSE production_status END`]],
+    before: { state: 'active', production_status: p.productionFrom }, after: { state: 'cancelled', production_status: p.productionTo, reason: p.reason },
+  })
+}
+
+export function reopenOrder(db: D1Database, p: Guarded) {
+  return orderWrite(db, { ...p, action: 'order_reopened', set: [[`state = 'active'`]], before: { state: 'cancelled' }, after: { state: 'active' } })
+}
+
+export async function addNote(db: D1Database, p: { orderId: number; actorId: number; body: string }) {
+  await db.batch([
+    db.prepare(`INSERT INTO notes (entity_type, entity_id, author_id, body) VALUES ('order', ?, ?, ?)`).bind(p.orderId, p.actorId, p.body),
+    db.prepare(LOG_IF_CHANGED).bind(p.actorId, p.orderId, 'note_added', null, null),
+  ])
+}
+
+// ---- new orders ----
+// The year's counter row is created on first use (the remote counters table starts empty) and handed out
+// atomically; the order INSERT reads the number back in the same batch, so a failed batch burns no number.
+const COUNTER_SQL = `INSERT INTO counters (name, year, next) VALUES ('order', ?, 2)
+  ON CONFLICT (name, year) DO UPDATE SET next = next + 1 RETURNING next - 1 AS n`
+/** The number just handed out, formatted like domain/orderNumber.formatOrderNumber (orders-write.test.ts checks they agree). */
+export const NEW_NUMBER = `(SELECT printf('%d-%04d', year, next - 1) FROM counters WHERE name = 'order' AND year = ?)`
+const counterN = (r: { results?: unknown[] } | undefined) => (r!.results![0] as { n: number }).n
+
+export async function createOrder(db: D1Database, p: {
+  year: number; actorId: number; customerId: number; contactId: number | null; source: OrderSource; title: string; dueDate: string | null
+  poRequired: boolean; paymentTerms: PaymentTerms; artworkRequired: boolean; productionStatus: ProductionStatus; items: ItemWrite[]
+}) {
+  const [counter] = await db.batch([
+    db.prepare(COUNTER_SQL).bind(p.year),
+    // The contact must belong to the customer, re-checked here so a moved contact can't slip in.
+    db.prepare(`INSERT INTO orders (number, customer_id, contact_id, source, title, due_date, po_required, payment_terms, artwork_required, production_status, created_by)
+        SELECT ${NEW_NUMBER.replace('?', '?1')}, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11
+        WHERE ?3 IS NULL OR EXISTS (SELECT 1 FROM customer_contacts cc WHERE cc.id = ?3 AND cc.customer_id = ?2 AND cc.archived_at IS NULL)`)
+      .bind(p.year, p.customerId, p.contactId, p.source, p.title, p.dueDate, p.poRequired ? 1 : 0, p.paymentTerms, p.artworkRequired ? 1 : 0, p.productionStatus, p.actorId),
+    ...p.items.map((i) => db.prepare(`INSERT INTO order_items (order_id, ${ITEM_COLS}, notes) SELECT o.id, ?, ?, ?, ?, ?, ?, ?, ?, ? FROM orders o WHERE o.number = ${NEW_NUMBER}`)
+      .bind(...itemBinds(i), i.notes, p.year)),
+    db.prepare(`INSERT INTO activity_log (actor_kind, actor_id, entity_type, entity_id, action, after)
+        SELECT 'user', ?, 'order', id, 'created', json_object('order_number', number, 'production_status', production_status) FROM orders WHERE number = ${NEW_NUMBER}`)
+      .bind(p.actorId, p.year),
+  ])
+  return counterN(counter)
+}
+
+/** A new order for the same customer with a copy of the source's items (no quotes, artwork, POs or authorization). */
+export async function repeatOrder(db: D1Database, p: { year: number; actorId: number; sourceId: number; source: OrderSource; dueDate: string | null; productionStatus: ProductionStatus }) {
+  const [counter] = await db.batch([
+    db.prepare(COUNTER_SQL).bind(p.year),
+    db.prepare(`INSERT INTO orders (number, customer_id, contact_id, source, title, due_date, po_required, payment_terms, artwork_required, production_status, created_by)
+        SELECT ${NEW_NUMBER}, customer_id, contact_id, ?, title || ' (repeat)', ?, po_required, payment_terms, artwork_required, ?, ? FROM orders WHERE id = ?`)
+      .bind(p.year, p.source, p.dueDate, p.productionStatus, p.actorId, p.sourceId),
+    db.prepare(`INSERT INTO order_items (order_id, ${ITEM_COLS}, notes) SELECT n.id, ${ITEM_COLS.split(', ').map((c) => `i.${c}`).join(', ')}, i.notes
+        FROM order_items i JOIN orders n ON n.number = ${NEW_NUMBER} WHERE i.order_id = ? ORDER BY i.id`).bind(p.year, p.sourceId),
+    db.prepare(`INSERT INTO activity_log (actor_kind, actor_id, entity_type, entity_id, action, after)
+        SELECT 'user', ?, 'order', n.id, 'created', json_object('order_number', n.number, 'repeat_of', s.number, 'production_status', n.production_status)
+        FROM orders n JOIN orders s ON s.id = ? WHERE n.number = ${NEW_NUMBER}`).bind(p.actorId, p.sourceId, p.year),
+    db.prepare(`INSERT INTO activity_log (actor_kind, actor_id, entity_type, entity_id, action, after)
+        SELECT 'user', ?, 'order', ?, 'order_repeated', json_object('order_number', number) FROM orders WHERE number = ${NEW_NUMBER}`)
+      .bind(p.actorId, p.sourceId, p.year),
+  ])
+  return counterN(counter)
+}
+
+// ---- reads for the writes ----
+
+export const getCustomerDefaults = (db: D1Database, id: number) =>
+  db.prepare('SELECT id, default_po_required, default_payment_terms FROM customers WHERE id = ?').bind(id)
+    .first<{ id: number; default_po_required: 0 | 1; default_payment_terms: PaymentTerms }>()
+// An archived contact can't be put on an order: the caller tells "archived" apart from "not this customer's".
+export const getContactCustomer = (db: D1Database, contactId: number) =>
+  db.prepare('SELECT customer_id, archived_at IS NOT NULL AS archived FROM customer_contacts WHERE id = ?').bind(contactId)
+    .first<{ customer_id: number; archived: 0 | 1 }>()
+export const isActiveUser = async (db: D1Database, id: number) =>
+  (await db.prepare('SELECT 1 AS ok FROM users WHERE id = ? AND active = 1').bind(id).first<{ ok: number }>()) !== null
+
+export async function listItems(db: D1Database, orderId: number): Promise<(ItemWrite & { id: number })[]> {
+  const { results } = await db.prepare(`SELECT id, ${ITEM_COLS}, notes FROM order_items WHERE order_id = ? ORDER BY id`).bind(orderId)
+    .all<ItemRow & { notes: string | null }>()
+  return results.map((i) => ({ ...toItem(i), notes: i.notes }))
+}
+export async function listQuotes(db: D1Database, orderId: number) {
+  const { results } = await db.prepare('SELECT id, version, status, items_revision FROM quotes WHERE order_id = ? ORDER BY version').bind(orderId)
+    .all<{ id: number; version: number; status: QuoteStatus; items_revision: number }>()
+  return results
+}
+export async function quoteLines(db: D1Database, quoteId: number) {
+  const { results } = await db.prepare(`SELECT id, ${ITEM_COLS} FROM quote_items WHERE quote_id = ? ORDER BY position`).bind(quoteId).all<ItemRow>()
+  return results.map(toItem)
 }

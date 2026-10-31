@@ -25,3 +25,11 @@ run `npm run verify` yourself before committing.
 agent's e2e was running. Not a code failure. Rule: run e2e in only one worktree
 at a time, or re-run after the other agent finishes, before concluding that
 anything broke.
+
+### 2026-10-30 — An edited migration doesn't re-run on a database that already applied it
+Migration 0002 was edited after the e2e state had applied it, so the browser tests
+ran against the old schema ("no such column: orders.version"). Rule: until a
+migration has been applied remotely it may be edited, but every local state must
+be rebuilt. `tests/e2e/prepare.ts` now deletes `.wrangler/e2e` on every run.
+Locally, run `rm -rf .wrangler/state` before `db:migrate`. Once a migration has
+been applied remotely, never edit it; write a new one.

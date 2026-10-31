@@ -1,5 +1,5 @@
 import { QUOTE_STATUSES } from '../../shared/enums.ts'
-import { checkQuoteAcceptable, checkQuoteTransition, currentQuote, itemsChangeRequiresReapproval, lineTotalCents, planNewVersion, quoteSatisfied, quoteTotals, sizesTotal, validateItem, CUSTOMER_FACING_ITEM_FIELDS } from './quotes.ts'
+import { checkQuoteAcceptable, checkQuoteTransition, currentQuote, itemsChangeRequiresReapproval, lineTotalCents, planNewVersion, quoteSatisfied, quoteTotals, restoreLines, sizesTotal, snapshot, validateItem, CUSTOMER_FACING_ITEM_FIELDS } from './quotes.ts'
 import type { Item } from './quotes.ts'
 const item: Item = { id: 1, kind: 'product', quantity: 2, unitPriceCents: 150, sizes: { M: 2 } }
 it('totals product, charge and discount cents', () => {
@@ -37,6 +37,21 @@ it('matches IDs, ignores internal edits and zero sizes, and detects new/removed 
   expect(itemsChangeRequiresReapproval([], [item])).toBe(true)
   expect(itemsChangeRequiresReapproval([item], [{ ...item, id: undefined }])).toBe(true)
   expect(itemsChangeRequiresReapproval([item], [second])).toBe(true)
+})
+it('snapshots lines with signed totals and refuses a discount larger than the total', () => {
+  const charge: Item = { kind: 'charge', quantity: 1, unitPriceCents: 500 }
+  const discount: Item = { kind: 'discount', quantity: 1, unitPriceCents: 100 }
+  expect(snapshot([item, charge, discount])).toEqual({ ok: true, totals: { subtotalCents: 300, chargesCents: 500, discountsCents: 100, totalCents: 700 },
+    lines: [{ ...item, lineTotalCents: 300 }, { ...charge, lineTotalCents: 500 }, { ...discount, lineTotalCents: -100 }] })
+  expect(snapshot([item, { ...discount, unitPriceCents: 1000 }])).toEqual({ ok: false, error: 'discount_exceeds_total' })
+  expect(snapshot([{ ...item, sizes: { M: 1 } }])).toEqual({ ok: false, error: 'sizes_quantity_mismatch' })
+})
+it('restores quote lines onto the items position by position', () => {
+  const restored = restoreLines([{ id: 7 }], [{ ...item, id: 99 }, { ...item, id: 100 }])
+  expect(restored.map((l) => l.id)).toEqual([7, undefined])
+  // Same content at the same position is not a change; an extra line is.
+  expect(itemsChangeRequiresReapproval([{ ...item, id: 7 }], restoreLines([{ id: 7 }], [item]))).toBe(false)
+  expect(itemsChangeRequiresReapproval([{ ...item, id: 7 }], restored)).toBe(true)
 })
 it('exhaustively checks quote transitions', () => {
   for (const from of QUOTE_STATUSES) for (const to of QUOTE_STATUSES) {

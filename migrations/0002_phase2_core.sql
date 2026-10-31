@@ -67,6 +67,9 @@ CREATE TABLE orders (
   invoice_ref TEXT,
   payment_ref TEXT,
   state TEXT NOT NULL DEFAULT 'active' CHECK (state IN ('active','cancelled','closed')),
+  -- Conflict guard: every write to the order does SET version = version + 1 WHERE version = <what it read>.
+  -- updated_at can't do it: two writes in the same millisecond leave it unchanged.
+  version INTEGER NOT NULL DEFAULT 0 CHECK (typeof(version) = 'integer' AND version >= 0),
   created_by INTEGER REFERENCES users (id) ON DELETE SET NULL,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))

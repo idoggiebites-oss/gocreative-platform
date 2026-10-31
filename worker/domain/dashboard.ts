@@ -1,5 +1,6 @@
 import type { OrderArtworkStatus, PoStatus, ProductionStatus, QuoteStatus } from '../../shared/enums.ts'
 import type { AttentionReason, DashboardMetrics } from '../../shared/api.ts'
+import { businessToday } from '../../shared/businessDate.ts'
 
 export type DashOrder = {
   id: number
@@ -35,9 +36,11 @@ const SEVERITY: AttentionReason[] = ['overdue', 'artwork_changes_requested', 'po
 const DAY = 86_400_000
 const dayNumber = (date: string) => Date.parse(date.slice(0, 10)) / DAY
 export const addDays = (date: string, n: number) => new Date(dayNumber(date) * DAY + n * DAY).toISOString().slice(0, 10)
+/** The shop-time business date a UTC timestamp falls on (PHASE2_PLAN §4.5). */
+const shopDate = (timestamp: string) => businessToday(new Date(timestamp))
 const PO_WAITING = ['received', 'under_review']
 
-/** Pure: takes ACTIVE orders, when each order finished production (production_complete = waiting for pickup until M5), new inquiries, and today (YYYY-MM-DD). */
+/** Pure: takes ACTIVE orders, when each order finished production (production_complete = waiting for pickup until M5), new inquiries, and today (the shop's business date, YYYY-MM-DD; shared/businessDate.businessToday). */
 export function buildDashboard(orders: DashOrder[], readyAt: Map<number, string>, inquiries: DashInquiry[], today: string) {
   const weekEnd = addDays(today, 7)
   const notDone = orders.filter((o) => o.productionStatus !== 'production_complete')
@@ -46,16 +49,16 @@ export function buildDashboard(orders: DashOrder[], readyAt: Map<number, string>
   const ready = orders.filter((o) => o.productionStatus === 'production_complete')
   const readyDays = (o: DashOrder) => {
     const at = readyAt.get(o.id)
-    return at === undefined ? undefined : Math.max(0, dayNumber(today) - dayNumber(at))
+    return at === undefined ? undefined : Math.max(0, dayNumber(today) - dayNumber(shopDate(at)))
   }
   const oldest = ready.map(readyDays).filter((d): d is number => d !== undefined)
 
   const metrics: DashboardMetrics = {
     activeOrders: orders.length,
-    activeOrdersNewThisWeek: orders.filter((o) => o.createdAt.slice(0, 10) >= addDays(today, -7)).length,
+    activeOrdersNewThisWeek: orders.filter((o) => shopDate(o.createdAt) >= addDays(today, -7)).length,
     pendingQuotes: orders.filter((o) => o.quoteStatus === 'draft' || o.quoteStatus === 'sent').length,
     pendingQuotesWaitingOver5Days: orders.filter(
-      (o) => o.quoteStatus === 'sent' && o.quoteSentAt !== null && o.quoteSentAt.slice(0, 10) < addDays(today, -5),
+      (o) => o.quoteStatus === 'sent' && o.quoteSentAt !== null && shopDate(o.quoteSentAt) < addDays(today, -5),
     ).length,
     artworkAwaitingApproval: {
       pending: orders.filter((o) => o.artworkStatus === 'under_review').length,

@@ -7,12 +7,13 @@ import type { ApiErrorCode, DashboardResponse, OrderDetailResponse, OrdersListRe
 import { PO_STATUSES, PRODUCTION_STATUSES } from '../../shared/enums'
 import { buildDashboard } from '../domain/dashboard'
 import { parseOrderNumber } from '../domain/orderNumber'
-import { checkOrderProductionMove, syncAwaitingStatus } from '../domain/productionFlow'
+import { checkOrderProductionMove } from '../domain/productionFlow'
 import { gateResult, readiness } from '../domain/readiness'
 import { checkPoTransition } from '../domain/purchaseOrder'
 import * as db from '../db/orders'
+import { businessToday } from '../../shared/businessDate'
 
-const number = z.string().refine((s) => parseOrderNumber(s) !== null, 'invalid order number')
+export const number = z.string().refine((s) => parseOrderNumber(s) !== null, 'invalid order number')
 const poId = z.string().regex(/^[1-9]\d{0,14}$/, 'invalid purchase order id').transform(Number)
 const listQuery = z.object({
   view: z.enum(ORDER_VIEWS).default('active'),
@@ -20,10 +21,7 @@ const listQuery = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(100),
 })
 
-const bad = (c: Context, e: z.ZodError) => c.json({ error: `Invalid request: ${e.issues[0]?.path.join('.') || 'input'} ${e.issues[0]?.message ?? ''}`.trim(), code: 'invalid_request' satisfies ApiErrorCode }, 400)
-
-// ponytail: "today" is the UTC date; the shop's local timezone is a later refinement.
-const todayUtc = () => new Date().toISOString().slice(0, 10)
+export const bad = (c: Context, e: z.ZodError) => c.json({ error: `Invalid request: ${e.issues[0]?.path.join('.') || 'input'} ${e.issues[0]?.message ?? ''}`.trim(), code: 'invalid_request' satisfies ApiErrorCode }, 400)
 
 export function orderRoutes() {
   return new Hono<AppEnv>()
@@ -32,7 +30,7 @@ export function orderRoutes() {
       const [orders, readyAt, inquiries, recentActivity] = await Promise.all([
         db.listActiveDashOrders(d), db.readyForPickupSince(d), db.listNewInquiriesForDashboard(d), db.recentActivity(d),
       ])
-      const { metrics, attention, dueThisWeek } = buildDashboard(orders, readyAt, inquiries, todayUtc())
+      const { metrics, attention, dueThisWeek } = buildDashboard(orders, readyAt, inquiries, businessToday(new Date()))
       const items = await db.itemsSummaries(d, attention.flatMap((a) => (a.orderId === null ? [] : [a.orderId])))
       const needsAttention = attention.map(({ orderId, ...a }) => ({ ...a, itemsSummary: orderId === null ? '' : (items.get(orderId) ?? '') }))
       return c.json<DashboardResponse>({ metrics, needsAttention, dueThisWeek, recentActivity })
@@ -85,12 +83,9 @@ export function orderRoutes() {
       if (!loaded) return c.json({ error: 'Purchase order not found', code: 'not_found' satisfies ApiErrorCode }, 404)
       const check = checkPoTransition(loaded.po.status, body.data.to)
       if (!check.ok) return c.json({ error: check.error, code: 'po_transition_not_allowed' satisfies ApiErrorCode }, 409)
-      // Readiness after this change: the edited PO counts only if it is the order's latest.
-      const after = loaded.latestPoId === loaded.po.id ? { ...loaded.input, latestPo: { status: body.data.to } } : loaded.input
-      const syncTo = syncAwaitingStatus(loaded.productionStatus, loaded.state, readiness(after))
+      // The re-derive in the same batch moves a pre-production status to whatever readiness says after the change.
       const { changed, productionStatus } = await db.applyPoChange(c.env.DB, {
         orderId: loaded.orderId, poId: loaded.po.id, actorId: c.get('user').id, from: loaded.po.status, to: body.data.to,
-        productionFrom: loaded.productionStatus, sync: syncTo !== null,
       })
       if (!changed) return c.json({ error: 'Purchase order changed, reload and retry', code: 'conflict_retry' satisfies ApiErrorCode }, 409)
       return c.json({ poId: loaded.po.id, status: body.data.to, productionStatus })

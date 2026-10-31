@@ -55,6 +55,8 @@ export type OrderListRow = {
   productionStatus: ProductionStatus
   state: OrderState
   dueDate: string | null
+  /** The order's conflict-guard counter; send it back as expectedVersion. */
+  version: number
   /** The current (highest-version) quote. Its total is the agreed total only when it is accepted. */
   quote: { status: QuoteStatus; totalCents: number } | null
 }
@@ -108,6 +110,8 @@ export type OrderDetailResponse = {
     invoiceRef: string | null
     paymentRef: string | null
     state: OrderState
+    /** Conflict guard: send it back as expectedVersion. updatedAt is for display only. */
+    version: number
     createdAt: string
     updatedAt: string
   }
@@ -141,13 +145,58 @@ export type ProductionChangeRequest = { to: ProductionStatus }
 export type ProductionChangeResponse = { number: string; productionStatus: ProductionStatus; state: OrderState }
 export type PoChangeRequest = { to: PoStatus }
 export type PoChangeResponse = { poId: number; status: PoStatus; productionStatus: ProductionStatus }
+// ---- order writes (M1c) ----
+export type ItemInput = {
+  /** An existing item's id keeps its identity (and so its place in the reapproval comparison); omit for a new line. */
+  id?: number
+  kind: ItemKind
+  description?: string | null
+  product?: string | null
+  garmentColor?: string | null
+  method?: Method | null
+  sizes?: Record<string, number> | null
+  quantity: number
+  unitPriceCents: number
+  /** Internal; never bumps itemsRevision. */
+  notes?: string | null
+}
+export type CreateOrderRequest = {
+  customerId: number; contactId?: number | null; source: OrderSource; title: string; dueDate?: string | null
+  poRequired?: boolean; paymentTerms?: PaymentTerms; artworkRequired?: boolean; items?: ItemInput[]
+}
+export type UpdateOrderRequest = {
+  expectedVersion: number; title?: string; dueDate?: string | null; contactId?: number | null; source?: OrderSource
+  poRequired?: boolean; paymentTerms?: PaymentTerms; artworkRequired?: boolean
+  /** false = "No purchasing needed", which needs confirmNoPurchasing: true. */
+  materialsRequired?: boolean; confirmNoPurchasing?: boolean; assigneeId?: number | null
+}
+export type ReplaceItemsRequest = { expectedVersion: number; items: ItemInput[] }
+export type QuoteChangeRequest = { to: 'sent' | 'accepted' | 'declined'; expectedVersion?: number }
+export type AuthorizationRequest = { method: AuthorizationMethod; notes?: string | null; expectedVersion?: number }
+export type ReasonRequest = { reason: string; expectedVersion?: number }
+/** Every order write answers with the order's state after the write (re-read from the database). */
+export type OrderWriteResponse = {
+  number: string; version: number; productionStatus: ProductionStatus; itemsRevision: number; state: OrderState
+  quote?: { version: number; status: QuoteStatus }
+}
+
 // `error` is English text for logs; the UI shows a translation of `code` (and of each gate reason code in `reasons`).
-export const API_ERROR_CODES = ['transition_not_allowed', 'gate_failed', 'conflict_retry', 'po_transition_not_allowed', 'not_found', 'invalid_request', 'contact_archived'] as const
+export const API_ERROR_CODES = [
+  'transition_not_allowed', 'gate_failed', 'conflict_retry', 'po_transition_not_allowed', 'not_found', 'invalid_request',
+  'contact_archived', 'contact_not_for_customer', 'confirmation_required', 'order_not_active', 'production_started', 'quote_stale',
+  'quote_frozen', 'quote_not_draft', 'invalid_quote_transition', 'no_product_line', 'discount_exceeds_total', 'po_required',
+  'not_authorized',
+] as const
 export type ApiErrorCode = (typeof API_ERROR_CODES)[number]
 export type ApiError = { error: string; code?: ApiErrorCode; reasons?: string[] }
 
 // Codes the UI translates. Unknown codes fall back to a generic label, so the API can add one first.
-export const ACTIVITY_ACTIONS = ['created', 'production_status_changed', 'po_status_changed', 'customer_created', 'customer_updated', 'contact_added', 'contact_updated', 'contact_archived', 'contact_unarchived', 'note_added'] as const
+export const ACTIVITY_ACTIONS = [
+  'created', 'production_status_changed', 'po_status_changed', 'customer_created', 'customer_updated', 'contact_added',
+  'contact_updated', 'contact_archived', 'contact_unarchived', 'note_added', 'order_updated', 'no_purchasing_confirmed',
+  'items_replaced', 'quote_created', 'quote_refreshed', 'quote_status_changed', 'order_repeated', 'authorization_recorded',
+  'authorization_revoked', 'order_cancelled', 'order_reopened',
+] as const
 export type ActivityAction = (typeof ACTIVITY_ACTIONS)[number]
 export const GATE_REASON_CODES = [
   'order_not_active',
