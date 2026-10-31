@@ -134,6 +134,9 @@ describe('REPLACE and identity changes can\'t get around the slot rules (Codex r
       expect(exec(`UPDATE orders SET ${alias} = 999, production_slot = 2, production_override_by = ?, production_override_reason = 'rush' WHERE id = 3`, OWNER), alias).toThrow(/order_id_fixed|production_override_invalid/)
       expect(exec(`UPDATE orders SET ${alias} = 999 WHERE id = 5`), alias).toThrow(/order_id_fixed/)
     }
+    // Nor its number: UPDATE OR REPLACE onto the running job's number would delete that job.
+    const n3 = (db.prepare('SELECT number FROM orders WHERE id = 3').get() as { number: string }).number
+    expect(exec(`UPDATE OR REPLACE orders SET number = ? WHERE id = 5`, n3)).toThrow(/order_id_fixed/)
     expect(row(3)).toMatchObject({ production_slot: 1, production_override_by: null })
     expect(activityCount()).toBe(n)
   })

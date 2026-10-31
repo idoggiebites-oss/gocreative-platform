@@ -46,9 +46,9 @@ BEGIN
 END;
 CREATE TRIGGER orders_production_slot_update BEFORE UPDATE ON orders
 BEGIN
-  -- An order's identity is fixed (through id or any rowid alias); otherwise an order could count itself as the
+  -- An order's identity (id through any rowid alias, and its number) is fixed, so UPDATE OR REPLACE can't evict another order; otherwise an order could count itself as the
   -- running slot-1 job (Codex review of fcdbb90). UPDATE OR REPLACE into a held slot would evict its job: refuse.
-  SELECT RAISE(ABORT, 'order_id_fixed') WHERE NEW.id IS NOT OLD.id;
+  SELECT RAISE(ABORT, 'order_id_fixed') WHERE NEW.id IS NOT OLD.id OR NEW.number IS NOT OLD.number;
   SELECT RAISE(ABORT, 'production_slot_invalid')
   WHERE NEW.production_slot IS NOT NULL AND NEW.production_slot IS NOT OLD.production_slot
     AND EXISTS (SELECT 1 FROM orders WHERE production_slot = NEW.production_slot AND id IS NOT OLD.id);

@@ -369,5 +369,5 @@ Business-rule choices made while building the M4 API. Each can be overturned.
   someone must decide which job is really running before it is applied.
 
 ## 2026-10-31 — Order identity and slot collisions are refused by the database (Codex review of fcdbb90)
-- An order's id can't change (through `id` or any rowid alias); an INSERT that collides with an existing order (id or number) or a held production slot is refused, so `INSERT/UPDATE OR REPLACE` can't promote a slot-2 job, rewrite an override or evict a running job.
+- An order's id (through `id` or any rowid alias) and number can't change; an INSERT that collides with an existing order (id or number) or a held production slot is refused, so `INSERT/UPDATE OR REPLACE` can't promote a slot-2 job, rewrite an override or evict a running job.
 - A start that loses the slot race now fails on the slot trigger (`production_slot_invalid`) before the unique index; the route maps both to 409 as before.
