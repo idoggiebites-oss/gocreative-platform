@@ -1,7 +1,7 @@
 import { fulfilmentStatus, checkPickupRelease, isClosed } from './fulfilment.ts'
-import { FINANCIAL_STATUSES, FULFILMENT_STATUSES, PRODUCTION_STATUSES_NEXT } from '../../shared/enums-next.ts'
+import { FINANCIAL_STATUSES, FULFILMENT_STATUSES, PRODUCTION_STATUSES } from '../../shared/enums.ts'
 it('keeps fulfilment separate from production and payment', () => {
-  for (const status of PRODUCTION_STATUSES_NEXT) expect(fulfilmentStatus(status, { notifiedAt: 'now', pickedUpAt: 'now' })).toBe(status === 'production_complete' ? 'picked_up' : 'not_ready')
+  for (const status of PRODUCTION_STATUSES) expect(fulfilmentStatus(status, { notifiedAt: 'now', pickedUpAt: 'now' })).toBe(status === 'production_complete' ? 'picked_up' : 'not_ready')
   expect(fulfilmentStatus('production_complete', null)).toBe('ready_for_pickup')
   expect(fulfilmentStatus('production_complete', { notifiedAt: 'now', pickedUpAt: null })).toBe('customer_notified')
   for (const fulfilment of FULFILMENT_STATUSES) for (const financial of FINANCIAL_STATUSES) expect(isClosed(fulfilment, financial)).toBe(fulfilment === 'picked_up' && financial === 'paid')

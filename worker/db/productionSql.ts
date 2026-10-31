@@ -1,6 +1,6 @@
 // M0 design statements; the M3 start/cancel routes run them verbatim against the migration 0004 schema.
-// Full readiness is not in SQL yet: the route checks canEnterProduction first, and the guard below only
-// requires 'ready' (which readiness alone writes). M1/M3 add the SQL readiness re-check to the guard.
+// The guard below only requires 'ready' (which readiness alone writes); M3/M4 add the full readiness
+// re-check (orders.ts GATE_OK) to its WHERE, as applyProductionChange already does.
 
 // Start: one batch, [UPDATE, log]. Bind [0] (slot, overrideBy|null, overrideReason|null, orderId) and
 // [1] (actorId, orderId). A losing start either matches no row (changes() = 0, nothing logged) or

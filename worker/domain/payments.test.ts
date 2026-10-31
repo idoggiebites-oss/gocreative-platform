@@ -1,5 +1,5 @@
 import { balance, checkCheckTransition, matchRetry } from './payments.ts'
-import { CHECK_STATUSES } from '../../shared/enums-next.ts'
+import { CHECK_STATUSES } from '../../shared/enums.ts'
 it.each([
   [null, [], null, 0, 'unpaid'], [null, [100], null, 0, 'partially_paid'],
   [200, [], 200, 0, 'unpaid'], [200, [50, 25], 125, 0, 'partially_paid'],

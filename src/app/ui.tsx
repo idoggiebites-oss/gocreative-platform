@@ -1,7 +1,7 @@
 import type { MouseEvent, ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { ChevronDown } from 'lucide-react'
-import type { ArtworkStatus, EstimateStatus, PoStatus, ProductionStatus } from '@shared/enums'
+import type { OrderArtworkStatus, PoStatus, ProductionStatus, QuoteStatus } from '@shared/enums'
 import { cn } from '@/lib/utils'
 
 export type Tone = 'amber' | 'blue' | 'green' | 'red' | 'gray'
@@ -16,12 +16,13 @@ const TONE: Record<Tone, string> = {
 const CHIP = "inline-flex h-[22px] items-center gap-1.5 rounded-full px-2 text-xs font-medium whitespace-nowrap before:size-1.5 before:rounded-full before:bg-current before:content-['']"
 
 // Each status always has a text label next to its colour (DESIGN_SYSTEM.md).
-export const ARTWORK_TONE: Record<ArtworkStatus, Tone> = { none: 'gray', pending: 'amber', approved: 'green', changes_requested: 'red' }
+export const ARTWORK_TONE: Record<OrderArtworkStatus, Tone> = { not_received: 'gray', under_review: 'amber', changes_requested: 'red', approved: 'green', not_required: 'gray' }
 export const PO_TONE: Record<PoStatus, Tone> = { requested: 'amber', received: 'amber', under_review: 'amber', approved: 'green', rejected: 'red', correction_required: 'red' }
 export const PRODUCTION_TONE: Record<ProductionStatus, Tone> = {
-  awaiting_authorization: 'amber', awaiting_artwork: 'amber', ready: 'gray', in_production: 'blue', quality_control: 'blue', ready_for_pickup: 'green', completed: 'green',
+  awaiting_quote: 'amber', awaiting_authorization: 'amber', awaiting_artwork: 'amber', awaiting_materials: 'amber', awaiting_preparation: 'amber',
+  ready: 'gray', in_production: 'blue', quality_control: 'blue', production_complete: 'green',
 }
-export const ESTIMATE_TONE: Record<EstimateStatus, Tone> = { draft: 'gray', sent: 'amber', accepted: 'green', declined: 'red' }
+export const QUOTE_TONE: Record<QuoteStatus, Tone> = { draft: 'gray', sent: 'amber', accepted: 'green', declined: 'red', superseded: 'gray' }
 
 export function Chip({ tone, children, className }: { tone: Tone; children: ReactNode; className?: string }) {
   return <span className={cn(CHIP, TONE[tone], className)}>{children}</span>

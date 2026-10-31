@@ -7,7 +7,8 @@ import type { ApiErrorCode, DashboardResponse, OrderDetailResponse, OrdersListRe
 import { PO_STATUSES, PRODUCTION_STATUSES } from '../../shared/enums'
 import { buildDashboard } from '../domain/dashboard'
 import { parseOrderNumber } from '../domain/orderNumber'
-import { canEnterProduction, checkProductionTransition, syncAwaitingStatus } from '../domain/production'
+import { checkOrderProductionMove, syncAwaitingStatus } from '../domain/productionFlow'
+import { gateResult, readiness } from '../domain/readiness'
 import { checkPoTransition } from '../domain/purchaseOrder'
 import * as db from '../db/orders'
 
@@ -49,8 +50,9 @@ export function orderRoutes() {
       if (!n.success) return bad(c, n.error)
       const detail = await db.getOrderDetail(c.env.DB, n.data)
       if (!detail) return c.json({ error: 'Order not found', code: 'not_found' satisfies ApiErrorCode }, 404)
-      const { gateInput, ...rest } = detail
-      return c.json<OrderDetailResponse>({ ...rest, gate: canEnterProduction(gateInput.order, gateInput.latestPo) })
+      const { readinessInput, ...rest } = detail
+      const r = readiness(readinessInput)
+      return c.json<OrderDetailResponse>({ ...rest, gate: gateResult(readinessInput.state, r), readiness: r })
     })
     .patch('/orders/:number/production', async (c) => {
       const n = number.safeParse(c.req.param('number'))
@@ -59,15 +61,18 @@ export function orderRoutes() {
       if (!body.success) return bad(c, body.error)
       const loaded = await db.loadForProductionChange(c.env.DB, n.data)
       if (!loaded) return c.json({ error: 'Order not found', code: 'not_found' satisfies ApiErrorCode }, 404)
-      const check = checkProductionTransition(loaded.from, body.data.to, loaded.order, loaded.latestPo)
+      const r = readiness(loaded.input)
+      const check = checkOrderProductionMove(loaded.state, loaded.from, body.data.to, r)
       if (!check.ok) {
-        const gate = canEnterProduction(loaded.order, loaded.latestPo)
-        const code: ApiErrorCode = !gate.ok && check.error.startsWith('Production gate failed') ? 'gate_failed' : 'transition_not_allowed'
-        return c.json({ error: check.error, code, ...(gate.ok ? {} : { reasons: gate.reasons }) }, 409)
+        const gate = gateResult(loaded.state, r)
+        // A refused start, or a move to 'ready' that readiness doesn't support, is the gate speaking.
+        const gated = !r.ready && loaded.state === 'active' && (check.error === 'not_ready' || (check.error === 'readiness_status_mismatch' && body.data.to === 'ready'))
+        const code: ApiErrorCode = gated ? 'gate_failed' : 'transition_not_allowed'
+        return c.json({ error: `Production move refused: ${check.error}`, code, ...(gate.ok ? {} : { reasons: gate.reasons }) }, 409)
       }
       const changed = await db.applyProductionChange(c.env.DB, { orderId: loaded.id, actorId: c.get('user').id, from: loaded.from, to: body.data.to })
       if (!changed) return c.json({ error: 'Order changed, reload and retry', code: 'conflict_retry' satisfies ApiErrorCode }, 409)
-      return c.json({ number: n.data, productionStatus: body.data.to, state: body.data.to === 'completed' ? 'completed' : loaded.order.state })
+      return c.json({ number: n.data, productionStatus: body.data.to, state: loaded.state })
     })
     .patch('/orders/:number/purchase-orders/:poId', async (c) => {
       const n = number.safeParse(c.req.param('number'))
@@ -80,9 +85,9 @@ export function orderRoutes() {
       if (!loaded) return c.json({ error: 'Purchase order not found', code: 'not_found' satisfies ApiErrorCode }, 404)
       const check = checkPoTransition(loaded.po.status, body.data.to)
       if (!check.ok) return c.json({ error: check.error, code: 'po_transition_not_allowed' satisfies ApiErrorCode }, 409)
-      // The order's latest PO after this change: the edited one if it is the latest, else unchanged.
-      const latestAfter = loaded.latestPoId === loaded.po.id ? { status: body.data.to } : loaded.latestPo
-      const syncTo = syncAwaitingStatus(loaded.productionStatus, loaded.order, latestAfter)
+      // Readiness after this change: the edited PO counts only if it is the order's latest.
+      const after = loaded.latestPoId === loaded.po.id ? { ...loaded.input, latestPo: { status: body.data.to } } : loaded.input
+      const syncTo = syncAwaitingStatus(loaded.productionStatus, loaded.state, readiness(after))
       const { changed, productionStatus } = await db.applyPoChange(c.env.DB, {
         orderId: loaded.orderId, poId: loaded.po.id, actorId: c.get('user').id, from: loaded.po.status, to: body.data.to,
         productionFrom: loaded.productionStatus, sync: syncTo !== null,

@@ -1,6 +1,9 @@
 // Request/response types for /api/app order screens. Dates are returned as stored
 // (due_date YYYY-MM-DD, timestamps ISO UTC text); money is integer cents.
-import type { ArtworkStatus, CustomerKind, EstimateStatus, Method, OrderSource, OrderState, PoStatus, ProductionStatus } from './enums'
+import type {
+  AuthorizationMethod, CustomerKind, ItemKind, Method, OrderArtworkStatus, OrderSource, OrderState, PaymentTerms, PoStatus, PrepStatus,
+  ProductionStatus, QuoteStatus,
+} from './enums'
 
 export const ORDER_VIEWS = ['active', 'inquiries', 'waiting_po', 'waiting_artwork', 'in_production', 'ready', 'completed'] as const
 export type OrderView = (typeof ORDER_VIEWS)[number]
@@ -12,8 +15,9 @@ export type DashboardMetrics = {
   /** Active orders created in the last 7 days (a sibling of activeOrders, which stays a plain number). */
   activeOrdersNewThisWeek: number
   pendingQuotes: number
-  /** Pending quotes whose latest estimate is 'sent' and was created more than 5 days ago. */
+  /** Pending quotes whose current quote is 'sent' and was sent more than 5 days ago. */
   pendingQuotesWaitingOver5Days: number
+  /** pending = current versions under review. */
   artworkAwaitingApproval: { pending: number; changesRequested: number }
   posAwaitingApproval: { count: number; amountCents: number }
   inProduction: { count: number; qc: number }
@@ -45,13 +49,14 @@ export type OrderListRow = {
   title: string
   methods: Method[]
   totalQty: number
-  artworkStatus: ArtworkStatus
+  artworkStatus: OrderArtworkStatus
   poRequired: boolean
   latestPoStatus: PoStatus | null
   productionStatus: ProductionStatus
   state: OrderState
   dueDate: string | null
-  estimatedTotalCents: number | null
+  /** The current (highest-version) quote. Its total is the agreed total only when it is accepted. */
+  quote: { status: QuoteStatus; totalCents: number } | null
 }
 export type InquiryListRow = { id: number; contactName: string | null; contactEmail: string | null; contactPhone: string | null; createdAt: string }
 export type OrderCounts = Record<OrderView, number>
@@ -60,6 +65,25 @@ export type OrdersListResponse =
   | { view: Exclude<OrderView, 'inquiries'>; rows: OrderListRow[]; counts: OrderCounts }
 
 export type GateResult = { ok: true } | { ok: false; reasons: string[] }
+export type ReadinessKey = 'quote' | 'authorization' | 'artwork' | 'materials' | 'preparation'
+/** domain/readiness.ts's result: the five items in fixed order, whether production may start, and the derived awaiting status. */
+export type ReadinessResult = {
+  items: { key: ReadinessKey; state: 'complete' | 'pending' | 'not_required'; reason?: string }[]
+  ready: boolean
+  preProductionStatus: ProductionStatus
+}
+export type OrderItem = {
+  id: number
+  kind: ItemKind
+  description: string | null
+  /** null on charge and discount lines. */
+  product: string | null
+  garmentColor: string | null
+  method: Method | null
+  sizes: Record<string, number> | null
+  quantity: number
+  unitPriceCents: number
+}
 export type OrderDetailResponse = {
   order: {
     id: number
@@ -67,13 +91,20 @@ export type OrderDetailResponse = {
     source: OrderSource
     title: string
     dueDate: string | null
-    artworkStatus: ArtworkStatus
+    /** Derived from the designs' current versions. */
+    artworkStatus: OrderArtworkStatus
+    artworkRequired: boolean
     poRequired: boolean
     authorizedAt: string | null
     authorizedBy: number | null
+    authorizationMethod: AuthorizationMethod | null
+    authorizationNotes: string | null
+    itemsRevision: number
+    paymentTerms: PaymentTerms
+    materialsRequired: boolean
+    prepStatus: PrepStatus
     productionStatus: ProductionStatus
     assigneeId: number | null
-    estimatedTotalCents: number | null
     invoiceRef: string | null
     paymentRef: string | null
     state: OrderState
@@ -82,21 +113,28 @@ export type OrderDetailResponse = {
   }
   customer: { id: number; name: string; kind: CustomerKind; email: string | null; phone: string | null }
   contact: { id: number; name: string; email: string | null; phone: string | null; title: string | null } | null
-  items: {
+  items: (OrderItem & { notes: string | null })[]
+  /** The current (highest-version) quote and its frozen lines; replaces Phase 1's latestEstimate. */
+  quote: {
     id: number
-    product: string
-    garmentColor: string | null
-    method: Method
-    sizes: Record<string, number> | null
-    quantity: number
-    unitPriceCents: number
-    notes: string | null
-  }[]
-  latestEstimate: { id: number; version: number; inputs: unknown; lines: unknown; totalCents: number; status: EstimateStatus; createdAt: string } | null
+    version: number
+    status: QuoteStatus
+    itemsRevision: number
+    subtotalCents: number
+    chargesCents: number
+    discountsCents: number
+    totalCents: number
+    createdAt: string
+    sentAt: string | null
+    decidedAt: string | null
+    items: (OrderItem & { lineTotalCents: number })[]
+  } | null
   purchaseOrders: { id: number; poNumber: string | null; amountCents: number | null; status: PoStatus; createdAt: string; updatedAt: string }[]
   notes: { id: number; body: string; authorName: string | null; createdAt: string }[]
   activity: { id: number; actor: string; action: string; before: unknown; after: unknown; createdAt: string }[]
+  /** ok = readiness.ready; reasons = 'order_not_active' and/or '<item>.<reason>' for each pending item (GATE_REASON_CODES). */
   gate: GateResult
+  readiness: ReadinessResult
 }
 
 export type ProductionChangeRequest = { to: ProductionStatus }
@@ -111,5 +149,12 @@ export type ApiError = { error: string; code?: ApiErrorCode; reasons?: string[] 
 // Codes the UI translates. Unknown codes fall back to a generic label, so the API can add one first.
 export const ACTIVITY_ACTIONS = ['created', 'production_status_changed', 'po_status_changed'] as const
 export type ActivityAction = (typeof ACTIVITY_ACTIONS)[number]
-export const GATE_REASON_CODES = ['order_not_active', 'artwork_not_approved', 'po_missing', 'po_not_approved', 'not_authorized'] as const
+export const GATE_REASON_CODES = [
+  'order_not_active',
+  'quote.no_quote', 'quote.not_accepted', 'quote.items_changed_since_acceptance', 'quote.empty_quote',
+  'authorization.po_missing', 'authorization.po_not_approved', 'authorization.not_authorized',
+  'artwork.not_received', 'artwork.under_review', 'artwork.changes_requested',
+  'materials.not_ordered', 'materials.awaiting_delivery',
+  'preparation.not_started', 'preparation.in_progress',
+] as const
 export type GateReasonCode = (typeof GATE_REASON_CODES)[number]

@@ -1,4 +1,4 @@
-import type { ItemKind, QuoteStatus } from '../../shared/enums-next.ts'
+import type { ItemKind, QuoteStatus } from '../../shared/enums.ts'
 
 type Failure = { ok: false; error: string }
 export type Line = { kind: ItemKind; quantity: number; unitPriceCents: number }

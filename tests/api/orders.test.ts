@@ -56,7 +56,7 @@ describe('dashboard', () => {
     )
     expect(d.metrics.posAwaitingApproval.amountCents).toBe(72000 + 186000)
     expect(d.metrics.dueIn7Days.overdue).toBe(
-      n(`SELECT COUNT(*) AS n FROM orders WHERE state = 'active' AND production_status <> 'completed' AND due_date < date('now')`),
+      n(`SELECT COUNT(*) AS n FROM orders WHERE state = 'active' AND production_status <> 'production_complete' AND due_date < date('now')`),
     )
     expect(d.metrics.inProduction.count).toBe(n(`SELECT COUNT(*) AS n FROM orders WHERE state='active' AND production_status IN ('in_production','quality_control')`))
     expect(d.needsAttention.length).toBeLessThanOrEqual(10)
@@ -73,10 +73,11 @@ describe('orders list', () => {
     const rowsOf = async (view: string) => ((await get(`view=${view}&limit=200`)).rows as { number: string }[]).map((r) => r.number)
     const sqlNums = (where: string) => (t.sqlite.prepare(`SELECT number FROM orders o WHERE ${where} ORDER BY due_date, number`).all() as { number: string }[]).map((r) => r.number)
     expect(await rowsOf('active')).toEqual(sqlNums(`state='active'`))
-    expect(await rowsOf('completed')).toEqual(sqlNums(`state='completed'`))
-    expect(await rowsOf('ready')).toEqual(sqlNums(`state='active' AND production_status='ready_for_pickup'`))
+    expect(await rowsOf('completed')).toEqual(sqlNums(`state='closed'`))
+    expect(await rowsOf('ready')).toEqual(sqlNums(`state='active' AND production_status='production_complete'`))
     expect(await rowsOf('in_production')).toEqual(sqlNums(`state='active' AND production_status IN ('in_production','quality_control')`))
-    expect(await rowsOf('waiting_artwork')).toEqual(sqlNums(`state='active' AND artwork_status <> 'approved'`))
+    // Derived from the designs' current versions (seed: 7 and 12 under review, 9 changes requested, 8/22/23/25 none; 18 needs none).
+    expect((await rowsOf('waiting_artwork')).sort()).toEqual(['2026-0007', '2026-0008', '2026-0009', '2026-0012', '2026-0022', '2026-0023', '2026-0025'])
     expect(await rowsOf('waiting_po')).toEqual(
       sqlNums(`state='active' AND po_required=1 AND COALESCE((SELECT status FROM purchase_orders p WHERE p.order_id=o.id ORDER BY id DESC LIMIT 1),'') <> 'approved'`),
     )
@@ -89,7 +90,7 @@ describe('orders list', () => {
   test('cancelled orders are excluded from in_production and ready views and counts', async () => {
     const t = setup()
     const before = (await t.json<OrdersListResponse>(await t.call('GET', '/orders'))).counts
-    t.sqlite.exec(`UPDATE orders SET state = 'cancelled' WHERE number IN ('2026-0003', '2026-0006')`) // in_production, ready_for_pickup
+    t.sqlite.exec(`UPDATE orders SET state = 'cancelled' WHERE number IN ('2026-0003', '2026-0006')`) // in_production, production_complete
     const get = async (view: string) => t.json<OrdersListResponse>(await t.call('GET', `/orders?view=${view}&limit=200`))
     const nums = (r: OrdersListResponse) => (r.rows as { number: string }[]).map((x) => x.number)
     const ip = await get('in_production')
@@ -145,6 +146,29 @@ describe('order detail', () => {
     expect(JSON.stringify(n.notes)).not.toContain('@')
     expect(n.activity.length).toBeGreaterThan(0)
   })
+  test('the current quote, its frozen lines, derived artwork status and readiness', async () => {
+    const t = setup()
+    const d = await t.json<OrderDetailResponse>(await t.call('GET', '/orders/2026-0005'))
+    expect(d.quote).toMatchObject({ version: 1, status: 'accepted', subtotalCents: 6000 + 144000 + 36000, chargesCents: 5000, discountsCents: 0, totalCents: 191000 })
+    expect(d.quote?.items.map((i) => [i.kind, i.lineTotalCents])).toEqual([['product', 6000], ['product', 144000], ['product', 36000], ['charge', 5000]])
+    expect(d.items.find((i) => i.kind === 'charge')).toMatchObject({ product: null, method: null, description: 'Rush fee' })
+    expect(d.order).toMatchObject({ artworkStatus: 'approved', materialsRequired: false, prepStatus: 'ready', paymentTerms: 'due_after_pickup' })
+    expect(d.readiness).toMatchObject({ ready: true, preProductionStatus: 'ready' })
+    expect(d.gate).toEqual({ ok: true })
+    // Accepted, but the items changed afterwards: the quote item is pending again.
+    const stale = await t.json<OrderDetailResponse>(await t.call('GET', '/orders/2026-0014'))
+    expect(stale.quote).toMatchObject({ status: 'accepted', itemsRevision: 1 })
+    expect(stale.order.itemsRevision).toBe(2)
+    expect(stale.readiness.preProductionStatus).toBe('awaiting_quote')
+    expect(stale.gate).toMatchObject({ ok: false, reasons: expect.arrayContaining(['quote.items_changed_since_acceptance']) })
+    // The current quote is the highest version: v2 draft, after v1 was superseded.
+    expect((await t.json<OrderDetailResponse>(await t.call('GET', '/orders/2026-0023'))).quote).toMatchObject({ version: 2, status: 'draft' })
+    const noArt = await t.json<OrderDetailResponse>(await t.call('GET', '/orders/2026-0018'))
+    expect(noArt.order).toMatchObject({ artworkStatus: 'not_required', authorizationMethod: 'signed_form' })
+    expect(noArt.readiness.items.find((i) => i.key === 'artwork')).toEqual({ key: 'artwork', state: 'not_required' })
+    const closed = await t.json<OrderDetailResponse>(await t.call('GET', '/orders/2026-0001'))
+    expect(closed.gate).toEqual({ ok: false, reasons: ['order_not_active'] })
+  })
   test('activity payloads are allowlisted', async () => {
     const t = setup()
     t.sqlite.exec(`INSERT INTO activity_log (actor_kind, actor_id, entity_type, entity_id, action, before, after)
@@ -166,7 +190,7 @@ describe('production status change', () => {
     const before = t.activityCount()
     const res = await patch(t, '2026-0011', 'ready')
     expect(res.status).toBe(409)
-    expect(await t.json<{ reasons: string[] }>(res)).toMatchObject({ reasons: ['po_not_approved'] })
+    expect(await t.json<{ reasons: string[] }>(res)).toMatchObject({ reasons: ['authorization.po_not_approved'] })
     expect(t.prod('2026-0011').production_status).toBe('awaiting_authorization')
     expect(t.activityCount()).toBe(before)
   })
@@ -186,10 +210,36 @@ describe('production status change', () => {
     expect((await patch(t, '2026-0005', 'quality_control')).status).toBe(409)
     expect(t.prod('2026-0005').production_status).toBe('ready')
   })
-  test('ready_for_pickup to completed sets state completed', async () => {
+  test('quality_control to production_complete ends production but leaves the order active', async () => {
     const t = setup()
-    expect((await patch(t, '2026-0006', 'completed')).status).toBe(200)
-    expect(t.prod('2026-0006')).toEqual({ production_status: 'completed', state: 'completed' })
+    const res = await patch(t, '2026-0004', 'production_complete')
+    expect(res.status).toBe(200)
+    expect(await t.json(res)).toEqual({ number: '2026-0004', productionStatus: 'production_complete', state: 'active' })
+    // Closed = fulfilled AND paid (M5); production never writes another track.
+    expect(t.prod('2026-0004')).toEqual({ production_status: 'production_complete', state: 'active' })
+  })
+  test('a pause lands on the derived pre-production status, and awaiting moves must match readiness', async () => {
+    const t = setup()
+    expect((await patch(t, '2026-0003', 'awaiting_artwork')).status).toBe(409) // readiness says ready
+    expect((await patch(t, '2026-0003', 'ready')).status).toBe(200)
+    expect((await patch(t, '2026-0014', 'awaiting_authorization')).status).toBe(409) // derived: awaiting_quote
+    expect(t.prod('2026-0014').production_status).toBe('awaiting_quote')
+  })
+  test('closed and cancelled orders refuse every move', async () => {
+    const t = setup()
+    for (const n of ['2026-0001', '2026-0024']) {
+      const res = await patch(t, n, 'in_production')
+      expect(res.status).toBe(409)
+      expect(await t.json(res)).toMatchObject({ code: 'transition_not_allowed', reasons: expect.arrayContaining(['order_not_active']) })
+    }
+  })
+  test('a start is refused unless every readiness item is met', async () => {
+    const t = setup()
+    t.sqlite.exec("UPDATE orders SET prep_status = 'in_progress' WHERE number = '2026-0005'")
+    const res = await patch(t, '2026-0005', 'in_production')
+    expect(res.status).toBe(409)
+    expect(await t.json(res)).toMatchObject({ code: 'gate_failed', reasons: ['preparation.in_progress'] })
+    expect(t.prod('2026-0005').production_status).toBe('ready')
   })
   test('unknown order 404, bad body 400', async () => {
     const t = setup()
@@ -264,7 +314,7 @@ describe('purchase order status change', () => {
     expect((await patch(t, '2026-0005', 6, 'rejected')).status).toBe(200)
     expect(t.prod('2026-0005').production_status).toBe('ready')
     const d = await t.json<OrderDetailResponse>(await t.call('GET', '/orders/2026-0005'))
-    expect(d.gate).toEqual({ ok: false, reasons: ['po_not_approved'] })
+    expect(d.gate).toEqual({ ok: false, reasons: ['authorization.po_not_approved'] })
   })
   test('invalid transition is 409 and changes nothing', async () => {
     const t = setup()
@@ -293,8 +343,8 @@ describe('purchase order status change', () => {
 describe('dashboard due window', () => {
   const o = (id: number, dueDate: string) => ({
     id, number: `N${id}`, customerName: 'c', title: 't', artworkStatus: 'approved' as const, productionStatus: 'ready' as const,
-    dueDate, latestPoStatus: null, latestPoAmountCents: null, latestEstimateStatus: null,
-    createdAt: '2026-10-01T00:00:00.000Z', latestEstimateCreatedAt: null,
+    dueDate, latestPoStatus: null, latestPoAmountCents: null, quoteStatus: null,
+    createdAt: '2026-10-01T00:00:00.000Z', quoteSentAt: null,
   })
   test('half-open [today, today+7) for dueIn7Days and dueThisWeek', () => {
     const today = '2026-10-30'
@@ -312,8 +362,8 @@ describe('dashboard sub-line metrics', () => {
     const m = await get()
     expect(m.activeOrdersNewThisWeek).toBe(n(`SELECT COUNT(*) AS n FROM orders WHERE state = 'active' AND date(created_at) >= date('now', '-7 days')`))
     expect(m.pendingQuotesWaitingOver5Days).toBe(
-      n(`SELECT COUNT(*) AS n FROM orders o WHERE state = 'active' AND (SELECT status FROM estimates e WHERE e.order_id = o.id ORDER BY version DESC LIMIT 1) = 'sent'
-         AND date((SELECT created_at FROM estimates e WHERE e.order_id = o.id ORDER BY version DESC LIMIT 1)) < date('now', '-5 days')`),
+      n(`SELECT COUNT(*) AS n FROM orders o WHERE state = 'active' AND (SELECT status FROM quotes q WHERE q.order_id = o.id ORDER BY version DESC LIMIT 1) = 'sent'
+         AND date((SELECT COALESCE(sent_at, created_at) FROM quotes q WHERE q.order_id = o.id ORDER BY version DESC LIMIT 1)) < date('now', '-5 days')`),
     )
     // The seed backdates so neither is trivially 0 or all.
     expect(m.activeOrdersNewThisWeek).toBeGreaterThan(0)
@@ -321,7 +371,7 @@ describe('dashboard sub-line metrics', () => {
     expect(m.pendingQuotesWaitingOver5Days).toBeGreaterThan(0)
     // An active order made 8 days ago stops counting; a 'sent' quote made today does not count as waiting.
     t.sqlite.exec(`UPDATE orders SET created_at = strftime('%Y-%m-%dT%H:%M:%fZ','now','-8 days') WHERE number = '2026-0013'`)
-    t.sqlite.exec(`UPDATE estimates SET created_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = 2`)
+    t.sqlite.exec(`UPDATE quotes SET sent_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = 22`) // allowed on a sent quote by quotes_frozen
     const m2 = await get()
     expect(m2.activeOrdersNewThisWeek).toBe(m.activeOrdersNewThisWeek - 1)
     expect(m2.pendingQuotesWaitingOver5Days).toBe(m.pendingQuotesWaitingOver5Days - 1)
@@ -345,7 +395,7 @@ describe('error codes', () => {
   test('a closed gate is gate_failed with reason codes', async () => {
     const t = setup()
     t.sqlite.exec(`UPDATE purchase_orders SET status = 'under_review' WHERE id = 12`)
-    expect(await code(t, await t.call('PATCH', '/orders/2026-0011/production', { to: 'ready' }))).toMatchObject({ code: 'gate_failed', reasons: ['po_not_approved'] })
+    expect(await code(t, await t.call('PATCH', '/orders/2026-0011/production', { to: 'ready' }))).toMatchObject({ code: 'gate_failed', reasons: ['authorization.po_not_approved'] })
   })
 })
 

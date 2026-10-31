@@ -1,4 +1,4 @@
-import type { CheckStatus, FinancialStatus, PaymentMethod } from '../../shared/enums-next.ts'
+import type { CheckStatus, FinancialStatus, PaymentMethod } from '../../shared/enums.ts'
 
 type Failure = { ok: false; error: string }
 export function balance(agreedTotalCents: number | null, payments: readonly { amountCents: number }[]): {

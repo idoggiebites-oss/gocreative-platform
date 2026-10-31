@@ -16,7 +16,7 @@ function OrdersTable({ rows }: { rows: OrderListRow[] }) {
   const today = fmt.todayIso()
   const c = m.orders.cols
   const dueOf = (r: OrderListRow) => {
-    const overdue = r.dueDate !== null && r.dueDate < today && r.productionStatus !== 'completed'
+    const overdue = r.dueDate !== null && r.dueDate < today && r.productionStatus !== 'production_complete'
     const text = r.dueDate === null ? m.common.dash : overdue ? `${fmt.date(r.dueDate)} · ${m.orders.overdue}` : r.dueDate === today ? m.common.today : fmt.date(r.dueDate)
     return { overdue, text }
   }
@@ -33,12 +33,12 @@ function OrdersTable({ rows }: { rows: OrderListRow[] }) {
     <table className="hidden w-full border-collapse text-[13px] sm:table">
       <thead><tr className="bg-header">
         <th className={TH}>{c.order}</th><th className={TH}>{c.customer}</th><th className={TH}>{c.items}</th><th className={TH}>{c.artwork}</th>
-        <th className={TH}>{c.po}</th><th className={TH}>{c.production}</th><th className={TH}>{c.due}</th><th className={cn(TH, 'text-right')}>{c.estimate}</th>
+        <th className={TH}>{c.po}</th><th className={TH}>{c.production}</th><th className={TH}>{c.due}</th><th className={cn(TH, 'text-right')}>{c.quote}</th>
       </tr></thead>
       <tbody>
         {rows.map((r) => {
           const to = `/app/orders/${r.number}`
-          const overdue = r.dueDate !== null && r.dueDate < today && r.productionStatus !== 'completed'
+          const overdue = r.dueDate !== null && r.dueDate < today && r.productionStatus !== 'production_complete'
           return (
             <tr key={r.number} {...rowLink(to)}>
               <td className={`${TD} num font-medium`}>
@@ -49,8 +49,8 @@ function OrdersTable({ rows }: { rows: OrderListRow[] }) {
               </td>
               <td className={TD}>{r.methods.slice(0, 1).map((x) => <MethodTag key={x}>{m.labels.method[x]}</MethodTag>)}{r.methods.length > 1 && <MethodTag>+{r.methods.length - 1}</MethodTag>}<span title={m.common.items(r.totalQty)}>{r.totalQty}</span></td>
               <td className={TD}>
-                {r.artworkStatus === 'none'
-                  ? <span className="text-xs text-muted-foreground">{m.labels.artworkStatus.none}</span>
+                {r.artworkStatus === 'not_received' || r.artworkStatus === 'not_required'
+                  ? <span className="text-xs text-muted-foreground">{m.labels.artworkStatus[r.artworkStatus]}</span>
                   : <Chip tone={ARTWORK_TONE[r.artworkStatus]}>{m.labels.artworkStatus[r.artworkStatus]}</Chip>}
               </td>
               <td className={TD}>
@@ -64,8 +64,10 @@ function OrdersTable({ rows }: { rows: OrderListRow[] }) {
                   : overdue ? `${fmt.date(r.dueDate)} · ${m.orders.overdue}`
                   : r.dueDate === today ? m.common.today : fmt.date(r.dueDate)}
               </td>
-              <td className={cn(TD, 'num text-right', r.estimatedTotalCents === null && 'text-muted-foreground')}>
-                {r.estimatedTotalCents === null ? m.common.dash : fmt.money(r.estimatedTotalCents)}
+              <td className={cn(TD, 'num text-right', r.quote?.status !== 'accepted' && 'text-muted-foreground')}>
+                {r.quote === null ? m.common.dash
+                  : r.quote.status === 'accepted' ? fmt.money(r.quote.totalCents)
+                  : m.orders.quoteTotal(fmt.money(r.quote.totalCents), m.labels.quoteStatus[r.quote.status])}
               </td>
             </tr>
           )

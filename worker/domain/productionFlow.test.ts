@@ -1,9 +1,10 @@
-import { PRODUCTION_STATUSES_NEXT } from '../../shared/enums-next.ts'
-import { checkProductionMove, checkUnitsCompleted, chooseSlot } from './productionFlow.ts'
+import { PRODUCTION_STATUSES } from '../../shared/enums.ts'
+import { ORDER_STATES } from '../../shared/enums.ts'
+import { checkOrderProductionMove, checkProductionMove, checkUnitsCompleted, chooseSlot, syncAwaitingStatus } from './productionFlow.ts'
 import { readiness } from './readiness.ts'
 const gate = { ready: true, preProductionStatus: 'ready' as const }
 it('checks all production moves with a satisfied gate', () => {
-  for (const from of PRODUCTION_STATUSES_NEXT) for (const to of PRODUCTION_STATUSES_NEXT) {
+  for (const from of PRODUCTION_STATUSES) for (const to of PRODUCTION_STATUSES) {
     const allowed = from !== to && (from.startsWith('awaiting_') && to === 'ready'
       || (from === 'ready' || from === 'quality_control') && to === 'in_production'
       || from === 'in_production' && ['quality_control', 'ready'].includes(to)
@@ -47,4 +48,20 @@ it('allows downward progress corrections within safe integer bounds', () => {
   for (const n of [-1, 11, 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) expect(checkUnitsCompleted(n, 10).ok).toBe(false)
   expect(checkUnitsCompleted(0, 0).ok).toBe(true)
   expect(checkUnitsCompleted(0, 1.5).ok).toBe(false)
+})
+it('blocks every move for closed and cancelled orders, and allows the same moves as checkProductionMove for active ones', () => {
+  for (const state of ORDER_STATES) for (const from of PRODUCTION_STATUSES) for (const to of PRODUCTION_STATUSES) {
+    expect(checkOrderProductionMove(state, from, to, gate).ok, `${state} ${from} -> ${to}`).toBe(state === 'active' && checkProductionMove(from, to, gate).ok)
+  }
+  expect(checkOrderProductionMove('closed', 'ready', 'in_production', gate)).toEqual({ ok: false, error: 'order_not_active' })
+})
+it('syncs only active awaiting_* orders, to the derived status', () => {
+  expect(syncAwaitingStatus('awaiting_authorization', 'active', { preProductionStatus: 'ready' })).toBe('ready')
+  expect(syncAwaitingStatus('awaiting_authorization', 'active', { preProductionStatus: 'awaiting_artwork' })).toBe('awaiting_artwork')
+  expect(syncAwaitingStatus('awaiting_quote', 'active', { preProductionStatus: 'awaiting_quote' })).toBeNull()
+  // A revoked PO never pulls back an order that is already ready or later; the detail's readiness shows why.
+  for (const current of ['ready', 'in_production', 'quality_control', 'production_complete'] as const) {
+    expect(syncAwaitingStatus(current, 'active', { preProductionStatus: 'awaiting_authorization' })).toBeNull()
+  }
+  for (const state of ['cancelled', 'closed'] as const) expect(syncAwaitingStatus('awaiting_authorization', state, { preProductionStatus: 'ready' })).toBeNull()
 })

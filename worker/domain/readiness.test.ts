@@ -1,4 +1,4 @@
-import { orderArtworkStatus, readiness } from './readiness.ts'
+import { gateResult, orderArtworkStatus, readiness } from './readiness.ts'
 import type { Design, ReadinessInput } from './readiness.ts'
 const design = (approval: 'under_review' | 'changes_requested' | 'approved'): Design => ({ currentVersion: { id: 1, fileId: 1, approval } })
 const noVersion: Design = { currentVersion: null }
@@ -58,4 +58,10 @@ it('derives the worst current artwork approval', () => {
   // A design whose current version is missing has not been received, whatever the others say.
   expect(orderArtworkStatus(true, [design('approved'), noVersion])).toBe('not_received')
   expect(orderArtworkStatus(false, [noVersion])).toBe('not_required')
+})
+it('reports the gate as namespaced reason codes, inactive state first', () => {
+  expect(gateResult('active', readiness(ready))).toEqual({ ok: true })
+  const blocked = readiness({ ...ready, quote: null, poRequired: true, latestPo: { status: 'under_review' }, prepStatus: 'in_progress' })
+  expect(gateResult('active', blocked)).toEqual({ ok: false, reasons: ['quote.no_quote', 'authorization.po_not_approved', 'preparation.in_progress'] })
+  expect(gateResult('closed', readiness({ ...ready, state: 'closed' }))).toEqual({ ok: false, reasons: ['order_not_active'] })
 })

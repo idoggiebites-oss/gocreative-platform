@@ -2,19 +2,22 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router'
 import { Lock, SearchX } from 'lucide-react'
 import type { UseMutationResult } from '@tanstack/react-query'
-import type { GateReasonCode, OrderDetailResponse } from '@shared/api'
+import type { GateReasonCode, OrderDetailResponse, OrderItem } from '@shared/api'
 import { PRODUCTION_STATUSES, type PoStatus, type ProductionStatus } from '@shared/enums'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useI18n } from '@/i18n'
 import { ApiError, useChangePo, useChangeProduction, useOrder } from '@/lib/api'
 import { cn } from '@/lib/utils'
-import { checkProductionTransition } from '../../worker/domain/production'
+import { checkOrderProductionMove } from '../../worker/domain/productionFlow'
 import { allowedPoTransitions } from '../../worker/domain/purchaseOrder'
 import QueryBoundary from './QueryBoundary'
-import { CARD, Chip, ChipTrigger, ESTIMATE_TONE, ARTWORK_TONE, MUTED, PAGE, PO_TONE, PRODUCTION_TONE, TD, TH, type Tone } from './ui'
+import { CARD, Chip, ChipTrigger, QUOTE_TONE, ARTWORK_TONE, MUTED, PAGE, PO_TONE, PRODUCTION_TONE, TD, TH, type Tone } from './ui'
 
 type Detail = OrderDetailResponse
+// A product line reads "Product · Color"; a charge or discount line shows its description (or its kind).
+const lineTitle = (i: OrderItem, kindLabel: string) =>
+  i.product ? (i.garmentColor ? `${i.product} · ${i.garmentColor}` : i.product) : (i.description ?? kindLabel)
 type PoMutation = UseMutationResult<unknown, Error, { poId: number; to: PoStatus }>
 type ProdMutation = UseMutationResult<unknown, Error, ProductionStatus>
 type Controls = { po: PoMutation; prod: ProdMutation }
@@ -77,11 +80,9 @@ function StatusMenu<T extends string>(p: {
 }
 
 function useMoves(d: Detail) {
-  const latestPo = d.purchaseOrders[0] ? { status: d.purchaseOrders[0].status } : null
-  const gateOrder = { state: d.order.state, artworkStatus: d.order.artworkStatus, poRequired: d.order.poRequired, authorizedAt: d.order.authorizedAt }
-  // The same pure rule the server re-checks, so the menu never offers a move that would be refused.
-  const production = PRODUCTION_STATUSES.filter((to) => checkProductionTransition(d.order.productionStatus, to, gateOrder, latestPo).ok)
-  return { production, latestPo }
+  // The same pure rule and readiness the server re-checks, so the menu never offers a move that would be refused.
+  const production = PRODUCTION_STATUSES.filter((to) => checkOrderProductionMove(d.order.state, d.order.productionStatus, to, d.readiness).ok)
+  return { production }
 }
 
 function PoMenu({ po, status, mut }: { po: Detail['purchaseOrders'][number]; status: PoStatus; mut: PoMutation }) {
@@ -96,7 +97,7 @@ function PoMenu({ po, status, mut }: { po: Detail['purchaseOrders'][number]; sta
 
 function StatusStrip({ d, c, moves }: { d: Detail; c: Controls; moves: ReturnType<typeof useMoves> }) {
   const { m, fmt } = useI18n()
-  const { order, latestEstimate: est } = d
+  const { order, quote: est } = d
   const po = d.purchaseOrders[0]
   const t = m.order.track
   const cell = 'flex min-w-0 flex-col gap-1.5 border-r border-secondary px-3.5 py-3 last:border-r-0'
@@ -105,8 +106,8 @@ function StatusStrip({ d, c, moves }: { d: Detail; c: Controls; moves: ReturnTyp
     <section aria-label={m.order.status} className={`${CARD} grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))]`}>
       <div className={cell}>
         <span className={label}>{t.quote}</span>
-        {est ? <span><Chip tone={ESTIMATE_TONE[est.status]}>{m.labels.estimateStatus[est.status]}</Chip></span> : <span className="text-[13px] text-muted-foreground">{m.order.noQuote}</span>}
-        {est && <span className={MUTED}>{m.order.quoteSub(est.version, fmt.date(est.createdAt))}</span>}
+        {est ? <span><Chip tone={QUOTE_TONE[est.status]}>{m.labels.quoteStatus[est.status]}</Chip></span> : <span className="text-[13px] text-muted-foreground">{m.order.noQuote}</span>}
+        {est && <span className={MUTED}>{m.order.quoteSub(est.version, fmt.date(est.sentAt ?? est.createdAt))}</span>}
       </div>
       <div className={cell}>
         <span className={label}>{t.artwork}</span>
@@ -164,8 +165,8 @@ function ItemsTab({ d }: { d: Detail }) {
   const { m, fmt } = useI18n()
   const t = m.order.items
   if (d.items.length === 0) return <p className="px-4 py-8 text-center text-[13px] text-muted-foreground">{t.empty}</p>
-  const sum = d.items.reduce((s, i) => s + i.quantity * i.unitPriceCents, 0)
-  const total = d.order.estimatedTotalCents ?? sum
+  const signed = (i: Detail['items'][number]) => (i.kind === 'discount' ? -1 : 1) * i.quantity * i.unitPriceCents
+  const total = d.items.reduce((s, i) => s + signed(i), 0)
   return (
     <div className="overflow-x-auto">
       <table className="w-full border-collapse text-[13px]">
@@ -178,8 +179,8 @@ function ItemsTab({ d }: { d: Detail }) {
             <tr key={i.id} className="align-top">
               <td className="border-b border-secondary p-3">
                 <div className="flex min-w-[190px] flex-col gap-[3px]">
-                  <span className="font-medium">{i.garmentColor ? `${i.product} · ${i.garmentColor}` : i.product}</span>
-                  <span className={MUTED}>{m.labels.method[i.method]}{i.notes ? ` · ${i.notes}` : ''}</span>
+                  <span className="font-medium">{lineTitle(i, m.labels.itemKind[i.kind])}</span>
+                  <span className={MUTED}>{i.method ? m.labels.method[i.method] : m.labels.itemKind[i.kind]}{i.notes ? ` · ${i.notes}` : ''}</span>
                 </div>
               </td>
               <td className="border-b border-secondary p-3">
@@ -195,11 +196,11 @@ function ItemsTab({ d }: { d: Detail }) {
               </td>
               <td className="num border-b border-secondary p-3 text-right">{i.quantity}</td>
               <td className="num border-b border-secondary p-3 text-right">{fmt.money(i.unitPriceCents)}</td>
-              <td className="num border-b border-secondary p-3 text-right font-medium">{fmt.money(i.quantity * i.unitPriceCents)}</td>
+              <td className="num border-b border-secondary p-3 text-right font-medium">{fmt.money(signed(i))}</td>
             </tr>
           ))}
           <tr>
-            <td colSpan={4} className="p-3 text-right text-muted-foreground">{t.estimateTotal}</td>
+            <td colSpan={4} className="p-3 text-right text-muted-foreground">{t.itemsTotal}</td>
             <td className="num p-3 text-right font-semibold">{fmt.money(total)}</td>
           </tr>
         </tbody>
@@ -208,24 +209,35 @@ function ItemsTab({ d }: { d: Detail }) {
   )
 }
 
-const asLines = (v: unknown): { label: string; cents: number }[] =>
-  Array.isArray(v) ? v.flatMap((l) => (l && typeof l.label === 'string' && typeof l.cents === 'number' ? [{ label: l.label, cents: l.cents }] : [])) : []
-
 function QuoteTab({ d }: { d: Detail }) {
   const { m, fmt } = useI18n()
-  const est = d.latestEstimate
-  if (!est) return <p className="px-4 py-8 text-center text-[13px] text-muted-foreground">{m.order.quote.empty}</p>
-  const lines = asLines(est.lines)
+  const q = d.quote
+  const t = m.order.quote
+  if (!q) return <p className="px-4 py-8 text-center text-[13px] text-muted-foreground">{t.empty}</p>
+  const totals: [string, number][] = [[t.subtotal, q.subtotalCents], ...(q.chargesCents ? [[t.charges, q.chargesCents] as [string, number]] : []), ...(q.discountsCents ? [[t.discounts, -q.discountsCents] as [string, number]] : [])]
   return (
     <div className="flex flex-col gap-3 p-4 text-[13px]">
-      <div className="flex items-center gap-2"><span className="font-medium">{m.order.quote.version(est.version)}</span><Chip tone={ESTIMATE_TONE[est.status]}>{m.labels.estimateStatus[est.status]}</Chip></div>
-      {lines.length > 0 && (
-        <table className="w-full border-collapse"><thead><tr><th className={TH}>{m.order.quote.line}</th><th className={cn(TH, 'text-right')}>{m.order.quote.amount}</th></tr></thead>
-          <tbody>{lines.map((l, i) => <tr key={i}><td className={TD}>{l.label}</td><td className={cn(TD, 'num text-right')}>{fmt.money(l.cents)}</td></tr>)}</tbody>
-        </table>
+      <div className="flex items-center gap-2"><span className="font-medium">{t.version(q.version)}</span><Chip tone={QUOTE_TONE[q.status]}>{m.labels.quoteStatus[q.status]}</Chip></div>
+      {q.status === 'accepted' && q.itemsRevision !== d.order.itemsRevision && <p role="status" className="text-xs text-status-amber-fg">{t.stale}</p>}
+      {q.items.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse"><thead><tr>
+            <th className={TH}>{t.line}</th><th className={cn(TH, 'text-right')}>{t.qty}</th><th className={cn(TH, 'text-right')}>{t.unit}</th><th className={cn(TH, 'text-right')}>{t.amount}</th>
+          </tr></thead>
+            <tbody>{q.items.map((l) => (
+              <tr key={l.id}>
+                <td className={TD}>{lineTitle(l, m.labels.itemKind[l.kind])}</td>
+                <td className={cn(TD, 'num text-right')}>{l.quantity}</td>
+                <td className={cn(TD, 'num text-right')}>{fmt.money(l.unitPriceCents)}</td>
+                <td className={cn(TD, 'num text-right')}>{fmt.money(l.lineTotalCents)}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
       )}
-      <div className="flex justify-between border-t border-border pt-2"><span className="text-muted-foreground">{m.order.items.estimateTotal}</span><span className="num font-semibold">{fmt.money(est.totalCents)}</span></div>
-      <p className={MUTED}>{m.order.quote.uploadNote}</p>
+      {totals.map(([label, cents]) => <div key={label} className="flex justify-between"><span className="text-muted-foreground">{label}</span><span className="num">{fmt.money(cents)}</span></div>)}
+      <div className="flex justify-between border-t border-border pt-2"><span className="text-muted-foreground">{t.total}</span><span className="num font-semibold">{fmt.money(q.totalCents)}</span></div>
+      <p className={MUTED}>{t.uploadNote}</p>
     </div>
   )
 }
@@ -312,6 +324,10 @@ function Side({ d }: { d: Detail }) {
     [m.order.detail.created, <span className="num">{fmt.date(order.createdAt)}</span>],
     [m.order.detail.due, order.dueDate ? <span className="num">{fmt.weekdayDate(order.dueDate)}</span> : muted],
     [m.order.detail.poRequired, order.poRequired ? m.common.yes : m.common.no],
+    ...(order.poRequired ? [] : [[m.order.detail.authorization, order.authorizedAt
+      ? <span>{order.authorizationMethod ? `${m.labels.authorizationMethod[order.authorizationMethod]} · ` : ''}<span className="num">{fmt.date(order.authorizedAt)}</span></span>
+      : muted] as [string, ReactNode]]),
+    [m.order.detail.paymentTerms, m.labels.paymentTerms[order.paymentTerms]],
     [m.order.detail.invoiceRef, order.invoiceRef ?? muted],
     [m.order.detail.paymentRef, order.paymentRef ?? muted],
     [m.order.detail.state, m.labels.orderState[order.state]],
@@ -373,10 +389,11 @@ function Order({ d }: { d: Detail }) {
             {d.order.dueDate && <> · {m.order.due} <b className="num font-medium text-foreground">{fmt.weekdayDate(d.order.dueDate)}</b></>}
           </span>
         </div>
-        {d.order.estimatedTotalCents !== null && (
+        {d.quote && (
           <div className="flex flex-col items-end gap-0.5">
-            <span className={MUTED}>{m.order.estimate}</span>
-            <span className="num text-xl font-semibold tracking-[-0.015em]">{fmt.money(d.order.estimatedTotalCents)}</span>
+            {/* The agreed total is the accepted quote's; any other quote's total is labelled with its status. */}
+            <span className={MUTED}>{d.quote.status === 'accepted' ? m.order.agreedTotal : m.order.quoteTotal(m.labels.quoteStatus[d.quote.status])}</span>
+            <span className="num text-xl font-semibold tracking-[-0.015em]">{fmt.money(d.quote.totalCents)}</span>
           </div>
         )}
       </div>
