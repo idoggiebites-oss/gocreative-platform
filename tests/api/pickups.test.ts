@@ -220,5 +220,16 @@ describe('payment terms can\'t be used to skip the owner\'s release override (Co
     expect(d.status).toBe(201)
     expect((await t.call('POST', '/orders', { customerId: d.body.customer.id, source: 'email', title: 'Shirts' }, STAFF)).status).toBe(201)
   })
+
+  test('a staff repeat of an owner-granted pay-after-pickup order takes the customer\'s own terms; an owner repeat keeps them', async () => {
+    const t = setup()
+    const ind = (await t.call<{ customer: { id: number } }>('POST', '/customers', { name: 'Regular', kind: 'individual' })).body.customer
+    const src = await t.call('POST', '/orders', { customerId: ind.id, source: 'phone', title: 'Tees', paymentTerms: 'due_after_pickup' }) // owner-granted
+    const terms = (n: string) => t.one<{ payment_terms: string }>('SELECT payment_terms FROM orders WHERE number = ?', n).payment_terms
+    const staffRepeat = await t.call('POST', `/orders/${src.body.number}/repeat`, { source: 'phone' }, STAFF)
+    expect(terms(staffRepeat.body.number)).toBe('due_at_pickup')
+    const ownerRepeat = await t.call('POST', `/orders/${src.body.number}/repeat`, { source: 'phone' })
+    expect(terms(ownerRepeat.body.number)).toBe('due_after_pickup')
+  })
 })
 

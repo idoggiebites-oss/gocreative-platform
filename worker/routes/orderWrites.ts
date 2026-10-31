@@ -276,9 +276,13 @@ export function orderWriteRoutes() {
         if (contact?.customer_id !== o.customer_id) return refuse(c, 'contact_not_for_customer', "The source order's contact is not this customer's")
         if (contact.archived) return refuse(c, 'contact_archived', "The source order's contact is archived")
       }
+      // A source order's owner-granted pay-after-pickup isn't copied by staff: the repeat takes the customer's own terms.
+      const customer = await db.getCustomerDefaults(c.env.DB, o.customer_id)
+      const paymentTerms = o.payment_terms === 'due_after_pickup' && customer?.default_payment_terms !== 'due_after_pickup' && c.get('user').role !== 'owner'
+        ? 'due_at_pickup' : o.payment_terms
       const y = year()
       const n = await db.repeatOrder(c.env.DB, {
-        year: y, actorId: c.get('user').id, sourceId: o.id, source: b.source, dueDate: b.dueDate ?? null,
+        year: y, actorId: c.get('user').id, sourceId: o.id, source: b.source, dueDate: b.dueDate ?? null, paymentTerms,
         productionStatus: initialStatus(o.artwork_required === 1, o.po_required === 1),
       })
       if (n === null) return contactRefusal(c, o.contact_id) // nothing written, no number used

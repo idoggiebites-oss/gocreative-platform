@@ -702,14 +702,14 @@ export async function createOrder(db: D1Database, p: {
  * The contact is copied only while it is still the customer's live contact; otherwise nothing is created and no number
  * is used (null). An archived contact is refused rather than dropped, so staff pick the new contact on purpose.
  */
-export async function repeatOrder(db: D1Database, p: { year: number; actorId: number; sourceId: number; source: OrderSource; dueDate: string | null; productionStatus: ProductionStatus }): Promise<number | null> {
+export async function repeatOrder(db: D1Database, p: { year: number; actorId: number; sourceId: number; source: OrderSource; dueDate: string | null; productionStatus: ProductionStatus; paymentTerms: PaymentTerms }): Promise<number | null> {
   const ok = `EXISTS (SELECT 1 FROM orders src WHERE src.id = ? AND (src.contact_id IS NULL OR EXISTS (SELECT 1 FROM customer_contacts cc
     WHERE cc.id = src.contact_id AND cc.customer_id = src.customer_id AND cc.archived_at IS NULL)))`
   const [counter] = await db.batch([
     db.prepare(COUNTER_SQL(ok)).bind(p.year, p.sourceId),
     db.prepare(`INSERT INTO orders (number, customer_id, contact_id, source, title, due_date, po_required, payment_terms, artwork_required, production_status, created_by)
-        SELECT ${NEW_NUMBER}, customer_id, contact_id, ?, title || ' (repeat)', ?, po_required, payment_terms, artwork_required, ?, ? FROM orders WHERE id = ? AND ${ok}`)
-      .bind(p.year, p.source, p.dueDate, p.productionStatus, p.actorId, p.sourceId, p.sourceId),
+        SELECT ${NEW_NUMBER}, customer_id, contact_id, ?, title || ' (repeat)', ?, po_required, ?, artwork_required, ?, ? FROM orders WHERE id = ? AND ${ok}`)
+      .bind(p.year, p.source, p.dueDate, p.paymentTerms, p.productionStatus, p.actorId, p.sourceId, p.sourceId),
     db.prepare(`INSERT INTO order_items (order_id, ${ITEM_COLS}, notes) SELECT n.id, ${ITEM_COLS.split(', ').map((c) => `i.${c}`).join(', ')}, i.notes
         FROM order_items i JOIN orders n ON n.number = ${NEW_NUMBER} WHERE i.order_id = ? AND ${ok} ORDER BY i.id`).bind(p.year, p.sourceId, p.sourceId),
     db.prepare(`INSERT INTO activity_log (actor_kind, actor_id, entity_type, entity_id, action, after)
