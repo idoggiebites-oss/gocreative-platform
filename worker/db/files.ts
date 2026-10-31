@@ -3,7 +3,7 @@
 // re-derives. Values are bound; the interpolated fragments are constants.
 import type { ArtworkApproval, AuthorizationMethod, PoStatus } from '../../shared/enums'
 import type { ArtworkDesign, PurchaseOrderRecord, UploadedFile } from '../../shared/api'
-import { GUARD, orderWriteResults, type Stmt } from './orders'
+import { GUARD, orderWriteBatch, orderWriteResults, type Stmt } from './orders'
 
 type Guarded = { orderId: number; version: number; actorId: number }
 export type NewFile = { r2Key: string; mime: string; bytes: number; sha256: string; filename: string | null }
@@ -14,13 +14,20 @@ const insertFile = (db: D1Database, p: Guarded & { file: NewFile }): Stmt =>
   db.prepare(`INSERT INTO files (r2_key, mime, bytes, sha256, uploaded_by, filename) SELECT ?, ?, ?, ?, ?, ? WHERE ${GUARD}`)
     .bind(p.file.r2Key, p.file.mime, p.file.bytes, p.file.sha256, p.actorId, p.file.filename, p.orderId, p.version)
 const newId = (r: { results?: unknown[] } | undefined) => (r?.results?.[0] as { id: number } | undefined)?.id ?? null
+/**
+ * An upload batch's outcome from its own results, with no read after it (worker/files.ts decides the R2 cleanup on
+ * this): null only when the guarded files INSERT changed no row (stale order version: nothing committed). Otherwise
+ * the row is committed and names the object, and the new artwork / po_documents id comes back (same guard, same batch).
+ */
+const uploadOutcome = (data: { meta: { changes?: number }; results?: unknown[] }[]) =>
+  (data[0]?.meta.changes ?? 0) > 0 ? { id: newId(data[1])! } : null
 
 /**
  * A file as a new design (lineageId omitted: the next free lineage id, version 1) or as the next version of one of
  * this order's designs, which copies the design's name. Every new version starts under_review, so a re-upload after
  * approval needs approval again (§4). For a lineage that isn't on this order the version subquery is NULL and the
  * NOT NULL constraint aborts the whole batch, so a file row can never be left behind without its artwork row.
- * Returns null when the order version was stale (nothing written).
+ * Returns null when the order version was stale (nothing written). The caller reads the order's state afterwards.
  */
 export async function uploadArtwork(db: D1Database, p: Guarded & { file: NewFile; lineageId?: number; designName: string | null; nextVersion: number }) {
   const artwork = p.lineageId === undefined
@@ -32,12 +39,11 @@ export async function uploadArtwork(db: D1Database, p: Guarded & { file: NewFile
           (SELECT id FROM files WHERE r2_key = ?2),
           (SELECT b.design_name FROM artwork b WHERE b.lineage_id = ?1 AND b.order_id = o.id ORDER BY b.version DESC LIMIT 1)
         FROM orders o WHERE o.id = ?3 AND o.version = ?4 RETURNING id`).bind(p.lineageId, p.file.r2Key, p.orderId, p.version)
-  const { state, data } = await orderWriteResults(db, {
+  const { data } = await orderWriteBatch(db, {
     ...p, action: 'artwork_uploaded', data: [insertFile(db, p), artwork],
     after: { ...(p.lineageId === undefined ? {} : { lineage_id: p.lineageId }), artwork_version: p.nextVersion, ...(p.designName ? { design_name: p.designName } : {}) },
   })
-  const id = newId(data[1])
-  return state && id !== null ? { state, id } : null
+  return uploadOutcome(data)
 }
 
 export type ArtworkRow = { id: number; lineage_id: number; version: number; approval_status: ArtworkApproval; is_current: 0 | 1 }
@@ -75,16 +81,28 @@ export async function decideArtwork(db: D1Database, p: Guarded & { artwork: Artw
 
 // ---- purchase orders ----
 
-export async function createPurchaseOrder(db: D1Database, p: Guarded & { poNumber: string | null; amountCents: number | null }) {
+/**
+ * A new PO in requested. When the order's latest PO is approved the route only gets here with `replaces` (the
+ * approved PO's id and the reason), and the activity row is po_replaced with both. The old PO keeps its status; the
+ * new one is now the latest, so the re-derive puts authorization back to pending. The order-version GUARD keeps the
+ * route's latest-PO check true at write time: every PO status change bumps the order version (applyPoChange).
+ */
+export async function createPurchaseOrder(db: D1Database, p: Guarded & { poNumber: string | null; amountCents: number | null; replaces?: { poId: number; reason: string } }) {
+  const r = p.replaces
   const { state, data } = await orderWriteResults(db, {
-    ...p, action: 'po_created',
+    ...p, action: r ? 'po_replaced' : 'po_created',
     data: [db.prepare(`INSERT INTO purchase_orders (order_id, po_number, amount_cents) SELECT ?, ?, ? WHERE ${GUARD} RETURNING id`)
       .bind(p.orderId, p.poNumber, p.amountCents, p.orderId, p.version)],
-    after: { po_status: 'requested', po_number: p.poNumber, amount_cents: p.amountCents },
+    ...(r ? { before: { po_id: r.poId, po_status: 'approved' } } : {}),
+    after: { ...(r ? { replaced_po_id: r.poId, reason: r.reason } : {}), po_status: 'requested', po_number: p.poNumber, amount_cents: p.amountCents },
   })
   const id = newId(data[0])
   return state && id !== null ? { state, id } : null
 }
+
+/** The order's latest PO (highest id: the one that drives authorization), or null. */
+export const getLatestPurchaseOrder = (db: D1Database, orderId: number) =>
+  db.prepare('SELECT id, status FROM purchase_orders WHERE order_id = ? ORDER BY id DESC LIMIT 1').bind(orderId).first<{ id: number; status: PoStatus }>()
 
 export const getPurchaseOrder = (db: D1Database, orderId: number, poId: number) =>
   db.prepare('SELECT id, po_number, amount_cents, status FROM purchase_orders WHERE id = ? AND order_id = ?').bind(poId, orderId)
@@ -95,7 +113,8 @@ export async function updatePurchaseOrderDetails(db: D1Database, p: Guarded & {
 }) {
   const { state } = await orderWriteResults(db, {
     ...p, action: 'po_details_updated',
-    data: [db.prepare(`UPDATE purchase_orders SET po_number = ?, amount_cents = ?, updated_at = ${NOW} WHERE id = ? AND order_id = ? AND ${GUARD}`)
+    // An approved PO is locked: re-asserted here behind the route's check.
+    data: [db.prepare(`UPDATE purchase_orders SET po_number = ?, amount_cents = ?, updated_at = ${NOW} WHERE id = ? AND order_id = ? AND status <> 'approved' AND ${GUARD}`)
       .bind(p.after.poNumber, p.after.amountCents, p.poId, p.orderId, p.orderId, p.version)],
     where: ['changes() > 0'],
     before: { po_id: p.poId, po_number: p.before.poNumber, amount_cents: p.before.amountCents },
@@ -106,7 +125,7 @@ export async function updatePurchaseOrderDetails(db: D1Database, p: Guarded & {
 
 /** A PO document is always a new row: a corrected document is added next to the old one, never over it. */
 export async function addPoDocument(db: D1Database, p: Guarded & { poId: number; file: NewFile }) {
-  const { state, data } = await orderWriteResults(db, {
+  const { data } = await orderWriteBatch(db, {
     ...p, action: 'po_document_added',
     data: [
       insertFile(db, p),
@@ -117,8 +136,7 @@ export async function addPoDocument(db: D1Database, p: Guarded & { poId: number;
     ],
     after: { po_id: p.poId },
   })
-  const id = newId(data[1])
-  return state && id !== null ? { state, id } : null
+  return uploadOutcome(data)
 }
 
 // ---- reads ----

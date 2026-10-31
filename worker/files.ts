@@ -1,11 +1,14 @@
 // Uploads and downloads (R2). Upload format: the raw file is the request body (not multipart), Content-Type is the
-// declared type, X-Filename is encodeURIComponent(file name). Raw keeps one copy of the file in memory (multipart
-// parsing holds the body and then the part), which matters with a 50 MB cap under the Worker's 128 MB.
+// declared type, X-Filename is encodeURIComponent(file name), and Content-Length is required. The body is streamed
+// into R2, never buffered: only the first SNIFF_BYTES are held, to check the type, and the SHA-256 is computed as the
+// bytes pass (Codex security review of 1729ff4: a 50 MB buffer per request could exhaust the Worker's 128 MB).
 //
 // Ordering: R2 put first, then the one D1 batch that inserts the files row with its artwork / po_documents row and
-// the activity row. If the batch throws or changes nothing (a stale order version), the R2 object is deleted (best
-// effort). So a D1 row never points at a missing object; the worst case, a failed delete, is an R2 object no row
-// names, which nothing can serve (downloads look the key up from a files row linked to an order).
+// the activity row. The object is deleted only when the batch certainly did NOT commit: it returned and the guarded
+// files INSERT changed no row (a stale order version), or it threw a constraint error (SQLite aborted the
+// transaction). On any other failure (a dropped connection, a timeout) the object is kept: an object no row names is
+// harmless (nothing can serve it; downloads look the key up from a files row linked to an order), while a row naming
+// a deleted object breaks the order. Reads after the batch (the order's new state) are the caller's, after this.
 import { Hono } from 'hono'
 import type { Context } from 'hono'
 import { z } from 'zod'
@@ -13,7 +16,10 @@ import type { AppEnv } from './auth'
 import type { ApiErrorCode } from '../shared/api'
 import { getLinkedFile, type NewFile } from './db/files'
 
+/** The one upload cap (the 413 and the UI's message). Streaming holds no copy of the file, so it can rise. */
 export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+/** How much of the file's start is held to sniff its type. An SVG must reach its <svg> element within it. */
+export const SNIFF_BYTES = 4096
 
 export const FILE_KINDS = {
   png: 'image/png',
@@ -29,12 +35,16 @@ export const PO_DOCUMENT_KINDS: readonly FileKind[] = ['png', 'jpeg', 'tiff', 'p
 
 const startsWith = (b: Uint8Array, sig: number[]) => sig.every((x, i) => b[i] === x)
 
-/** SVG = UTF-8 text that is, after an optional BOM, whitespace, XML declaration, comments and a plain DOCTYPE, an <svg> element. */
+/**
+ * SVG = UTF-8 text that is, after an optional BOM, whitespace, XML declaration, comments and a plain DOCTYPE, an <svg>
+ * element, all within the first SNIFF_BYTES. ponytail: a prolog longer than 4 KB is refused as not-SVG; real exports'
+ * prologs are a few hundred bytes. If one isn't, raise SNIFF_BYTES (it is held in memory, once per request).
+ */
 function isSvg(b: Uint8Array) {
   let s: string
   try {
-    // stream: a multi-byte character cut by the 64 KB prefix isn't an error; anything else that isn't UTF-8 is.
-    s = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(b.subarray(0, 64 * 1024), { stream: true })
+    // stream: a multi-byte character cut by the prefix isn't an error; anything else that isn't UTF-8 is.
+    s = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(b.subarray(0, SNIFF_BYTES), { stream: true })
   } catch {
     return false
   }
@@ -81,74 +91,130 @@ export function contentDisposition(kind: 'inline' | 'attachment', filename: stri
   return `${kind}; filename="${filename.replace(/[^\x20-\x7e]/g, '_')}"; filename*=UTF-8''${rfc5987(filename)}`
 }
 
-/** Reads at most `max` bytes; 'too_large' as soon as the body goes past it, without buffering the rest. */
-async function readBounded(body: ReadableStream<Uint8Array> | null, declared: number | null, max: number): Promise<Uint8Array<ArrayBuffer> | 'too_large'> {
-  if (!body) return new Uint8Array()
-  const reader = body.getReader()
-  // With a Content-Length the file is read straight into one buffer; without one, chunks are joined at the end.
-  // ponytail: the chunked path briefly holds two copies; browsers always send Content-Length for a File body.
-  const chunks: Uint8Array[] = []
-  const out = declared === null ? null : new Uint8Array(declared)
-  let n = 0
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    if (n + value.byteLength > (out ? out.byteLength : max)) {
-      await reader.cancel()
-      return 'too_large'
-    }
-    if (out) out.set(value, n)
-    else chunks.push(value)
-    n += value.byteLength
-  }
-  if (out) return n === out.byteLength ? out : out.subarray(0, n)
-  const joined = new Uint8Array(n)
-  let o = 0
-  for (const c of chunks) {
-    joined.set(c, o)
-    o += c.byteLength
-  }
-  return joined
-}
-
 const hex = (buf: ArrayBuffer) => Array.from(new Uint8Array(buf), (x) => x.toString(16).padStart(2, '0')).join('')
 const refuse = (c: Context, status: 400 | 411 | 413 | 415, code: ApiErrorCode, error: string) => c.json({ error, code }, status)
+const joinChunks = (chunks: Uint8Array[]) => {
+  const out = new Uint8Array(chunks.reduce((n, x) => n + x.byteLength, 0))
+  let o = 0
+  for (const x of chunks) {
+    out.set(x, o)
+    o += x.byteLength
+  }
+  return out
+}
+
+/** A D1 error that means SQLite aborted the batch's transaction, so nothing in it committed. */
+export const isDefiniteRollback = (e: unknown) => /constraint failed|SQLITE_CONSTRAINT/.test(e instanceof Error ? e.message : String(e))
 
 /**
- * Validates the request body as an upload of one of `kinds`, stores it in R2, then runs `write` (the D1 batch).
- * Returns the refusal Response, or write's result: null means the batch applied nothing (stale order version),
- * in which case the R2 object has already been deleted. A batch that throws deletes it too, then rethrows.
+ * Validates the request as an upload of one of `kinds` (exactly Content-Length bytes), streams it into R2, then runs
+ * `write` (the D1 batch). Returns the refusal Response, or write's result: null means the batch committed nothing
+ * (stale order version), and the R2 object has been deleted. A batch that throws deletes it only on a definite
+ * rollback (see the header), then rethrows.
  */
 export async function storeUpload<T>(c: Context<AppEnv>, orderId: number, kinds: readonly FileKind[], write: (file: NewFile) => Promise<T | null>):
   Promise<{ response: Response } | { result: T | null }> {
   const lengthHeader = c.req.header('content-length')
-  const declared = lengthHeader === undefined ? null : Number(lengthHeader)
-  if (declared !== null && !(Number.isSafeInteger(declared) && declared >= 0)) return { response: refuse(c, 400, 'invalid_request', 'Bad Content-Length') }
-  if (declared !== null && declared > MAX_UPLOAD_BYTES) return { response: refuse(c, 413, 'file_too_large', 'File is larger than 50 MB') }
-  const bytes = await readBounded(c.req.raw.body, declared, MAX_UPLOAD_BYTES)
-  if (bytes === 'too_large') return { response: refuse(c, 413, 'file_too_large', 'File is larger than 50 MB') }
-  if (bytes.byteLength === 0) return { response: refuse(c, 400, 'invalid_request', 'Empty upload') }
-  const kind = sniff(bytes)
-  if (!kind || !kinds.includes(kind)) return { response: refuse(c, 415, 'unsupported_file_type', 'File type not accepted') }
-  const mime = FILE_KINDS[kind]
+  const length = lengthHeader && /^\d{1,16}$/.test(lengthHeader) ? Number(lengthHeader) : NaN
+  if (!Number.isSafeInteger(length)) return { response: refuse(c, 411, 'length_required', 'Content-Length is required') }
+  if (length > MAX_UPLOAD_BYTES) return { response: refuse(c, 413, 'file_too_large', `File is larger than ${MAX_UPLOAD_BYTES / 2 ** 20} MB`) }
+  const body = c.req.raw.body
+  if (length === 0 || !body) return { response: refuse(c, 400, 'invalid_request', 'Empty upload') }
+  const incomplete = () => refuse(c, 400, 'invalid_request', 'The body is not Content-Length bytes long')
+
+  // The head: just enough chunks to hold SNIFF_BYTES (or the whole file, if smaller).
+  const reader = body.getReader()
+  const head: Uint8Array[] = []
+  let received = 0
+  try {
+    while (received < Math.min(SNIFF_BYTES, length)) {
+      const { done, value } = await reader.read()
+      if (done) break
+      head.push(value)
+      received += value.byteLength
+    }
+  } catch {
+    return { response: incomplete() }
+  }
+  if (received > length || (received < SNIFF_BYTES && received !== length)) {
+    await reader.cancel().catch(() => {})
+    return { response: incomplete() }
+  }
+  const kind = sniff(joinChunks(head).subarray(0, SNIFF_BYTES))
+  const mime = kind && FILE_KINDS[kind]
   const claimed = c.req.header('content-type')?.split(';')[0]?.trim().toLowerCase()
-  if (claimed !== mime) return { response: refuse(c, 415, 'file_type_mismatch', `Declared ${claimed ?? 'no type'}, content is ${mime}`) }
+  const refusal = !kind || !kinds.includes(kind) ? refuse(c, 415, 'unsupported_file_type', 'File type not accepted')
+    : claimed !== mime ? refuse(c, 415, 'file_type_mismatch', `Declared ${claimed ?? 'no type'}, content is ${mime}`) : null
+  if (refusal || !mime) {
+    await reader.cancel().catch(() => {})
+    return { response: refusal! }
+  }
   let name: string | null = null
   try {
     name = sanitizeFilename(decodeURIComponent(c.req.header('x-filename') ?? ''))
   } catch {
     // A malformed X-Filename is dropped, not fatal: the name is display-only.
   }
-  const sha256 = hex(await crypto.subtle.digest('SHA-256', bytes))
-  // Never derived from the file name: the order, the content hash, and a random suffix (two uploads of one file are two objects).
-  const r2Key = `orders/${orderId}/${sha256}-${crypto.randomUUID()}`
-  await c.env.FILES.put(r2Key, bytes, { httpMetadata: { contentType: mime }, sha256 })
+
+  // The head, then the rest of the body, each chunk hashed on its way through. The source errors (so the R2 put
+  // fails and stores nothing) if the body ends short of Content-Length or runs past it; FixedLengthStream, which
+  // gives R2 the length it needs for a stream, refuses a mismatch too.
+  const digest = new crypto.DigestStream('SHA-256')
+  const hash = digest.getWriter()
+  let bodyFailed = false
+  const fail = (ctl: ReadableStreamDefaultController<Uint8Array>, why: string) => {
+    bodyFailed = true
+    ctl.error(new Error(why))
+    return reader.cancel().catch(() => {})
+  }
+  const source = new ReadableStream<Uint8Array>({
+    async start(ctl) {
+      for (const chunk of head) {
+        await hash.write(chunk)
+        ctl.enqueue(chunk)
+      }
+    },
+    async pull(ctl) {
+      const r = await reader.read().catch(() => null)
+      if (!r) return fail(ctl, 'request body failed')
+      if (r.done) {
+        if (received !== length) return fail(ctl, 'body shorter than Content-Length')
+        await hash.close()
+        return ctl.close()
+      }
+      received += r.value.byteLength
+      if (received > length) return fail(ctl, 'body longer than Content-Length')
+      await hash.write(r.value)
+      ctl.enqueue(r.value)
+    },
+    cancel: (reason) => reader.cancel(reason),
+  })
+  const fixed = new FixedLengthStream(length)
+  const pumped = source.pipeTo(fixed.writable).then(() => true, () => false)
+  // A random key, never derived from the file name or (unknown until the end) its hash.
+  const r2Key = `orders/${orderId}/${crypto.randomUUID()}`
   const cleanup = () => c.env.FILES.delete(r2Key).catch((e: unknown) => console.error('R2 cleanup failed', r2Key, e))
+  try {
+    await c.env.FILES.put(r2Key, fixed.readable, { httpMetadata: { contentType: mime } })
+  } catch (e) {
+    // A failed put stores nothing; the delete is for an object some error left behind regardless. The client's
+    // fault (a body that broke or didn't match Content-Length) is a 400; anything else (R2 itself) a 500.
+    await cleanup()
+    if (bodyFailed) return { response: incomplete() }
+    throw e
+  }
+  if (!(await pumped) || bodyFailed || received !== length) {
+    await cleanup()
+    return { response: incomplete() }
+  }
+  const sha256 = hex(await digest.digest)
+
   let result: T | null
   try {
-    result = await write({ r2Key, mime, bytes: bytes.byteLength, sha256, filename: name })
+    result = await write({ r2Key, mime, bytes: length, sha256, filename: name })
   } catch (e) {
-    await cleanup()
+    if (isDefiniteRollback(e)) await cleanup()
+    else console.error('Upload batch outcome unknown; keeping the R2 object', r2Key)
     throw e
   }
   if (result === null) await cleanup()

@@ -460,6 +460,14 @@ async function orderWrite(db: D1Database, w: OrderWrite): Promise<OrderStateRow 
 }
 /** orderWrite, also handing back each data statement's result (for RETURNING ids). */
 export async function orderWriteResults(db: D1Database, w: OrderWrite) {
+  const { applied, data } = await orderWriteBatch(db, w)
+  return { state: applied ? await orderState(db, { id: w.orderId }) : null, data }
+}
+/**
+ * The batch alone, with no read after it: whether the order UPDATE applied, and each data statement's result.
+ * Uploads use this so the R2 cleanup decision rests on the batch's own result, never on a later read that can fail.
+ */
+export async function orderWriteBatch(db: D1Database, w: OrderWrite) {
   const set = w.set ?? []
   const data = w.data ?? []
   const results = await db.batch([
@@ -469,8 +477,7 @@ export async function orderWriteResults(db: D1Database, w: OrderWrite) {
     db.prepare(LOG_IF_CHANGED).bind(w.actorId, w.orderId, w.action, toJson(w.before), toJson(w.after)),
     ...rederive(db, w.orderId, w.actorId, w.action),
   ])
-  const state = (results[data.length]?.meta.changes ?? 0) > 0 ? await orderState(db, { id: w.orderId }) : null
-  return { state, data: results.slice(0, data.length) }
+  return { applied: (results[data.length]?.meta.changes ?? 0) > 0, data: results.slice(0, data.length) }
 }
 
 export type ItemWrite = {

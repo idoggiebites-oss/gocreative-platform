@@ -408,7 +408,7 @@ describe('atomicity and vocabulary', () => {
     // Customer and contact actions are the customers API's (covered in customers.test.ts); artwork and PO ones are
     // covered in artwork.test.ts and purchase-orders.test.ts.
     const customerSide = ['customer_created', 'customer_updated', 'contact_added', 'contact_updated', 'contact_archived', 'contact_unarchived',
-      'artwork_uploaded', 'artwork_decided', 'po_created', 'po_details_updated', 'po_document_added']
+      'artwork_uploaded', 'artwork_decided', 'po_created', 'po_details_updated', 'po_document_added', 'po_replaced']
     expect(ACTIVITY_ACTIONS.filter((a) => !actions.includes(a) && !customerSide.includes(a))).toEqual(['po_status_changed'])
   })
 })

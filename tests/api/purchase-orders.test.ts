@@ -5,21 +5,52 @@ import { JPEG, PDF, PNG, SVG, TIFF_LE, setupUploads } from './r2'
 describe('create', () => {
   test('a PO in requested, only on a po_required order; the latest PO now drives authorization', async () => {
     const t = setupUploads()
-    const n = '2026-0008' // po_required, PO 9 approved, no artwork yet
+    const n = '2026-0010' // po_required, PO 11 requested
     const o = t.order(n)
-    const res = await t.json('POST', `/orders/${n}/purchase-orders`, { poNumber: 'PO-2026-81', amountCents: 230300, expectedVersion: o.version })
+    const res = await t.json('POST', `/orders/${n}/purchase-orders`, { poNumber: 'PO-2026-101', amountCents: 230300, expectedVersion: o.version })
     expect(res.status).toBe(201)
     const { id } = (await res.json()) as UploadResponse
     expect(t.one('SELECT order_id, po_number, amount_cents, status FROM purchase_orders WHERE id = ?', id))
-      .toEqual({ order_id: o.id, po_number: 'PO-2026-81', amount_cents: 230300, status: 'requested' })
-    // The new PO is the latest one, and it isn't approved: authorization is pending again.
+      .toEqual({ order_id: o.id, po_number: 'PO-2026-101', amount_cents: 230300, status: 'requested' })
     expect(t.order(n).production_status).toBe('awaiting_authorization')
-    expect(t.activity(o.id).slice(-2).map((r) => r.action)).toEqual(['po_created', 'production_status_changed'])
+    expect(t.activity(o.id).at(-1)!.action).toBe('po_created')
     const before = t.footprint()
     const refused = await t.json('POST', '/orders/2026-0022/purchase-orders', { expectedVersion: t.order('2026-0022').version })
     expect(refused.status).toBe(409)
     expect(await refused.json()).toMatchObject({ code: 'po_not_required' })
     expect(t.footprint()).toEqual(before)
+  })
+
+  test('while the latest PO is approved, a new one is refused unless it says it replaces it, and why', async () => {
+    const t = setupUploads()
+    const n = '2026-0008' // po_required, PO 9 approved
+    const before = t.footprint()
+    const v = t.order(n).version
+    for (const extra of [{}, { replaceApproved: true }, { replaceApproved: true, reason: '   ' }, { replaceApproved: false, reason: 'Amount changed' }, { reason: 'Amount changed' }]) {
+      const res = await t.json('POST', `/orders/${n}/purchase-orders`, { poNumber: 'PO-2026-81', expectedVersion: v, ...extra })
+      expect(res.status, JSON.stringify(extra)).toBe(409)
+      expect(await res.json()).toMatchObject({ code: 'po_approved_exists' })
+    }
+    expect([t.footprint(), t.order(n).version]).toEqual([before, v])
+  })
+
+  test('replacing an approved PO: the new PO is created, po_replaced logs the reason and the replaced PO, and authorization is pending again', async () => {
+    const t = setupUploads()
+    const n = '2026-0008'
+    const o = t.order(n)
+    const auth = async () => ((await (await t.json('GET', `/orders/${n}`)).json()) as OrderDetailResponse).readiness.items.find((i) => i.key === 'authorization')
+    expect(await auth()).toMatchObject({ state: 'complete' })
+    const res = await t.json('POST', `/orders/${n}/purchase-orders`,
+      { poNumber: 'PO-2026-81', amountCents: 240000, replaceApproved: true, reason: ' District reissued the PO with the new amount ', expectedVersion: o.version })
+    expect(res.status).toBe(201)
+    const { id } = (await res.json()) as UploadResponse
+    expect(t.one('SELECT po_number, amount_cents, status FROM purchase_orders WHERE id = ?', id)).toEqual({ po_number: 'PO-2026-81', amount_cents: 240000, status: 'requested' })
+    expect(t.one('SELECT status FROM purchase_orders WHERE id = 9')).toEqual({ status: 'approved' }) // the old one is kept as it was
+    const rows = t.activity(o.id).slice(-2)
+    expect(rows.map((r) => r.action)).toEqual(['po_replaced', 'production_status_changed'])
+    expect(JSON.parse(rows[0]!.after!)).toMatchObject({ replaced_po_id: 9, reason: 'District reissued the PO with the new amount', po_status: 'requested', po_number: 'PO-2026-81' })
+    expect(await auth()).toMatchObject({ state: 'pending' })
+    expect(t.order(n).production_status).toBe('awaiting_authorization')
   })
 
   test('stale version and bad input change nothing', async () => {
@@ -56,6 +87,20 @@ describe('details', () => {
     expect((await t.json('PATCH', `/orders/${n}/purchase-orders/1/details`, { amountCents: 1, expectedVersion: v })).status).toBe(404)
     expect(t.footprint()).toEqual(before)
   })
+})
+
+test("an approved PO's number and amount are locked", async () => {
+  const t = setupUploads()
+  const n = '2026-0008' // PO 9 approved
+  const before = t.footprint()
+  const v = t.order(n).version
+  for (const body of [{ amountCents: 1 }, { poNumber: 'X' }, { poNumber: 'PO-2026-80' }]) {
+    const res = await t.json('PATCH', `/orders/${n}/purchase-orders/9/details`, { ...body, expectedVersion: v })
+    expect(res.status, JSON.stringify(body)).toBe(409)
+    expect(await res.json()).toMatchObject({ code: 'po_approved_locked' })
+  }
+  expect([t.footprint(), t.order(n).version]).toEqual([before, v])
+  expect(t.one('SELECT po_number, amount_cents FROM purchase_orders WHERE id = 9')).toEqual({ po_number: 'PO-2026-80', amount_cents: 230300 })
 })
 
 describe('documents', () => {
