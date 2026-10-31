@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Customer Riverbend Unified SD</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#F6F5F2}
+a{color:#2340A8}a:hover{color:#1A3184}
+.chip{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px;border-radius:999px;font-size:12px;font-weight:500;white-space:nowrap}
+.chip::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.amber{background:#FBF1DE;color:#8A5300}.blue{background:#E8EEFB;color:#1E46A8}.green{background:#E4F3E9;color:#1B6E3E}.red{background:#FCEAE8;color:#A8261B}.gray{background:#EFEDE8;color:#55524B}
+.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl th{text-align:left;font-weight:500;font-size:12px;color:#6B675F;padding:0 12px;height:34px;border-bottom:1px solid #E7E5E0;white-space:nowrap}
+.tbl td{padding:0 12px;height:44px;border-bottom:1px solid #F0EEE9;white-space:nowrap}
+.tbl tr:last-child td{border-bottom:0}
+.tbl tbody tr:hover td{background:#FAF9F7}
+.tbl.tall td{height:auto;padding:12px;white-space:normal;vertical-align:top}
+.r{text-align:right !important}
+.num{font-variant-numeric:tabular-nums}
+.card{background:#FFFFFF;border:1px solid #E7E5E0;border-radius:10px;box-shadow:0 1px 2px rgba(28,27,25,.04)}
+.kpi{display:flex;flex-direction:column;gap:4px;padding:14px 16px;border-right:1px solid #EFEDE8}
+.kpi:last-child{border-right:0}
+.track{display:flex;flex-direction:column;gap:6px;padding:12px 14px;border-right:1px solid #EFEDE8;min-width:0}
+.track:last-child{border-right:0}
+.tl{font-size:11.5px;font-weight:500;color:#6B675F;text-transform:uppercase;letter-spacing:.04em}
+.sub{font-size:12px;color:#6B675F}
+.tabs{display:flex;gap:2px;border-bottom:1px solid #E7E5E0;padding:0 8px;overflow-x:auto}
+.tabs button{height:40px;padding:0 10px;border:0;background:none;font:500 13px Inter,system-ui,sans-serif;color:#6B675F;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap}
+.tabs button.on{color:#1C1B19;border-bottom-color:#2340A8}
+.sizes{display:grid;grid-template-columns:repeat(8,minmax(34px,auto));gap:2px;font-size:12px}
+.sizes span{display:flex;flex-direction:column;align-items:center;padding:3px 4px;border-radius:5px;background:#F6F5F2;font-variant-numeric:tabular-nums}
+.sizes b{font-size:10.5px;font-weight:500;color:#6B675F}
+.btn{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:7px;font:500 13px Inter,system-ui,sans-serif;border:1px solid #E1DED8;background:#FFFFFF;color:#1C1B19;cursor:pointer;transition:transform 160ms cubic-bezier(.23,1,.32,1);white-space:nowrap}
+.btn:active{transform:scale(.97)}
+.btn.primary{background:#2340A8;border-color:#2340A8;color:#FFFFFF}
+.btn.sm{height:28px;padding:0 10px;font-size:12.5px}
+.btn.link{border:0;background:none;color:#2340A8;padding:0 4px}
+.btn[disabled]{background:#F6F5F2;color:#6B675F;cursor:not-allowed}
+.btn[disabled]:active{transform:none}
+.in{height:34px;border:1px solid #E1DED8;border-radius:7px;padding:0 10px;font:13px Inter,system-ui,sans-serif;background:#FFFFFF;color:#1C1B19;box-sizing:border-box;min-width:0}
+textarea.in{height:auto;padding:8px}
+.lbl{font-size:12px;color:#6B675F}
+.fld{display:flex;flex-direction:column;gap:4px;min-width:0}
+.seg{display:inline-flex;border:1px solid #E1DED8;border-radius:7px;overflow:hidden;background:#FFFFFF}
+.seg button{height:32px;padding:0 14px;border:0;border-right:1px solid #E1DED8;background:#FFFFFF;font:500 13px Inter,system-ui,sans-serif;color:#4A4741;cursor:pointer}
+.seg button:last-child{border-right:0}
+.seg button.on{background:#E8EEFB;color:#1E46A8}
+.bar{height:8px;border-radius:999px;background:#EFEDE8;overflow:hidden}
+.bar i{display:block;height:100%;background:#2340A8;border-radius:999px}
+.grip{display:inline-flex;align-items:center;justify-content:center;width:24px;height:28px;border:0;background:none;padding:0;color:#6B675F;cursor:grab}
+.thumb{width:84px;height:84px;border-radius:8px;background:#EFEDE8;border:1px solid #E1DED8;display:flex;align-items:center;justify-content:center;color:#6B675F;font-size:11px;flex:none}
+.sec{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:14px 16px 10px}
+.sec h2{margin:0;font-size:14px;font-weight:600}
+.ds{margin:0;display:grid;grid-template-columns:auto 1fr;gap:8px 16px;font-size:13px}
+.ds dt{color:#6B675F}.ds dd{margin:0;text-align:right}
+.ckrow{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;padding:11px 16px;border-bottom:1px solid #F0EEE9;font-size:13px}
+.ckrow:last-child{border-bottom:0}
+.ckrow .nm{width:170px;font-weight:500;flex:none}
+.ckrow .why{flex:1 1 240px;color:#4A4741;min-width:0}
+.ckrow .ch{width:112px;flex:none}
+</style>
+</helmet>
+<div style="display: flex; flex-wrap: wrap; min-height: 100vh; font-family: Inter, system-ui, sans-serif; color: #1C1B19; background: #F6F5F2">
+<dc-import name="Sidebar" active="customers" hint-size="232px,900px"></dc-import>
+<main style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
+<header style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 32px; border-bottom: 1px solid #E7E5E0; background: #FBFAF8">
+<nav aria-label="Breadcrumb" style="font-size: 13px; color: #6B675F"><a href="#" style="color: #6B675F; text-decoration: none">Customers</a> <span aria-hidden="true">/</span> <span style="color: #1C1B19; font-weight: 500">Riverbend Unified SD</span></nav>
+<div style="flex-grow: 1"></div>
+
+</header>
+<div style="width: 100%; max-width: 1280px; box-sizing: border-box; padding: 20px 32px 40px; display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px">
+<div style="display: flex; flex-direction: column; gap: 6px"><div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px"><h1 style="margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.015em">Riverbend Unified SD</h1><span class="chip blue">School district</span></div><span style="font-size: 13px; color: #6B675F">Customer since Mar 2023 &middot; 14 orders &middot; 2 active</span></div>
+<div style="display: flex; gap: 8px"><button class="btn">Edit customer</button><button class="btn primary"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>New order</button></div>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start">
+<div style="flex: 999 1 640px; min-width: 0; display: flex; flex-direction: column; gap: 16px">
+<section class="card" aria-labelledby="ct"><div class="sec"><h2 id="ct">Contacts</h2><button class="btn sm"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Add contact</button></div><div style="overflow-x: auto"><table class="tbl"><thead><tr><th>Name</th><th>Role</th><th>Email</th><th>Phone</th><th>Notes</th><th></th></tr></thead><tbody>
+<tr><td style="font-weight: 500">Dana Ortiz</td><td>Purchasing</td><td><a href="#" style="text-decoration: none">d.ortiz@riverbend.example</a></td><td class="num">(555) 014-2290</td><td><span class="chip blue">Primary</span></td><td class="r"><button class="btn sm" aria-label="Edit Dana Ortiz">Edit</button></td></tr>
+<tr><td style="font-weight: 500">Marcus Bell</td><td>Athletics director</td><td><a href="#" style="text-decoration: none">m.bell@riverbend.example</a></td><td class="num">(555) 014-2311</td><td><span class="sub">Spirit wear approvals</span></td><td class="r"><button class="btn sm" aria-label="Edit Marcus Bell">Edit</button></td></tr>
+<tr><td style="font-weight: 500">Priya Nair</td><td>Accounts payable</td><td><a href="#" style="text-decoration: none">ap@riverbend.example</a></td><td class="num">(555) 014-2300</td><td><span class="sub">Checks, W-9 requests</span></td><td class="r"><button class="btn sm" aria-label="Edit Priya Nair">Edit</button></td></tr>
+</tbody></table></div></section>
+<section class="card" aria-labelledby="oh"><div class="sec"><h2 id="oh">Order history</h2><a href="#" style="font-size: 13px; text-decoration: none">All 14 orders</a></div><div style="overflow-x: auto"><table class="tbl"><thead><tr><th>Order</th><th>Title</th><th>Status</th><th class="r">Total</th><th>Date</th></tr></thead><tbody>
+<tr><td class="num" style="font-weight: 500"><a href="#" style="text-decoration: none">2026-0147</a></td><td>Band jackets</td><td><span style="display: flex; gap: 6px"><span class="chip amber">Awaiting authorization</span><span class="chip gray">Not invoiced</span></span></td><td class="num r">$3,620.00</td><td class="num">Oct 26</td></tr>
+<tr><td class="num" style="font-weight: 500"><a href="#" style="text-decoration: none">2026-0142</a></td><td>Fall spirit wear</td><td><span style="display: flex; gap: 6px"><span class="chip amber">Awaiting authorization</span><span class="chip gray">Not invoiced</span></span></td><td class="num r">$5,180.00</td><td class="num">Oct 21</td></tr>
+<tr><td class="num" style="font-weight: 500"><a href="#" style="text-decoration: none">2026-0129</a></td><td>Homecoming tees</td><td><span style="display: flex; gap: 6px"><span class="chip green">Picked up</span><span class="chip blue">Check ready</span></span></td><td class="num r">$3,150.00</td><td class="num">Oct 2</td></tr>
+<tr><td class="num" style="font-weight: 500"><a href="#" style="text-decoration: none">2026-0118</a></td><td>Staff polos</td><td><span style="display: flex; gap: 6px"><span class="chip green">Picked up</span><span class="chip green">Paid</span></span></td><td class="num r">$2,140.00</td><td class="num">Sep 8</td></tr>
+<tr><td class="num" style="font-weight: 500"><a href="#" style="text-decoration: none">2026-0097</a></td><td>Summer camp shirts</td><td><span style="display: flex; gap: 6px"><span class="chip green">Picked up</span><span class="chip green">Paid</span></span></td><td class="num r">$1,880.00</td><td class="num">Jun 12</td></tr>
+</tbody></table></div></section>
+<section class="card" aria-labelledby="sa"><div class="sec"><h2 id="sa">Saved artwork</h2><a href="#" style="font-size: 13px; text-decoration: none">Upload artwork</a></div><div style="display: flex; flex-wrap: wrap; gap: 14px; padding: 0 16px 16px"><div style="display: flex; flex-direction: column; gap: 4px; width: 100px"><div class="thumb" style="width: 100px; height: 100px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="9" cy="9" r="2"></circle><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"></path></svg></div><span style="font-size: 12px">District crest</span><span class="sub">2 versions</span></div><div style="display: flex; flex-direction: column; gap: 4px; width: 100px"><div class="thumb" style="width: 100px; height: 100px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="9" cy="9" r="2"></circle><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"></path></svg></div><span style="font-size: 12px">Spirit wolf</span><span class="sub">3 versions</span></div><div style="display: flex; flex-direction: column; gap: 4px; width: 100px"><div class="thumb" style="width: 100px; height: 100px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="9" cy="9" r="2"></circle><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"></path></svg></div><span style="font-size: 12px">Athletics wordmark</span><span class="sub">1 version</span></div><div style="display: flex; flex-direction: column; gap: 4px; width: 100px"><div class="thumb" style="width: 100px; height: 100px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="9" cy="9" r="2"></circle><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"></path></svg></div><span style="font-size: 12px">Band logo</span><span class="sub">2 versions</span></div><div style="display: flex; flex-direction: column; gap: 4px; width: 100px"><div class="thumb" style="width: 100px; height: 100px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="9" cy="9" r="2"></circle><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"></path></svg></div><span style="font-size: 12px">Staff polo mark</span><span class="sub">1 version</span></div></div></section>
+</div>
+<div style="flex: 1 1 300px; min-width: 0; display: flex; flex-direction: column; gap: 16px">
+<section class="card" aria-labelledby="df" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 10px"><div style="display: flex; align-items: center; justify-content: space-between"><h2 id="df" style="margin: 0; font-size: 13px; font-weight: 600">Defaults</h2><button class="btn sm">Edit</button></div><dl class="ds"><dt>PO required</dt><dd>Yes</dd><dt>Payment terms</dt><dd>Due after pickup</dd><dt>Pays by</dt><dd>Check</dd><dt>Tax exempt</dt><dd>Yes, certificate on file</dd></dl></section>
+<section class="card" aria-labelledby="bal" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 10px"><div style="display: flex; align-items: center; justify-content: space-between"><h2 id="bal" style="margin: 0; font-size: 13px; font-weight: 600">Outstanding balance</h2></div><span class="num" style="font-size: 24px; font-weight: 600; letter-spacing: -0.02em">$3,150.00</span><dl class="ds"><dt>Invoiced, unpaid</dt><dd class="num">$3,150.00</dd><dt>Collected, not cleared</dt><dd class="num">$0.00</dd><dt>Not yet invoiced</dt><dd class="num">$8,800.00</dd><dt>Oldest outstanding</dt><dd class="num">12 days</dd></dl><a href="#" style="font-size: 13px; text-decoration: none">View payments</a></section>
+<section class="card" aria-labelledby="nt" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 10px"><div style="display: flex; align-items: center; justify-content: space-between"><h2 id="nt" style="margin: 0; font-size: 13px; font-weight: 600">Internal notes</h2><span class="sub">Staff only</span></div>
+<label class="fld"><span class="lbl">Add a note</span><textarea class="in" rows="2" placeholder="Visible to staff only"></textarea></label>
+<div style="display: flex; flex-direction: column; gap: 2px; font-size: 13px"><span>Board approves purchases on the first Tuesday of the month; PO can lag a week.</span><span class="sub">Owner 1 &middot; Sep 9</span></div>
+<div style="display: flex; flex-direction: column; gap: 2px; font-size: 13px"><span>Checks come from Priya, usually 10 days after pickup.</span><span class="sub">Owner 2 &middot; Jun 20</span></div></section>
+</div>
+</div>
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1240}}'>class Component extends DCLogic { renderVals() { return {}; } }</script>
+</body>
+</html>

@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>New order</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#F6F5F2}
+a{color:#2340A8}a:hover{color:#1A3184}
+.chip{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px;border-radius:999px;font-size:12px;font-weight:500;white-space:nowrap}
+.chip::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.amber{background:#FBF1DE;color:#8A5300}.blue{background:#E8EEFB;color:#1E46A8}.green{background:#E4F3E9;color:#1B6E3E}.red{background:#FCEAE8;color:#A8261B}.gray{background:#EFEDE8;color:#55524B}
+.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl th{text-align:left;font-weight:500;font-size:12px;color:#6B675F;padding:0 12px;height:34px;border-bottom:1px solid #E7E5E0;white-space:nowrap}
+.tbl td{padding:0 12px;height:44px;border-bottom:1px solid #F0EEE9;white-space:nowrap}
+.tbl tr:last-child td{border-bottom:0}
+.tbl tbody tr:hover td{background:#FAF9F7}
+.tbl.tall td{height:auto;padding:12px;white-space:normal;vertical-align:top}
+.r{text-align:right !important}
+.num{font-variant-numeric:tabular-nums}
+.card{background:#FFFFFF;border:1px solid #E7E5E0;border-radius:10px;box-shadow:0 1px 2px rgba(28,27,25,.04)}
+.kpi{display:flex;flex-direction:column;gap:4px;padding:14px 16px;border-right:1px solid #EFEDE8}
+.kpi:last-child{border-right:0}
+.track{display:flex;flex-direction:column;gap:6px;padding:12px 14px;border-right:1px solid #EFEDE8;min-width:0}
+.track:last-child{border-right:0}
+.tl{font-size:11.5px;font-weight:500;color:#6B675F;text-transform:uppercase;letter-spacing:.04em}
+.sub{font-size:12px;color:#6B675F}
+.tabs{display:flex;gap:2px;border-bottom:1px solid #E7E5E0;padding:0 8px;overflow-x:auto}
+.tabs button{height:40px;padding:0 10px;border:0;background:none;font:500 13px Inter,system-ui,sans-serif;color:#6B675F;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap}
+.tabs button.on{color:#1C1B19;border-bottom-color:#2340A8}
+.sizes{display:grid;grid-template-columns:repeat(8,minmax(34px,auto));gap:2px;font-size:12px}
+.sizes span{display:flex;flex-direction:column;align-items:center;padding:3px 4px;border-radius:5px;background:#F6F5F2;font-variant-numeric:tabular-nums}
+.sizes b{font-size:10.5px;font-weight:500;color:#6B675F}
+.btn{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:7px;font:500 13px Inter,system-ui,sans-serif;border:1px solid #E1DED8;background:#FFFFFF;color:#1C1B19;cursor:pointer;transition:transform 160ms cubic-bezier(.23,1,.32,1);white-space:nowrap}
+.btn:active{transform:scale(.97)}
+.btn.primary{background:#2340A8;border-color:#2340A8;color:#FFFFFF}
+.btn.sm{height:28px;padding:0 10px;font-size:12.5px}
+.btn.link{border:0;background:none;color:#2340A8;padding:0 4px}
+.btn[disabled]{background:#F6F5F2;color:#6B675F;cursor:not-allowed}
+.btn[disabled]:active{transform:none}
+.in{height:34px;border:1px solid #E1DED8;border-radius:7px;padding:0 10px;font:13px Inter,system-ui,sans-serif;background:#FFFFFF;color:#1C1B19;box-sizing:border-box;min-width:0}
+textarea.in{height:auto;padding:8px}
+.lbl{font-size:12px;color:#6B675F}
+.fld{display:flex;flex-direction:column;gap:4px;min-width:0}
+.seg{display:inline-flex;border:1px solid #E1DED8;border-radius:7px;overflow:hidden;background:#FFFFFF}
+.seg button{height:32px;padding:0 14px;border:0;border-right:1px solid #E1DED8;background:#FFFFFF;font:500 13px Inter,system-ui,sans-serif;color:#4A4741;cursor:pointer}
+.seg button:last-child{border-right:0}
+.seg button.on{background:#E8EEFB;color:#1E46A8}
+.bar{height:8px;border-radius:999px;background:#EFEDE8;overflow:hidden}
+.bar i{display:block;height:100%;background:#2340A8;border-radius:999px}
+.grip{display:inline-flex;align-items:center;justify-content:center;width:24px;height:28px;border:0;background:none;padding:0;color:#6B675F;cursor:grab}
+.thumb{width:84px;height:84px;border-radius:8px;background:#EFEDE8;border:1px solid #E1DED8;display:flex;align-items:center;justify-content:center;color:#6B675F;font-size:11px;flex:none}
+.sec{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:14px 16px 10px}
+.sec h2{margin:0;font-size:14px;font-weight:600}
+.ds{margin:0;display:grid;grid-template-columns:auto 1fr;gap:8px 16px;font-size:13px}
+.ds dt{color:#6B675F}.ds dd{margin:0;text-align:right}
+.ckrow{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;padding:11px 16px;border-bottom:1px solid #F0EEE9;font-size:13px}
+.ckrow:last-child{border-bottom:0}
+.ckrow .nm{width:170px;font-weight:500;flex:none}
+.ckrow .why{flex:1 1 240px;color:#4A4741;min-width:0}
+.ckrow .ch{width:112px;flex:none}
+</style>
+</helmet>
+<div style="display: flex; flex-wrap: wrap; min-height: 100vh; font-family: Inter, system-ui, sans-serif; color: #1C1B19; background: #F6F5F2">
+<dc-import name="Sidebar" active="orders" hint-size="232px,900px"></dc-import>
+<main style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
+<header style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 32px; border-bottom: 1px solid #E7E5E0; background: #FBFAF8">
+<nav aria-label="Breadcrumb" style="font-size: 13px; color: #6B675F"><a href="#" style="color: #6B675F; text-decoration: none">Orders</a> <span aria-hidden="true">/</span> <span style="color: #1C1B19; font-weight: 500">New order</span></nav>
+<div style="flex-grow: 1"></div>
+
+</header>
+<div style="width: 100%; max-width: 1100px; box-sizing: border-box; padding: 20px 32px 40px; display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; flex-direction: column; gap: 4px"><h1 style="margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.015em">New order</h1><span class="sub">Order number is assigned on save (next: 2026-0156).</span></div>
+<form action="#" style="display: flex; flex-direction: column; gap: 16px">
+<section class="card" aria-labelledby="s1" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 14px">
+<h2 id="s1" style="margin: 0; font-size: 14px; font-weight: 600">Customer</h2>
+<div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end">
+<div class="fld" style="flex: 2 1 320px"><label class="lbl" for="cust">Customer</label><div style="position: relative"><input class="in" id="cust" type="search" value="Riverbend Unified SD" style="width: 100%; padding-left: 10px"></div></div>
+<a href="#" style="font-size: 13px; text-decoration: none; height: 34px; display: inline-flex; align-items: center">+ New customer</a>
+<div class="fld" style="flex: 1 1 240px"><label class="lbl" for="contact">Contact</label><select class="in" id="contact" style=""><option selected>Dana Ortiz · Purchasing</option><option>Marcus Bell · Athletics</option><option>Add a contact</option></select></div>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 8px 10px; background: #F6F5F2; border-radius: 7px; font-size: 13px"><span class="chip gray">School district</span><span>Defaults from this customer:</span><b style="font-weight: 500">PO required</b><span aria-hidden="true">&middot;</span><b style="font-weight: 500">Due after pickup</b><span class="sub">(editable below)</span></div>
+</section>
+<section class="card" aria-labelledby="s2" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 14px">
+<h2 id="s2" style="margin: 0; font-size: 14px; font-weight: 600">Order details</h2>
+<div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end">
+<div class="fld"><span class="lbl" id="srcl">Source</span><div class="seg" role="group" aria-labelledby="srcl"><button type="button" aria-pressed="false">Phone</button><button type="button" class="on" aria-pressed="true">Email</button><button type="button" aria-pressed="false">Portal</button></div></div>
+<div class="fld" style="flex: 2 1 280px"><label class="lbl" for="title">Order title</label><input class="in" id="title" type="text" value="Fall spirit wear" placeholder="" style=""></div>
+<div class="fld" style="flex: 1 1 170px"><label class="lbl" for="due">Requested completion date</label><input class="in" id="due" type="date" value="2026-11-04" placeholder="" style=""></div>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: flex-end">
+<label style="display: inline-flex; align-items: center; gap: 8px; height: 34px; font-size: 13px"><input type="checkbox" checked style="width: 16px; height: 16px; accent-color: #2340A8">PO required</label>
+<div class="fld" style="flex: 0 1 220px"><label class="lbl" for="terms">Payment terms</label><select class="in" id="terms" style=""><option selected>Due after pickup</option><option>Due on pickup</option><option>Deposit then balance</option><option>Net 30</option></select></div>
+<span class="sub" style="height: 34px; display: inline-flex; align-items: center">Prefilled from Riverbend Unified SD</span>
+</div>
+</section>
+<section class="card" aria-labelledby="s3">
+<div class="sec"><h2 id="s3">Items</h2><span class="sub">Quantity is the sum of the size grid</span></div>
+<div style="display: flex; flex-direction: column; gap: 12px; padding: 14px 16px; border-top: 1px solid #F0EEE9">
+<div style="display: flex; flex-wrap: wrap; gap: 12px">
+<div class="fld" style="flex: 2 1 260px"><label class="lbl" for="d1">Product description</label><input class="in" id="d1" type="text" value="Heavy cotton tee" placeholder="" style=""></div>
+<div class="fld" style="flex: 1 1 140px"><label class="lbl" for="m1">Method</label><select class="in" id="m1" style=""><option selected>Screen print</option><option>Embroidery</option><option>DTG</option><option>Laser engraving</option><option>Vinyl</option></select></div>
+<div class="fld" style="flex: 1 1 140px"><label class="lbl" for="c1">Garment colour</label><input class="in" id="c1" type="text" value="Sport Grey" placeholder="" style=""></div>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end">
+<div style="display: flex; flex-wrap: wrap; gap: 4px; flex: 1 1 400px"><div class="fld" style="width: 56px"><label class="lbl" for="i1-YS" style="text-align: center">YS</label><input class="in num" id="i1-YS" type="number" min="0" value="12" style="padding: 0 4px; text-align: center"></div><div class="fld" style="width: 56px"><label class="lbl" for="i1-YM" style="text-align: center">YM</label><input class="in num" id="i1-YM" type="number" min="0" value="24" style="padding: 0 4px; text-align: center"></div><div class="fld" style="width: 56px"><label class="lbl" for="i1-YL" style="text-align: center">YL</label><input class="in num" id="i1-YL" type="number" min="0" value="30" style="padding: 0 4px; text-align: center"></div><div class="fld" style="width: 56px"><label class="lbl" for="i1-S" style="text-align: center">S</label><input class="in num" id="i1-S" type="number" min="0" value="20" style="padding: 0 4px; text-align: center"></div><div class="fld" style="width: 56px"><label class="lbl" for="i1-M" style="text-align: center">M</label><input class="in num" id="i1-M" type="number" min="0" value="36" style="padding: 0 4px; text-align: center"></div><div class="fld" style="width: 56px"><label class="lbl" for="i1-L" style="text-align: center">L</label><input class="in num" id="i1-L" type="number" min="0" value="30" style="padding: 0 4px; text-align: center"></div><div class="fld" style="width: 56px"><label class="lbl" for="i1-XL" style="text-align: center">XL</label><input class="in num" id="i1-XL" type="number" min="0" value="18" style="padding: 0 4px; text-align: center"></div><div class="fld" style="width: 56px"><label class="lbl" for="i1-2XL" style="text-align: center">2XL</label><input class="in num" id="i1-2XL" type="number" min="0" value="6" style="padding: 0 4px; text-align: center"></div><div class="fld" style="width: 56px"><label class="lbl" for="i1-3XL" style="text-align: center">3XL</label><input class="in num" id="i1-3XL" type="number" min="0" value="0" style="padding: 0 4px; text-align: center"></div></div>
+<div class="fld" style="width: 84px"><label class="lbl" for="q1">Quantity</label><input class="in num" id="q1" type="number" value="176" readonly style="background: #F6F5F2; text-align: right"></div>
+<div class="fld" style="width: 96px"><label class="lbl" for="u1">Unit price</label><input class="in" id="u1" type="text" value="$14.00" placeholder="" style="text-align: right"></div>
+<div class="fld" style="width: 110px"><span class="lbl" style="text-align: right">Line total</span><span class="num" style="height: 34px; display: flex; align-items: center; justify-content: flex-end; font-weight: 600">$2,464.00</span></div>
+<button class="btn sm" aria-label="Remove item 1">Remove</button>
+</div>
+<span class="sub">Live total: size grid sums to 176 pieces and sets the quantity.</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 12px; padding: 14px 16px; border-top: 1px solid #F0EEE9">
+<div style="display: flex; flex-wrap: wrap; gap: 12px">
+<div class="fld" style="flex: 2 1 260px"><label class="lbl" for="d2">Product description</label><input class="in" id="d2" type="text" value="Pullover hoodie" placeholder="" style=""></div>
+<div class="fld" style="flex: 1 1 140px"><label class="lbl" for="m2">Method</label><select class="in" id="m2" style=""><option selected>Screen print</option><option>Embroidery</option><option>DTG</option><option>Laser engraving</option><option>Vinyl</option></select></div>
+<div class="fld" style="flex: 1 1 140px"><label class="lbl" for="c2">Garment colour</label><input class="in" id="c2" type="text" value="Navy" placeholder="" style=""></div>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end">
+<div style="display: flex; flex-wrap: wrap; gap: 4px; flex: 1 1 400px"><div class="fld" style="width: 56px"><label class="lbl" for="i2-YS" style="text-align: center">YS</label><input class="in num" id="i2-YS" type="number" min="0" value="0" style="padding: 0 4px; text-align: center"></div><div class="fld" style="width: 56px"><label class="lbl" for="i2-YM" style="text-align: center">YM</label><input class="in num" id="i2-YM" type="number" min="0" value="0" style="padding: 0 4px; text-align: center"></div><div class="fld" style="width: 56px"><label class="lbl" for="i2-YL" style="text-align: center">YL</label><input class="in num" id="i2-YL" type="number" min="0" value="0" style="padding: 0 4px; text-align: center"></div><div class="fld" style="width: 56px"><label class="lbl" for="i2-S" style="text-align: center">S</label><input class="in num" id="i2-S" type="number" min="0" value="8" style="padding: 0 4px; text-align: center"></div><div class="fld" style="width: 56px"><label class="lbl" for="i2-M" style="text-align: center">M</label><input class="in num" id="i2-M" type="number" min="0" value="18" style="padding: 0 4px; text-align: center"></div><div class="fld" style="width: 56px"><label class="lbl" for="i2-L" style="text-align: center">L</label><input class="in num" id="i2-L" type="number" min="0" value="20" style="padding: 0 4px; text-align: center"></div><div class="fld" style="width: 56px"><label class="lbl" for="i2-XL" style="text-align: center">XL</label><input class="in num" id="i2-XL" type="number" min="0" value="12" style="padding: 0 4px; text-align: center"></div><div class="fld" style="width: 56px"><label class="lbl" for="i2-2XL" style="text-align: center">2XL</label><input class="in num" id="i2-2XL" type="number" min="0" value="6" style="padding: 0 4px; text-align: center"></div><div class="fld" style="width: 56px"><label class="lbl" for="i2-3XL" style="text-align: center">3XL</label><input class="in num" id="i2-3XL" type="number" min="0" value="0" style="padding: 0 4px; text-align: center"></div></div>
+<div class="fld" style="width: 84px"><label class="lbl" for="q2">Quantity</label><input class="in num" id="q2" type="number" value="64" readonly style="background: #F6F5F2; text-align: right"></div>
+<div class="fld" style="width: 96px"><label class="lbl" for="u2">Unit price</label><input class="in" id="u2" type="text" value="$40.00" placeholder="" style="text-align: right"></div>
+<div class="fld" style="width: 110px"><span class="lbl" style="text-align: right">Line total</span><span class="num" style="height: 34px; display: flex; align-items: center; justify-content: flex-end; font-weight: 600">$2,560.00</span></div>
+<button class="btn sm" aria-label="Remove item 2">Remove</button>
+</div>
+<span class="sub">Live total: size grid sums to 64 pieces and sets the quantity.</span>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 16px; border-top: 1px solid #F0EEE9"><button type="button" class="btn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Add item</button><button type="button" class="btn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Add charge</button><button type="button" class="btn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Add discount</button></div>
+<div style="display: flex; justify-content: flex-end; padding: 14px 16px; border-top: 1px solid #E7E5E0"><div style="width: 300px; max-width: 100%; display: flex; flex-direction: column; gap: 6px; font-size: 13px">
+<div style="display: flex; justify-content: space-between; gap: 24px; "><span style="color: #6B675F">Items subtotal (240 pieces)</span><span class="num">$5,024.00</span></div><div style="display: flex; justify-content: space-between; gap: 24px; "><span style="color: #6B675F">Charges (screen setup, 3 screens)</span><span class="num">$156.00</span></div><div style="display: flex; justify-content: space-between; gap: 24px; "><span style="color: #6B675F">Discounts</span><span class="num">&minus;$0.00</span></div><div style="display: flex; justify-content: space-between; gap: 24px; font-weight: 600; font-size: 15px; padding-top: 8px; border-top: 1px solid #E7E5E0"><span style="color: #1C1B19">Total</span><span class="num">$5,180.00</span></div>
+</div></div>
+</section>
+<div style="display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end"><button type="button" class="btn">Cancel</button><button type="button" class="btn">Save draft order</button><button type="button" class="btn primary">Create order &amp; draft quote v1</button></div>
+</form>
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1500}}'>class Component extends DCLogic { renderVals() { return {}; } }</script>
+</body>
+</html>

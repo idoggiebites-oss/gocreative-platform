@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Order workspace 2026-0142</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#F6F5F2}
+a{color:#2340A8}a:hover{color:#1A3184}
+.chip{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px;border-radius:999px;font-size:12px;font-weight:500;white-space:nowrap}
+.chip::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.amber{background:#FBF1DE;color:#8A5300}.blue{background:#E8EEFB;color:#1E46A8}.green{background:#E4F3E9;color:#1B6E3E}.red{background:#FCEAE8;color:#A8261B}.gray{background:#EFEDE8;color:#55524B}
+.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl th{text-align:left;font-weight:500;font-size:12px;color:#6B675F;padding:0 12px;height:34px;border-bottom:1px solid #E7E5E0;white-space:nowrap}
+.tbl td{padding:0 12px;height:44px;border-bottom:1px solid #F0EEE9;white-space:nowrap}
+.tbl tr:last-child td{border-bottom:0}
+.tbl tbody tr:hover td{background:#FAF9F7}
+.tbl.tall td{height:auto;padding:12px;white-space:normal;vertical-align:top}
+.r{text-align:right !important}
+.num{font-variant-numeric:tabular-nums}
+.card{background:#FFFFFF;border:1px solid #E7E5E0;border-radius:10px;box-shadow:0 1px 2px rgba(28,27,25,.04)}
+.kpi{display:flex;flex-direction:column;gap:4px;padding:14px 16px;border-right:1px solid #EFEDE8}
+.kpi:last-child{border-right:0}
+.track{display:flex;flex-direction:column;gap:6px;padding:12px 14px;border-right:1px solid #EFEDE8;min-width:0}
+.track:last-child{border-right:0}
+.tl{font-size:11.5px;font-weight:500;color:#6B675F;text-transform:uppercase;letter-spacing:.04em}
+.sub{font-size:12px;color:#6B675F}
+.tabs{display:flex;gap:2px;border-bottom:1px solid #E7E5E0;padding:0 8px;overflow-x:auto}
+.tabs button{height:40px;padding:0 10px;border:0;background:none;font:500 13px Inter,system-ui,sans-serif;color:#6B675F;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap}
+.tabs button.on{color:#1C1B19;border-bottom-color:#2340A8}
+.sizes{display:grid;grid-template-columns:repeat(8,minmax(34px,auto));gap:2px;font-size:12px}
+.sizes span{display:flex;flex-direction:column;align-items:center;padding:3px 4px;border-radius:5px;background:#F6F5F2;font-variant-numeric:tabular-nums}
+.sizes b{font-size:10.5px;font-weight:500;color:#6B675F}
+.btn{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:7px;font:500 13px Inter,system-ui,sans-serif;border:1px solid #E1DED8;background:#FFFFFF;color:#1C1B19;cursor:pointer;transition:transform 160ms cubic-bezier(.23,1,.32,1);white-space:nowrap}
+.btn:active{transform:scale(.97)}
+.btn.primary{background:#2340A8;border-color:#2340A8;color:#FFFFFF}
+.btn.sm{height:28px;padding:0 10px;font-size:12.5px}
+.btn.link{border:0;background:none;color:#2340A8;padding:0 4px}
+.btn[disabled]{background:#F6F5F2;color:#6B675F;cursor:not-allowed}
+.btn[disabled]:active{transform:none}
+.in{height:34px;border:1px solid #E1DED8;border-radius:7px;padding:0 10px;font:13px Inter,system-ui,sans-serif;background:#FFFFFF;color:#1C1B19;box-sizing:border-box;min-width:0}
+textarea.in{height:auto;padding:8px}
+.lbl{font-size:12px;color:#6B675F}
+.fld{display:flex;flex-direction:column;gap:4px;min-width:0}
+.seg{display:inline-flex;border:1px solid #E1DED8;border-radius:7px;overflow:hidden;background:#FFFFFF}
+.seg button{height:32px;padding:0 14px;border:0;border-right:1px solid #E1DED8;background:#FFFFFF;font:500 13px Inter,system-ui,sans-serif;color:#4A4741;cursor:pointer}
+.seg button:last-child{border-right:0}
+.seg button.on{background:#E8EEFB;color:#1E46A8}
+.bar{height:8px;border-radius:999px;background:#EFEDE8;overflow:hidden}
+.bar i{display:block;height:100%;background:#2340A8;border-radius:999px}
+.grip{display:inline-flex;align-items:center;justify-content:center;width:24px;height:28px;border:0;background:none;padding:0;color:#6B675F;cursor:grab}
+.thumb{width:84px;height:84px;border-radius:8px;background:#EFEDE8;border:1px solid #E1DED8;display:flex;align-items:center;justify-content:center;color:#6B675F;font-size:11px;flex:none}
+.sec{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:14px 16px 10px}
+.sec h2{margin:0;font-size:14px;font-weight:600}
+.ds{margin:0;display:grid;grid-template-columns:auto 1fr;gap:8px 16px;font-size:13px}
+.ds dt{color:#6B675F}.ds dd{margin:0;text-align:right}
+.ckrow{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;padding:11px 16px;border-bottom:1px solid #F0EEE9;font-size:13px}
+.ckrow:last-child{border-bottom:0}
+.ckrow .nm{width:170px;font-weight:500;flex:none}
+.ckrow .why{flex:1 1 240px;color:#4A4741;min-width:0}
+.ckrow .ch{width:112px;flex:none}
+</style>
+</helmet>
+<div style="display: flex; flex-wrap: wrap; min-height: 100vh; font-family: Inter, system-ui, sans-serif; color: #1C1B19; background: #F6F5F2">
+<dc-import name="Sidebar" active="orders" hint-size="232px,900px"></dc-import>
+<main style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
+<header style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 32px; border-bottom: 1px solid #E7E5E0; background: #FBFAF8">
+<nav aria-label="Breadcrumb" style="font-size: 13px; color: #6B675F"><a href="#" style="color: #6B675F; text-decoration: none">Orders</a> <span aria-hidden="true">/</span> <span class="num" style="color: #1C1B19; font-weight: 500">2026-0142</span></nav>
+<div style="flex-grow: 1"></div>
+<button class="btn">Print work order</button><button class="btn">Send update</button>
+</header>
+<div style="width: 100%; max-width: 1280px; box-sizing: border-box; padding: 20px 32px 40px; display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px"><h1 style="margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.015em">Fall spirit wear</h1><span class="chip gray">Email</span></div>
+<span style="font-size: 13px; color: #6B675F"><a href="#" style="text-decoration: none">Riverbend Unified SD</a> &middot; 240 items &middot; due <b class="num" style="color: #1C1B19; font-weight: 500">Wed, Nov 4</b> &middot; assigned to Owner 2</span></div>
+<div style="display: flex; flex-direction: column; align-items: flex-end; gap: 2px"><span class="sub">Quote v2 total</span><span class="num" style="font-size: 20px; font-weight: 600; letter-spacing: -0.015em">$5,180.00</span></div>
+</div>
+<section class="card" aria-label="Status tracks" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr))">
+<div class="track"><span class="tl">Production</span><span><span class="chip amber">Not ready</span></span><span class="sub">2 of 5 readiness items still open</span></div>
+<div class="track"><span class="tl">Fulfilment</span><span><span class="chip gray">Not started</span></span><span class="sub">Pickup after production is complete</span></div>
+<div class="track"><span class="tl">Payment</span><span><span class="chip gray">Not invoiced</span></span><span class="sub">$0.00 of $5,180.00 &middot; due after pickup</span></div>
+</section>
+<section class="card" aria-labelledby="rdy">
+<div class="sec" style="border-bottom: 1px solid #F0EEE9; padding-bottom: 12px"><h2 id="rdy">Readiness checklist</h2><span class="sub">3 of 5 complete &middot; production unlocks when all are complete or not required</span></div>
+<div class="ckrow"><span class="nm">Quote accepted</span><span class="ch"><span class="chip green">Complete</span></span><span class="why">v2 accepted Oct 24 by Dana Ortiz</span><span style="display: flex; gap: 6px"></span></div>
+<div class="ckrow"><span class="nm">Artwork approved</span><span class="ch"><span class="chip green">Complete</span></span><span class="why">Design A v3 and Design B v1 approved Oct 27</span><span style="display: flex; gap: 6px"></span></div>
+<div class="ckrow"><span class="nm">PO or authorization</span><span class="ch"><span class="chip amber">Pending</span></span><span class="why">PO RB-24-0918 under review for 6 days; board meets Tuesday</span><span style="display: flex; gap: 6px"><button class='btn sm'>View PO</button><button class="btn sm">Record authorization</button></span></div>
+<div class="ckrow"><span class="nm">Materials received</span><span class="ch"><span class="chip amber">Pending</span></span><span class="why">JDS: tees received in full, hoodies 40 of 64 received, 24 expected Nov 2</span><span style="display: flex; gap: 6px"><button class='btn sm'>Mark no purchasing needed</button><button class="btn sm">Record receipt</button></span></div>
+<div class="ckrow"><span class="nm">Production prep</span><span class="ch"><span class="chip gray">Not required</span></span><span class="why">Screens from the previous Riverbend run are reusable</span><span style="display: flex; gap: 6px"></span></div>
+</section>
+<div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start">
+<div style="flex: 999 1 600px; min-width: 0; display: flex; flex-direction: column; gap: 16px">
+<section class="card" style="min-width: 0">
+<div class="tabs" role="tablist" aria-label="Order sections"><button role="tab" aria-selected="true" class="on">Items &amp; quote</button><button role="tab" aria-selected="false">Artwork &middot; 2</button><button role="tab" aria-selected="false">Purchasing</button><button role="tab" aria-selected="false">Production</button><button role="tab" aria-selected="false">Pickup</button><button role="tab" aria-selected="false">Payments</button><button role="tab" aria-selected="false">Activity</button></div>
+<div style="overflow-x: auto"><table class="tbl tall"><thead><tr><th>Product</th><th>Sizes</th><th class="r">Qty</th><th class="r">Unit</th><th class="r">Total</th></tr></thead><tbody><tr><td><div style="display: flex; flex-direction: column; gap: 3px; min-width: 190px"><span style="font-weight: 500">Heavy cotton tee &middot; Sport Grey</span><span class="sub">Screen print &middot; 2 colours front</span></div></td><td><div class="sizes"><span><b>YS</b>12</span><span><b>YM</b>24</span><span><b>YL</b>30</span><span><b>S</b>20</span><span><b>M</b>36</span><span><b>L</b>30</span><span><b>XL</b>18</span><span><b>2XL</b>6</span></div></td><td class="num r">176</td><td class="num r">$14.00</td><td class="num r" style="font-weight: 500">$2,464.00</td></tr><tr><td><div style="display: flex; flex-direction: column; gap: 3px; min-width: 190px"><span style="font-weight: 500">Pullover hoodie &middot; Navy</span><span class="sub">Screen print &middot; 1 colour front</span></div></td><td><div class="sizes"><span><b>S</b>8</span><span><b>M</b>18</span><span><b>L</b>20</span><span><b>XL</b>12</span><span><b>2XL</b>6</span></div></td><td class="num r">64</td><td class="num r">$40.00</td><td class="num r" style="font-weight: 500">$2,560.00</td></tr><tr><td><div style="display: flex; flex-direction: column; gap: 3px"><span style="font-weight: 500">Screen setup</span><span class="sub">Charge &middot; 3 screens</span></div></td><td></td><td class="num r">3</td><td class="num r">$52.00</td><td class="num r" style="font-weight: 500">$156.00</td></tr><tr><td colspan="4" class="r" style="color: #6B675F">Quote v2 total</td><td class="num r" style="font-weight: 600">$5,180.00</td></tr></tbody></table></div>
+<div style="padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; border-top: 1px solid #E7E5E0">
+<div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px"><h3 style="margin: 0; font-size: 13px; font-weight: 600">Quote versions</h3><span style="display: flex; gap: 8px"><button class="btn sm">Duplicate</button><button class="btn sm primary">New version</button></span></div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 0; border-top: 1px solid #F0EEE9"><b class="num" style="width: 28px">v2</b><span class="chip green">Accepted</span><span class="sub" style="flex: 1 1 200px">$5,180.00 &middot; sent Oct 23 &middot; accepted Oct 24 by Dana Ortiz</span><span class='sub' style='display: inline-flex; align-items: center; gap: 4px'><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>Locked</span><button class='btn sm'>View</button></div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 0; border-top: 1px solid #F0EEE9"><b class="num" style="width: 28px">v1</b><span class="chip gray">Superseded</span><span class="sub" style="flex: 1 1 200px">$4,920.00 &middot; sent Oct 21 &middot; replaced after the hoodie count changed</span><button class='btn sm'>View</button></div>
+<div style="display: flex; gap: 8px; align-items: flex-start; margin-top: 8px; padding: 8px 10px; border-radius: 7px; background: #E8EEFB; color: #1E46A8; font-size: 12.5px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4M12 8h.01"></path></svg><span>Editing customer-facing items after acceptance requires a new version. Internal notes and production details can still be edited.</span></div>
+</div>
+</section>
+<section class="card" aria-labelledby="pv" style="flex: 999 1 600px">
+<div class="sec"><h2 id="pv">Purchasing tab</h2><span class="sub">JDS &middot; shown here for review, one tab at a time in the real page</span></div>
+<div style="overflow-x: auto"><table class="tbl"><thead><tr><th>Purchase line</th><th class="r">Est. cost</th><th class="r">Actual cost</th><th>Ordered</th><th>Expected</th><th>Received</th><th>Status</th></tr></thead><tbody>
+<tr><td>Heavy cotton tee, Sport Grey &times; 176</td><td class="num r">$1,056.00</td><td class="num r">$1,038.40</td><td class="num">Oct 24</td><td class="num">Oct 28</td><td class="num">176 of 176</td><td><span class="chip green">Received</span></td></tr>
+<tr><td>Pullover hoodie, Navy &times; 64</td><td class="num r">$1,152.00</td><td class="num r">$1,152.00</td><td class="num">Oct 24</td><td class="num">Nov 2</td><td class="num">40 of 64</td><td><span class="chip amber">Partially received</span></td></tr>
+</tbody></table></div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 16px; border-top: 1px solid #F0EEE9; align-items: center"><button class="btn sm">Record receipt</button><button class="btn sm">Add purchase line</button><button class="btn sm">Mark no purchasing needed</button><span class="sub" style="margin-left: auto">Estimated $2,208.00 &middot; actual so far $2,190.40</span></div>
+</section>
+<section class="card" aria-labelledby="av" style="flex: 999 1 600px">
+<div class="sec"><h2 id="av">Artwork tab</h2><button class="btn sm">Upload new version</button></div>
+<div style="display: flex; flex-wrap: wrap; gap: 24px; padding: 0 16px 16px">
+<div style="display: flex; flex-direction: column; gap: 8px; flex: 1 1 280px; min-width: 0"><div style="display: flex; align-items: center; justify-content: space-between; gap: 8px"><span style="font-weight: 500; font-size: 13px">Design A &middot; Front chest crest</span><span class="chip green">v3 approved Oct 27</span></div><div style="display: flex; gap: 10px; flex-wrap: wrap"><div style="display: flex; flex-direction: column; align-items: center; gap: 4px"><div class="thumb"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="9" cy="9" r="2"></circle><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"></path></svg></div><span class="sub">v1</span></div><div style="display: flex; flex-direction: column; align-items: center; gap: 4px"><div class="thumb"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="9" cy="9" r="2"></circle><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"></path></svg></div><span class="sub">v2</span></div><div style="display: flex; flex-direction: column; align-items: center; gap: 4px"><div class="thumb"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="9" cy="9" r="2"></circle><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"></path></svg></div><span class="sub">v3</span></div></div></div>
+<div style="display: flex; flex-direction: column; gap: 8px; flex: 1 1 280px; min-width: 0"><div style="display: flex; align-items: center; justify-content: space-between; gap: 8px"><span style="font-weight: 500; font-size: 13px">Design B &middot; Hoodie sleeve</span><span class="chip green">v1 approved Oct 27</span></div><div style="display: flex; gap: 10px; flex-wrap: wrap"><div style="display: flex; flex-direction: column; align-items: center; gap: 4px"><div class="thumb"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="9" cy="9" r="2"></circle><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"></path></svg></div><span class="sub">v1</span></div></div></div>
+</div></section>
+</div>
+<div style="flex: 1 1 300px; min-width: 0; display: flex; flex-direction: column; gap: 16px">
+<section class="card" aria-labelledby="cust" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 10px"><h2 id="cust" style="margin: 0; font-size: 13px; font-weight: 600">Customer</h2><div style="display: flex; flex-direction: column; gap: 2px; font-size: 13px"><a href="#" style="text-decoration: none; font-weight: 500">Riverbend Unified SD</a><span class="sub">School district &middot; 14 past orders</span></div><div style="display: flex; flex-direction: column; gap: 2px; font-size: 13px; padding-top: 8px; border-top: 1px solid #F0EEE9"><span style="font-weight: 500">Dana Ortiz &middot; Purchasing</span><a href="#" style="text-decoration: none">d.ortiz@riverbend.example</a><span class="num" style="color: #4A4741">(555) 014-2290</span></div></section>
+<section class="card" aria-labelledby="det" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 10px"><h2 id="det" style="margin: 0; font-size: 13px; font-weight: 600">Details</h2><dl class="ds"><dt>Source</dt><dd>Email</dd><dt>Created</dt><dd class="num">Oct 21</dd><dt>Due</dt><dd class="num">Wed, Nov 4</dd><dt>PO required</dt><dd>Yes</dd><dt>Payment terms</dt><dd>Due after pickup</dd><dt>Balance</dt><dd class="num">$5,180.00</dd></dl></section>
+<section class="card" aria-labelledby="notes" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; align-items: center; justify-content: space-between"><h2 id="notes" style="margin: 0; font-size: 13px; font-weight: 600">Internal notes</h2><span class="sub">Staff only</span></div>
+<label class="fld"><span class="lbl">Add a note</span><textarea class="in" rows="2" placeholder="Visible to staff only"></textarea></label>
+<div><button class="btn sm">Add note</button></div>
+<div style="display: flex; flex-direction: column; gap: 2px; font-size: 13px"><span>Dana says the board meets Tuesday; PO should clear after that.</span><span class="sub">Owner 2 &middot; Oct 27</span></div>
+<div style="display: flex; flex-direction: column; gap: 2px; font-size: 13px"><span>Hoodies: 40 arrived from JDS, rest on the Nov 2 truck.</span><span class="sub">Owner 1 &middot; Oct 29</span></div>
+</section>
+</div>
+</div>
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1750}}'>class Component extends DCLogic { renderVals() { return {}; } }</script>
+</body>
+</html>

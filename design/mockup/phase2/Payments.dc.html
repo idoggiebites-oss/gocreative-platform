@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Payments</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#F6F5F2}
+a{color:#2340A8}a:hover{color:#1A3184}
+.chip{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px;border-radius:999px;font-size:12px;font-weight:500;white-space:nowrap}
+.chip::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.amber{background:#FBF1DE;color:#8A5300}.blue{background:#E8EEFB;color:#1E46A8}.green{background:#E4F3E9;color:#1B6E3E}.red{background:#FCEAE8;color:#A8261B}.gray{background:#EFEDE8;color:#55524B}
+.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl th{text-align:left;font-weight:500;font-size:12px;color:#6B675F;padding:0 12px;height:34px;border-bottom:1px solid #E7E5E0;white-space:nowrap}
+.tbl td{padding:0 12px;height:44px;border-bottom:1px solid #F0EEE9;white-space:nowrap}
+.tbl tr:last-child td{border-bottom:0}
+.tbl tbody tr:hover td{background:#FAF9F7}
+.tbl.tall td{height:auto;padding:12px;white-space:normal;vertical-align:top}
+.r{text-align:right !important}
+.num{font-variant-numeric:tabular-nums}
+.card{background:#FFFFFF;border:1px solid #E7E5E0;border-radius:10px;box-shadow:0 1px 2px rgba(28,27,25,.04)}
+.kpi{display:flex;flex-direction:column;gap:4px;padding:14px 16px;border-right:1px solid #EFEDE8}
+.kpi:last-child{border-right:0}
+.track{display:flex;flex-direction:column;gap:6px;padding:12px 14px;border-right:1px solid #EFEDE8;min-width:0}
+.track:last-child{border-right:0}
+.tl{font-size:11.5px;font-weight:500;color:#6B675F;text-transform:uppercase;letter-spacing:.04em}
+.sub{font-size:12px;color:#6B675F}
+.tabs{display:flex;gap:2px;border-bottom:1px solid #E7E5E0;padding:0 8px;overflow-x:auto}
+.tabs button{height:40px;padding:0 10px;border:0;background:none;font:500 13px Inter,system-ui,sans-serif;color:#6B675F;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap}
+.tabs button.on{color:#1C1B19;border-bottom-color:#2340A8}
+.sizes{display:grid;grid-template-columns:repeat(8,minmax(34px,auto));gap:2px;font-size:12px}
+.sizes span{display:flex;flex-direction:column;align-items:center;padding:3px 4px;border-radius:5px;background:#F6F5F2;font-variant-numeric:tabular-nums}
+.sizes b{font-size:10.5px;font-weight:500;color:#6B675F}
+.btn{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:7px;font:500 13px Inter,system-ui,sans-serif;border:1px solid #E1DED8;background:#FFFFFF;color:#1C1B19;cursor:pointer;transition:transform 160ms cubic-bezier(.23,1,.32,1);white-space:nowrap}
+.btn:active{transform:scale(.97)}
+.btn.primary{background:#2340A8;border-color:#2340A8;color:#FFFFFF}
+.btn.sm{height:28px;padding:0 10px;font-size:12.5px}
+.btn.link{border:0;background:none;color:#2340A8;padding:0 4px}
+.btn[disabled]{background:#F6F5F2;color:#6B675F;cursor:not-allowed}
+.btn[disabled]:active{transform:none}
+.in{height:34px;border:1px solid #E1DED8;border-radius:7px;padding:0 10px;font:13px Inter,system-ui,sans-serif;background:#FFFFFF;color:#1C1B19;box-sizing:border-box;min-width:0}
+textarea.in{height:auto;padding:8px}
+.lbl{font-size:12px;color:#6B675F}
+.fld{display:flex;flex-direction:column;gap:4px;min-width:0}
+.seg{display:inline-flex;border:1px solid #E1DED8;border-radius:7px;overflow:hidden;background:#FFFFFF}
+.seg button{height:32px;padding:0 14px;border:0;border-right:1px solid #E1DED8;background:#FFFFFF;font:500 13px Inter,system-ui,sans-serif;color:#4A4741;cursor:pointer}
+.seg button:last-child{border-right:0}
+.seg button.on{background:#E8EEFB;color:#1E46A8}
+.bar{height:8px;border-radius:999px;background:#EFEDE8;overflow:hidden}
+.bar i{display:block;height:100%;background:#2340A8;border-radius:999px}
+.grip{display:inline-flex;align-items:center;justify-content:center;width:24px;height:28px;border:0;background:none;padding:0;color:#6B675F;cursor:grab}
+.thumb{width:84px;height:84px;border-radius:8px;background:#EFEDE8;border:1px solid #E1DED8;display:flex;align-items:center;justify-content:center;color:#6B675F;font-size:11px;flex:none}
+.sec{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:14px 16px 10px}
+.sec h2{margin:0;font-size:14px;font-weight:600}
+.ds{margin:0;display:grid;grid-template-columns:auto 1fr;gap:8px 16px;font-size:13px}
+.ds dt{color:#6B675F}.ds dd{margin:0;text-align:right}
+.ckrow{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;padding:11px 16px;border-bottom:1px solid #F0EEE9;font-size:13px}
+.ckrow:last-child{border-bottom:0}
+.ckrow .nm{width:170px;font-weight:500;flex:none}
+.ckrow .why{flex:1 1 240px;color:#4A4741;min-width:0}
+.ckrow .ch{width:112px;flex:none}
+</style>
+</helmet>
+<div style="display: flex; flex-wrap: wrap; min-height: 100vh; font-family: Inter, system-ui, sans-serif; color: #1C1B19; background: #F6F5F2">
+<dc-import name="Sidebar" active="payments" hint-size="232px,900px"></dc-import>
+<main style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
+<header style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 32px; border-bottom: 1px solid #E7E5E0; background: #FBFAF8">
+<label style="flex: 1 1 280px; max-width: 480px; display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px; border: 1px solid #E1DED8; border-radius: 8px; background: #FFFFFF; color: #6B675F; font-size: 13px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg><input type="search" placeholder="Search orders, customers, PO numbers" aria-label="Search" style="flex-grow: 1; border: 0; outline: none; font: inherit; color: #1C1B19; background: transparent; min-width: 0"></label>
+<div style="flex-grow: 1"></div>
+<button class="btn">Record payment</button>
+</header>
+<div style="width: 100%; max-width: 1240px; box-sizing: border-box; padding: 20px 32px 40px; display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px"><h1 style="margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.015em">Payments</h1><span style="font-size: 13px; color: #6B675F">Friday, October 30 &middot; Central time</span></div>
+<section aria-label="Payment summary" class="card" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr))">
+<div class="kpi"><span class="sub">Outstanding</span><span class="num" style="font-size: 24px; font-weight: 600; letter-spacing: -0.02em">$9,865</span><span class="sub" style="color: #A8261B">$3,950 overdue</span></div>
+<div class="kpi"><span class="sub">Checks ready to collect</span><span class="num" style="font-size: 24px; font-weight: 600; letter-spacing: -0.02em">$3,150</span><span class="sub">1 check</span></div>
+<div class="kpi"><span class="sub">Collected, not yet deposited</span><span class="num" style="font-size: 24px; font-weight: 600; letter-spacing: -0.02em">$1,420</span><span class="sub">1 check</span></div>
+<div class="kpi"><span class="sub">Deposited, not yet cleared</span><span class="num" style="font-size: 24px; font-weight: 600; letter-spacing: -0.02em">$2,140</span><span class="sub">1 check</span></div>
+</section>
+<p style="margin: 0; font-size: 13px; color: #4A4741"><b class="num" style="font-weight: 600">$3,560.00</b> collected, not yet cleared ($1,420.00 awaiting deposit, $2,140.00 deposited). A check becomes a payment when collected; deposited and cleared are tracked separately.</p>
+<div><div class="seg" role="group" aria-label="Payments view"><button type="button" class="on" aria-pressed="true">Outstanding &middot; 5</button><button type="button" aria-pressed="false">Checks to collect &middot; 5</button></div></div>
+<section aria-labelledby="o1" class="card"><div class="sec"><h2 id="o1">Outstanding</h2><span class="sub">Orders with a balance after payments received</span></div><div style="overflow-x: auto"><table class="tbl"><thead><tr><th>Customer</th><th>Order</th><th class="r">Agreed total</th><th class="r">Received</th><th class="r">Outstanding</th><th>Terms</th><th>Due</th><th class="r">Days out</th><th>Next action</th></tr></thead><tbody><tr><td>Cedar Hollow ISD</td><td class="num" style="font-weight: 500">2026-0131</td><td class="num r">$2,310.00</td><td class="num r">$0.00</td><td class="num r" style="font-weight: 500">$2,310.00</td><td>Due after pickup</td><td class="num" style="color: #A8261B">Oct 24</td><td class="num r">6</td><td><button class="btn sm">Send reminder</button></td></tr><tr><td>Lakeview Booster Club</td><td class="num" style="font-weight: 500">2026-0138</td><td class="num r">$2,140.00</td><td class="num r">$500.00</td><td class="num r" style="font-weight: 500">$1,640.00</td><td>Deposit, balance on pickup</td><td class="num" style="color: #A8261B">Oct 28</td><td class="num r">2</td><td><button class="btn sm">Send reminder</button></td></tr><tr><td>Riverbend Unified SD</td><td class="num" style="font-weight: 500">2026-0129</td><td class="num r">$3,150.00</td><td class="num r">$0.00</td><td class="num r" style="font-weight: 500">$3,150.00</td><td>Due after pickup</td><td class="num" style="color: #1C1B19">Nov 3</td><td class="num r">12</td><td><button class="btn sm">Record check collected</button></td></tr><tr><td>Northgate Elem. PTA</td><td class="num" style="font-weight: 500">2026-0149</td><td class="num r">$1,865.00</td><td class="num r">$0.00</td><td class="num r" style="font-weight: 500">$1,865.00</td><td>Due on pickup</td><td class="num" style="color: #1C1B19">At pickup</td><td class="num r">4</td><td><span class="sub">Collect when picked up</span></td></tr><tr><td>Jordan Pierce</td><td class="num" style="font-weight: 500">2026-0143</td><td class="num r">$900.00</td><td class="num r">$0.00</td><td class="num r" style="font-weight: 500">$900.00</td><td>Due on pickup</td><td class="num" style="color: #1C1B19">At pickup</td><td class="num r">2</td><td><span class="sub">Collect when picked up</span></td></tr><tr><td colspan="4" class="r" style="color: #6B675F">Total outstanding</td><td class="num r" style="font-weight: 600">$9,865.00</td><td colspan="4"></td></tr></tbody></table></div></section>
+<section aria-labelledby="o2" class="card"><div class="sec"><h2 id="o2">Checks to collect</h2><span class="sub">Shown below for review; the real page shows one view at a time</span></div><div style="overflow-x: auto"><table class="tbl"><thead><tr><th>District</th><th>Order</th><th class="r">Expected amount</th><th>Check #</th><th>Available date</th><th>Status</th><th>Action</th></tr></thead><tbody><tr><td>Riverbend Unified SD</td><td class="num" style="font-weight: 500">2026-0129</td><td class="num r">$3,150.00</td><td class="num"><span class="sub">Not yet issued</span></td><td class="num">Nov 3</td><td><span class="chip blue">ready_for_collection</span></td><td><button class="btn sm">Record collected</button></td></tr><tr><td>Cedar Hollow ISD</td><td class="num" style="font-weight: 500">2026-0131</td><td class="num r">$2,310.00</td><td class="num"><span class="sub">Not yet issued</span></td><td class="num">Nov 10</td><td><span class="chip gray">awaiting_payment</span></td><td><span class="sub">Waiting on district</span></td></tr><tr><td>Westfield HS Band</td><td class="num" style="font-weight: 500">2026-0128</td><td class="num r">$1,420.00</td><td class="num">18834</td><td class="num">Oct 20</td><td><span class="chip amber">collected</span></td><td><button class="btn sm">Mark deposited</button></td></tr><tr><td>Riverbend Unified SD</td><td class="num" style="font-weight: 500">2026-0118</td><td class="num r">$2,140.00</td><td class="num">20917</td><td class="num">Oct 14</td><td><span class="chip blue">deposited</span></td><td><button class="btn sm">Mark cleared</button></td></tr><tr><td>Cedar Hollow ISD</td><td class="num" style="font-weight: 500">2026-0112</td><td class="num r">$1,960.00</td><td class="num">70452</td><td class="num">Oct 7</td><td><span class="chip green">cleared</span></td><td><span class="sub">Cleared Oct 15</span></td></tr></tbody></table></div></section>
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1150}}'>class Component extends DCLogic { renderVals() { return {}; } }</script>
+</body>
+</html>

@@ -115,3 +115,11 @@ His corrections and the designs that answer them (Claude):
 Authorised now: M0 only (rules, tests, concurrency design, design review). Not
 yet: the wipe, destructive migrations, deploys. Codex reviews the rules and the
 concurrency design before M1.
+
+### 2026-10-30 — Phase 2 screens approved (Arturo: "Mock ups are good")
+The six screens are Dashboard v2, Order workspace, New order, Customer,
+Production and Payments, plus a Payments item in the sidebar. Source is in
+`design/mockup/phase2/` (also at https://claude.ai/artifact/SwwVcE6jJz2CSS37Hv9wnZ,
+"Phase 2 — for review" row). M1–M5 UI is built to them. They are static drafts:
+drag-to-reorder, toggles and live totals are shown in one state and get their
+real behaviour in the build.
