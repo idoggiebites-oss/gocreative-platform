@@ -1,6 +1,6 @@
 import { PRODUCTION_STATUSES } from '../../shared/enums.ts'
 import { ORDER_STATES } from '../../shared/enums.ts'
-import { checkOrderProductionMove, checkProductionMove, checkUnitsCompleted, chooseSlot, syncAwaitingStatus } from './productionFlow.ts'
+import { checkOrderProductionMove, checkProductionMove, checkQueueReorder, checkUnitsCompleted, chooseSlot, syncAwaitingStatus } from './productionFlow.ts'
 import { readiness } from './readiness.ts'
 const gate = { ready: true, preProductionStatus: 'ready' as const }
 it('checks all production moves with a satisfied gate', () => {
@@ -66,4 +66,10 @@ it('syncs only active awaiting_* orders, to the derived status', () => {
     expect(syncAwaitingStatus(current, 'active', { preProductionStatus: 'awaiting_authorization' })).toBeNull()
   }
   for (const state of ['cancelled', 'closed'] as const) expect(syncAwaitingStatus('awaiting_authorization', state, { preProductionStatus: 'ready' })).toBeNull()
+})
+it('accepts a queue reorder only as a permutation of the list the client saw', () => {
+  expect(checkQueueReorder(['a', 'b', 'c'], ['c', 'a', 'b']).ok).toBe(true)
+  for (const next of [['a', 'b'], ['a', 'b', 'b'], ['a', 'b', 'd'], ['a', 'b', 'c', 'd']]) expect(checkQueueReorder(['a', 'b', 'c'], next).ok, next.join()).toBe(false)
+  expect(checkQueueReorder(['a', 'a'], ['a', 'a']).ok).toBe(false)
+  expect(checkQueueReorder([], []).ok).toBe(false)
 })

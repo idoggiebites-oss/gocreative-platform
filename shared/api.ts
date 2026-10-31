@@ -35,12 +35,73 @@ export type NeedsAttentionRow = {
   reasonDays?: number
   dueDate: string | null
 }
+/** An Action required row: an active, pre-production order (awaiting_* or ready), soonest due first. */
+export type ActionRow = { number: string; customerName: string; title: string; dueDate: string | null }
+export type ActionRequired = {
+  /** No accepted current quote at the order's items revision (production status awaiting_quote). */
+  quotes: (ActionRow & { quoteStatus: QuoteStatus | null })[]
+  /** Artwork required and not received, or changes requested on a current version. */
+  missingArtwork: (ActionRow & { artworkStatus: OrderArtworkStatus })[]
+  /** A PO is required and the latest one is not approved (null: none yet). */
+  pendingPos: (ActionRow & { poStatus: PoStatus | null })[]
+  /** Purchasing needed and an ordered purchase not fully received. */
+  materialsAwaiting: ActionRow[]
+  /** Pickups and check collection arrive in M5; always empty until then. */
+  awaitingPickup: never[]
+  checksToCollect: never[]
+}
 export type DashboardResponse = {
   metrics: DashboardMetrics
   needsAttention: NeedsAttentionRow[]
   dueThisWeek: { number: string; customerName: string; dueDate: string; productionStatus: ProductionStatus }[]
   recentActivity: { actor: string; action: string; entityType: string; entityId: number; orderNumber: string | null; createdAt: string }[]
+  /** Same shape and order as ProductionResponse.current (slot 1 first). */
+  currentJobs: ProductionJob[]
+  /** The first five of ProductionResponse.readyToStart. */
+  upcoming: ProductionJob[]
+  actionRequired: ActionRequired
 }
+
+// ---- production (M4) ----
+export type ProductionJob = {
+  number: string
+  customerName: string
+  title: string
+  productionStatus: ProductionStatus
+  dueDate: string | null
+  /** Send back as expectedVersion on production, units and other order writes. */
+  version: number
+  /** First product line (by entry order) and how many product lines there are. */
+  product: { first: string | null; lines: number }
+  totalQuantity: number
+  methods: Method[]
+  unitsCompleted: number
+  notesCount: number
+  latestNote: { body: string; createdAt: string } | null
+  /** Ready to start only: the manual position (null = never placed; sorts after placed orders, then by due date). */
+  queuePosition: number | null
+  /** In production only. */
+  slot: 1 | 2 | null
+  /** Slot 2 only: the owner who overrode and why. */
+  override: { by: string; reason: string } | null
+}
+export type ProductionResponse = {
+  /** In production, slot order. */
+  current: ProductionJob[]
+  /** Ready orders: queue_position (unplaced last), then due date (none last), then created. */
+  readyToStart: ProductionJob[]
+  /** Active orders in quality_control or production_complete, most recently changed first (at most 20). */
+  completed: ProductionJob[]
+}
+/** PATCH /orders/:number/units. 0 ≤ unitsCompleted ≤ the order's total product quantity; in_production or quality_control only. */
+export type UnitsRequest = { unitsCompleted: number; expectedVersion: number }
+/**
+ * POST /production/queue. `seen` is the Ready to start list as the page showed it, `orderNumbers` the full new order
+ * (the same numbers). 409 conflict_retry when the queue no longer matches `seen` (someone reordered, or an order became
+ * ready or left); nothing is written then. Reordering does not bump any order's version.
+ */
+export type QueueReorderRequest = { seen: string[]; orderNumbers: string[] }
+export type QueueReorderResponse = { readyToStart: string[] }
 
 export type OrderListRow = {
   number: string
@@ -144,7 +205,13 @@ export type OrderDetailResponse = {
   readiness: ReadinessResult
 }
 
-export type ProductionChangeRequest = { to: ProductionStatus; expectedVersion: number }
+/**
+ * The one production write (PATCH /orders/:number/production). A start (ready → in_production, or a restart from
+ * quality_control) takes slot 1; while slot 1 is busy it is 409 production_busy (runningJob names that order) unless an
+ * active owner sends override + reason for slot 2 (staff: 403 override_requires_owner; blank reason: 400
+ * override_requires_reason). With both slots taken it is 409 no_slot_available. override is ignored when slot 1 is free.
+ */
+export type ProductionChangeRequest = { to: ProductionStatus; expectedVersion: number; override?: boolean; reason?: string }
 export type ProductionChangeResponse = { number: string; productionStatus: ProductionStatus; state: OrderState; version: number }
 /** expectedVersion is the order's version; every applied PO change bumps it (the new one comes back as version). */
 export type PoChangeRequest = { to: PoStatus; expectedVersion: number }
@@ -274,9 +341,10 @@ export const API_ERROR_CODES = [
   'not_authorized', 'file_too_large', 'unsupported_file_type', 'file_type_mismatch', 'not_current_version', 'artwork_unchanged',
   'po_not_required', 'length_required', 'po_approved_locked', 'po_approved_exists',
   'supplier_exists', 'purchase_locked', 'purchase_transition_not_allowed', 'purchase_not_ordered',
+  'production_busy', 'no_slot_available', 'override_requires_owner', 'override_requires_reason', 'invalid_units_completed', 'units_not_editable',
 ] as const
 export type ApiErrorCode = (typeof API_ERROR_CODES)[number]
-export type ApiError = { error: string; code?: ApiErrorCode; reasons?: string[] }
+export type ApiError = { error: string; code?: ApiErrorCode; reasons?: string[]; /** production_busy: the order running in slot 1. */ runningJob?: string }
 
 // Codes the UI translates. Unknown codes fall back to a generic label, so the API can add one first.
 export const ACTIVITY_ACTIONS = [
@@ -286,6 +354,7 @@ export const ACTIVITY_ACTIONS = [
   'authorization_revoked', 'order_cancelled', 'order_reopened', 'artwork_uploaded', 'artwork_decided', 'po_created',
   'po_details_updated', 'po_document_added', 'po_replaced',
   'supplier_created', 'purchase_created', 'purchase_updated', 'purchase_ordered', 'purchase_cancelled', 'purchase_received', 'prep_status_changed',
+  'production_started', 'production_override', 'units_completed_changed', 'queue_reordered',
 ] as const
 export type ActivityAction = (typeof ACTIVITY_ACTIONS)[number]
 export const GATE_REASON_CODES = [

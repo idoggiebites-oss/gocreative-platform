@@ -406,10 +406,11 @@ describe('atomicity and vocabulary', () => {
     const actions = t.all<{ action: string }>('SELECT DISTINCT action FROM activity_log').map((r) => r.action)
     for (const a of actions) expect(ACTIVITY_ACTIONS as readonly string[]).toContain(a)
     // Customer and contact actions are the customers API's (covered in customers.test.ts); artwork and PO ones are
-    // covered in artwork.test.ts and purchase-orders.test.ts; purchasing and prep ones in purchasing.test.ts.
+    // covered in artwork.test.ts and purchase-orders.test.ts; purchasing and prep ones in purchasing.test.ts; production ones (below) in production.test.ts.
     const customerSide = ['customer_created', 'customer_updated', 'contact_added', 'contact_updated', 'contact_archived', 'contact_unarchived',
       'artwork_uploaded', 'artwork_decided', 'po_created', 'po_details_updated', 'po_document_added', 'po_replaced',
-      'supplier_created', 'purchase_created', 'purchase_updated', 'purchase_ordered', 'purchase_cancelled', 'purchase_received', 'prep_status_changed']
+      'supplier_created', 'purchase_created', 'purchase_updated', 'purchase_ordered', 'purchase_cancelled', 'purchase_received', 'prep_status_changed',
+      'production_started', 'production_override', 'units_completed_changed', 'queue_reordered']
     expect(ACTIVITY_ACTIONS.filter((a) => !actions.includes(a) && !customerSide.includes(a))).toEqual(['po_status_changed'])
   })
 })
@@ -546,7 +547,9 @@ describe('Codex review of cce1dc9', () => {
   test.each(['in_production', 'quality_control', 'production_complete'])('the re-derive never moves an order at %s', async (status) => {
     const t = setup()
     // Order 19 is on a direct authorization; revoking it would drop a pre-production order to awaiting_authorization.
-    t.sqlite.exec(`UPDATE orders SET production_status = '${status}' WHERE id = 19`)
+    // Slot 1 is order 3's in the seed; free it so order 19 can hold it while in_production (migration 0005).
+    t.sqlite.exec(`UPDATE orders SET production_status = 'quality_control', production_slot = NULL WHERE id = 3`)
+    t.sqlite.prepare('UPDATE orders SET production_status = ?, production_slot = ? WHERE id = 19').run(status, status === 'in_production' ? 1 : null)
     const res = await t.send('DELETE', '/orders/2026-0019/authorization', { reason: 'x', expectedVersion: t.v('2026-0019') })
     expect(res).toMatchObject({ status: 200, body: { productionStatus: status } })
     expect(t.order('2026-0019')).toMatchObject({ production_status: status, authorized_at: null })

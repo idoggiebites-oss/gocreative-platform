@@ -1,5 +1,5 @@
 import type { OrderArtworkStatus, PoStatus, ProductionStatus, QuoteStatus } from '../../shared/enums.ts'
-import type { AttentionReason, DashboardMetrics } from '../../shared/api.ts'
+import type { ActionRequired, ActionRow, AttentionReason, DashboardMetrics } from '../../shared/api.ts'
 import { businessToday } from '../../shared/businessDate.ts'
 
 export type DashOrder = {
@@ -17,6 +17,9 @@ export type DashOrder = {
   createdAt: string
   /** When the current quote was sent (its creation time if it never was). */
   quoteSentAt: string | null
+  poRequired: boolean
+  /** Purchasing needed and an ordered purchase not fully received. */
+  materialsAwaiting: boolean
 }
 export type DashInquiry = { id: number; contactName: string | null }
 export type AttentionCandidate = {
@@ -106,4 +109,24 @@ export function buildDashboard(orders: DashOrder[], readyAt: Map<number, string>
     .map((o) => ({ number: o.number, customerName: o.customerName, dueDate: o.dueDate as string, productionStatus: o.productionStatus }))
 
   return { metrics, attention: candidates.slice(0, 10), dueThisWeek }
+}
+
+/**
+ * Pure: the dashboard's Action required groups (SPEC-phase2 §12) from ACTIVE orders. Only pre-production orders
+ * (awaiting_* or ready) are listed: once a job starts these are no longer actions. An order can be in several groups.
+ * Customers awaiting pickup and checks ready for collection arrive with M5 and stay empty until then.
+ */
+export function buildActionRequired(orders: DashOrder[]): ActionRequired {
+  const pre = orders
+    .filter((o) => o.productionStatus.startsWith('awaiting_') || o.productionStatus === 'ready')
+    .sort((a, b) => (a.dueDate ?? '9999').localeCompare(b.dueDate ?? '9999') || a.number.localeCompare(b.number))
+  const row = (o: DashOrder): ActionRow => ({ number: o.number, customerName: o.customerName, title: o.title, dueDate: o.dueDate })
+  return {
+    quotes: pre.filter((o) => o.productionStatus === 'awaiting_quote').map((o) => ({ ...row(o), quoteStatus: o.quoteStatus })),
+    missingArtwork: pre.filter((o) => o.artworkStatus === 'not_received' || o.artworkStatus === 'changes_requested').map((o) => ({ ...row(o), artworkStatus: o.artworkStatus })),
+    pendingPos: pre.filter((o) => o.poRequired && o.latestPoStatus !== 'approved').map((o) => ({ ...row(o), poStatus: o.latestPoStatus })),
+    materialsAwaiting: pre.filter((o) => o.materialsAwaiting).map(row),
+    awaitingPickup: [],
+    checksToCollect: [],
+  }
 }

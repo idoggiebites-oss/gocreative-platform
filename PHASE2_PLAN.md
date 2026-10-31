@@ -142,7 +142,7 @@ and a test fails if an internal edit bumps the revision.
 
 A **slot** model, with every rule enforced by the database so no SQL path can bypass it.
 DDL: [design/sql/production-slots.sql](design/sql/production-slots.sql); statements:
-`worker/db/productionSql.ts`. Both move verbatim into migration 0004 / the M3 routes.
+`worker/db/productionSql.ts`. Both move verbatim into migration 0004 / the M3 routes. *(M4, 2026-10-31: they landed in migration 0005 as triggers, since the live orders table can't be rebuilt for CHECKs; the start and cancel live in `applyProductionChange` and `cancelOrder` in `worker/db/orders.ts`, and `productionSql.ts` is gone.)*
 
 - `orders.production_slot INTEGER NULL CHECK (production_slot IN (1, 2))`, plus
   `production_override_by INTEGER REFERENCES users(id)` and `production_override_reason TEXT`.
@@ -280,7 +280,7 @@ logic it can test, Claude for design, integration and verification).
 - [x] UI: purchasing panel, receipts, prep, **readiness checklist** at the top of the workspace. *(Sonnet)*
 
 ### M4 — Production queue (brief Step 4) → acceptance 9, 11, 12, 17 (production part)
-- [ ] Migration 0004; queue ordering; start / QC / production complete transitions; units
+- [x] *(server built 2026-10-31, awaiting Codex review; migration is 0005, so M5's payments migration becomes 0006)* Migration 0004; queue ordering; start / QC / production complete transitions; units
       completed (correctable); the §4.3 slot DDL + owner override; production history. *(Opus; Codex
       reviews concurrency specifically)*
 - [ ] UI: Production page (Ready to start / In production / Completed), dashboard current job +

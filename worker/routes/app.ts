@@ -6,6 +6,7 @@ import { orderRoutes } from './orders'
 import { orderWriteRoutes } from './orderWrites'
 import { artworkRoutes } from './artwork'
 import { purchasingRoutes } from './purchasing'
+import { productionRoutes } from './production'
 import { fileRoutes } from '../files'
 
 /** Employee API, mounted at /api/app. getKeys is injectable for tests. */
@@ -19,5 +20,6 @@ export function appRoutes(getKeys?: GetKeys) {
     .route('/', orderWriteRoutes())
     .route('/', artworkRoutes())
     .route('/', purchasingRoutes())
+    .route('/', productionRoutes())
     .route('/', fileRoutes())
 }

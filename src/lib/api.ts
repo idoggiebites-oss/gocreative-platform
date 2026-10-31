@@ -3,6 +3,7 @@ import type {
   ArtworkListResponse, UploadResponse, CustomerDetailResponse, CustomersListResponse, DashboardResponse, OrderDetailResponse, OrdersListResponse, OrderView, PoChangeResponse, ProductionChangeResponse,
   OrderWriteResponse, PrepRequest, PurchaseCreateRequest, PurchaseOrderedRequest, PurchasePatchRequest, PurchasesResponse, ReasonRequest, ReceiptCreateRequest,
   SupplierCreateRequest, SupplierResponse, SuppliersResponse,
+  ProductionChangeRequest, ProductionResponse, QueueReorderRequest, QueueReorderResponse, UnitsRequest,
 } from '@shared/api'
 import type { CustomerKind, PoStatus, ProductionStatus } from '@shared/enums'
 import type { ApiError as ApiErrorBody } from '@shared/api'
@@ -52,6 +53,7 @@ function useInvalidate(number: string) {
   const qc = useQueryClient()
   return () => Promise.all([
     qc.invalidateQueries({ queryKey: ['dashboard'] }),
+    qc.invalidateQueries({ queryKey: ['production'] }),
     qc.invalidateQueries({ queryKey: ['orders'] }),
     qc.invalidateQueries({ queryKey: ['order', number] }),
   ])
@@ -175,3 +177,27 @@ export const useRecordReceipt = (number: string) =>
   useOrderWrite(number, (base, { id, ...b }: ReceiptCreateRequest & { id: number }) => send<UploadResponse>('POST', `${base}/purchases/${id}/receipts`, b))
 export const useChangePrep = (number: string) =>
   useOrderWrite(number, (base, b: PrepRequest) => send<OrderWriteResponse>('PATCH', `${base}/prep`, b))
+
+// ---- production (M4) ----
+// Every production write sends the order version the page or queue row was loaded with (expectedVersion); a 409 comes
+// back as ApiError with body.code production_busy (body.runningJob names the running order), no_slot_available,
+// conflict_retry, gate_failed or transition_not_allowed. Dashboard, production, orders and the order are refetched after.
+export const useProduction = () => useQuery({ queryKey: ['production'], queryFn: () => call<ProductionResponse>('/production'), retry })
+
+/** Start (or restart after QC) = to 'in_production'; an owner override adds { override: true, reason }. */
+export const useStartProduction = (number: string) =>
+  useOrderWrite(number, (base, b: Omit<ProductionChangeRequest, 'to'>) => send<ProductionChangeResponse>('PATCH', `${base}/production`, { ...b, to: 'in_production' }))
+/** Every other move: to quality_control, production_complete, or back to readiness's preProductionStatus (pause). */
+export const useMoveProduction = (number: string) =>
+  useOrderWrite(number, (base, b: Pick<ProductionChangeRequest, 'to' | 'expectedVersion'>) => send<ProductionChangeResponse>('PATCH', `${base}/production`, b))
+export const useUnitsCompleted = (number: string) =>
+  useOrderWrite(number, (base, b: UnitsRequest) => send<OrderWriteResponse>('PATCH', `${base}/units`, b))
+
+/** seen = the Ready to start numbers as shown; orderNumbers = the same numbers in the new order. 409 conflict_retry when the queue moved. */
+export function useReorderQueue() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (b: QueueReorderRequest) => send<QueueReorderResponse>('POST', '/production/queue', b),
+    onSettled: () => Promise.all([qc.invalidateQueries({ queryKey: ['production'] }), qc.invalidateQueries({ queryKey: ['dashboard'] })]),
+  })
+}

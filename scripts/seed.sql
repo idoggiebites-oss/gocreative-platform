@@ -1,4 +1,4 @@
--- Deterministic, fictional dev data for the Phase 2 schema (migrations 0001 … 0004). Re-runnable: wipes
+-- Deterministic, fictional dev data for the Phase 2 schema (migrations 0001 … 0005). Re-runnable: wipes
 -- child tables first. activity_log and purchase receipts are append-only and frozen quotes can't be deleted, so those delete
 -- triggers are dropped around the wipe and recreated identically to the migrations
 -- (tests/api/seed.test.ts fails if they drift).
@@ -72,7 +72,7 @@ INSERT INTO orders (id, number, customer_id, contact_id, source, title, due_date
   artwork_required, materials_required, prep_status, items_revision, production_status, assignee_id, state, created_by) VALUES
   (1, '2026-0001', 1, 1, 'phone', 'Varsity hoodies', date('now', '-20 days'), 1, 'due_after_pickup', NULL, NULL, NULL, NULL, 1, 0, 'ready', 1, 'production_complete', 2, 'closed', 2),
   (2, '2026-0002', 1, 2, 'email', 'Front office polos', date('now', '-10 days'), 1, 'due_after_pickup', NULL, NULL, NULL, NULL, 1, 0, 'ready', 1, 'production_complete', 1, 'closed', 1),
-  (3, '2026-0003', 2, 3, 'portal', 'Marching band shirts', date('now', '-3 days'), 1, 'due_after_pickup', NULL, NULL, NULL, NULL, 1, 0, 'ready', 1, 'in_production', 2, 'active', 2),
+  (3, '2026-0003', 2, 3, 'portal', 'Marching band shirts', date('now', '-3 days'), 1, 'due_after_pickup', NULL, NULL, NULL, NULL, 1, 0, 'ready', 1, 'ready', 2, 'active', 2),
   (4, '2026-0004', 2, 4, 'email', 'Staff appreciation caps', date('now', '+2 days'), 1, 'due_after_pickup', NULL, NULL, NULL, NULL, 1, 0, 'ready', 1, 'quality_control', 1, 'active', 1),
   (5, '2026-0005', 3, 5, 'phone', 'PTA spirit wear', date('now', '+5 days'), 1, 'due_after_pickup', NULL, NULL, NULL, NULL, 1, 0, 'ready', 1, 'ready', 2, 'active', 2),
   (6, '2026-0006', 3, 6, 'portal', 'Fun run tees', date('now', '+1 days'), 1, 'due_after_pickup', NULL, NULL, NULL, NULL, 1, 0, 'ready', 1, 'production_complete', 1, 'active', 1),
@@ -95,6 +95,12 @@ INSERT INTO orders (id, number, customer_id, contact_id, source, title, due_date
   (23, '2026-0023', 8, NULL, 'email', 'Hockey bags', date('now', '+45 days'), 0, 'due_at_pickup', NULL, NULL, NULL, NULL, 1, 1, 'not_started', 1, 'awaiting_quote', 2, 'active', 2),
   (24, '2026-0024', 8, NULL, 'portal', 'Birthday hoodies', date('now', '+8 days'), 0, 'due_at_pickup', NULL, NULL, NULL, NULL, 1, 1, 'not_started', 1, 'awaiting_quote', 1, 'cancelled', 1),
   (25, '2026-0025', 6, NULL, 'phone', 'Holiday ornaments', date('now', '+21 days'), 0, 'due_at_pickup', NULL, NULL, NULL, NULL, 1, 1, 'not_started', 0, 'awaiting_quote', 1, 'active', 1);
+-- Production (0005): the marching band job runs in slot 1 with 4 of its 10 tumblers done (an in_production row must
+-- hold a slot, so it is inserted ready and started here); the ready queue is placed by hand, aprons before PTA wear.
+UPDATE orders SET production_status = 'in_production', production_slot = 1, units_completed = 4 WHERE id = 3;
+UPDATE orders SET units_completed = 50 WHERE id = 4;
+UPDATE orders SET queue_position = 1 WHERE id = 17;
+UPDATE orders SET queue_position = 2 WHERE id = 5;
 
 INSERT INTO order_items (id, order_id, kind, description, product, garment_color, method, sizes, quantity, unit_price_cents, notes) VALUES
   (1, 1, 'product', NULL, 'Polo shirt', 'Navy', 'embroidery', '{"M":20,"L":24,"XL":10}', 54, 2400, NULL),

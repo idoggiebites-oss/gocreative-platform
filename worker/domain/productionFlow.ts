@@ -48,3 +48,14 @@ export function checkUnitsCompleted(n: number, totalQuantity: number): Result {
   return Number.isSafeInteger(n) && Number.isSafeInteger(totalQuantity) && n >= 0 && totalQuantity >= n
     ? { ok: true } : { ok: false, error: 'invalid_units_completed' }
 }
+/** Units are recorded while the job runs or is in quality control (corrections found at QC); never before or after. */
+export const UNITS_EDITABLE: readonly ProductionStatus[] = ['in_production', 'quality_control']
+/**
+ * A queue reorder names every order in the Ready to start list exactly once. `seen` is the list as the client saw it
+ * (the race guard: the SQL refuses the write unless the queue is still exactly that), `next` the order it wants.
+ */
+export function checkQueueReorder(seen: string[], next: string[]): Result {
+  const unique = (a: string[]) => new Set(a).size === a.length
+  return next.length > 0 && next.length === seen.length && unique(next) && unique(seen) && next.every((n) => seen.includes(n))
+    ? { ok: true } : { ok: false, error: 'invalid_queue_order' }
+}

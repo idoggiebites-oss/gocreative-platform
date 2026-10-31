@@ -1,177 +1,160 @@
 /// <reference types="vitest/globals" />
 /// <reference types="node" />
+// The §4.3 slot rules as the database enforces them, on the real migration chain (0001–0005) and the seed: every
+// direct-SQL route around the app, the slot-2 override and its audit row, the migration's handling of existing rows,
+// and the one writer (applyProductionChange) under a race. The routes are tested in production.test.ts.
 import { readFileSync } from 'node:fs'
-import type { DatabaseSync } from 'node:sqlite'
-import { chooseSlot } from '../../worker/domain/productionFlow.ts'
+import { DatabaseSync } from 'node:sqlite'
 import { PRODUCTION_STATUSES } from '../../shared/enums.ts'
-import { CANCEL_ORDER_SQL, START_PRODUCTION_SQL } from '../../worker/db/productionSql.ts'
-import { createTestD1 } from './d1.ts'
+import { applyProductionChange } from '../../worker/db/orders.ts'
+import { applyMigration, createTestD1, migrations } from './d1.ts'
 
-// users and activity_log as in migration 0001 (columns only; their triggers are irrelevant here).
-const BASE = `
-CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL UNIQUE COLLATE NOCASE, name TEXT NOT NULL,
-  role TEXT NOT NULL CHECK (role IN ('owner','staff')), active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')));
-CREATE TABLE activity_log (id INTEGER PRIMARY KEY, actor_kind TEXT NOT NULL CHECK (actor_kind IN ('user','portal','system')),
-  actor_id INTEGER REFERENCES users (id) ON DELETE RESTRICT, entity_type TEXT NOT NULL, entity_id INTEGER NOT NULL,
-  action TEXT NOT NULL, before TEXT CHECK (before IS NULL OR json_valid(before)), after TEXT CHECK (after IS NULL OR json_valid(after)),
-  at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')));
-`
-const SLOTS = readFileSync(new URL('../../design/sql/production-slots.sql', import.meta.url), 'utf8')
-// START_PRODUCTION_SQL re-asserts the full readiness gate (GATE_OK). These stand-ins carry only the columns it reads,
-// defaulted so every order meets the gate; tests/api/gate-parity.test.ts proves GATE_OK itself on the real schema.
-const READINESS = `
-ALTER TABLE orders ADD COLUMN items_revision INTEGER NOT NULL DEFAULT 1;
-ALTER TABLE orders ADD COLUMN po_required INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE orders ADD COLUMN authorized_at TEXT DEFAULT '2026-10-01T00:00:00Z';
-ALTER TABLE orders ADD COLUMN artwork_required INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE orders ADD COLUMN materials_required INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE orders ADD COLUMN prep_status TEXT NOT NULL DEFAULT 'ready';
-CREATE TABLE quotes (id INTEGER PRIMARY KEY, order_id INTEGER, version INTEGER, status TEXT, items_revision INTEGER);
-CREATE TABLE quote_items (quote_id INTEGER, kind TEXT);
-CREATE TABLE purchase_orders (id INTEGER PRIMARY KEY, order_id INTEGER, status TEXT);
-CREATE TABLE artwork (id INTEGER PRIMARY KEY, order_id INTEGER, lineage_id INTEGER, version INTEGER, approval_status TEXT);
-CREATE TABLE order_purchases (id INTEGER PRIMARY KEY, order_id INTEGER, status TEXT, quantity INTEGER);
-CREATE TABLE purchase_receipts (purchase_id INTEGER, quantity INTEGER);
-`
-const OWNER = 1, STAFF = 2, INACTIVE_OWNER = 3
+const seed = readFileSync(new URL('../../scripts/seed.sql', import.meta.url), 'utf8')
+const OWNER = 1, STAFF = 3, INACTIVE_OWNER = 4
+// Seed: order 3 runs in slot 1; 5 and 17 are ready; 4 and 19 in quality_control; 24 cancelled; 1 closed.
 
 let t: ReturnType<typeof createTestD1>
 let db: DatabaseSync
 beforeEach(() => {
-  t = createTestD1(BASE + SLOTS + READINESS)
+  t = createTestD1()
   db = t.sqlite
-  db.exec(`INSERT INTO users (id, email, name, role, active) VALUES (1, 'o@x', 'Owner', 'owner', 1), (2, 's@x', 'Staff', 'staff', 1), (3, 'i@x', 'Old', 'owner', 0);
-    INSERT INTO orders (id, production_status) VALUES (1, 'ready'), (2, 'ready'), (3, 'ready'), (4, 'awaiting_artwork');
-    INSERT INTO quotes (id, order_id, version, status, items_revision) SELECT id, id, 1, 'accepted', 1 FROM orders;
-    INSERT INTO quote_items (quote_id, kind) SELECT id, 'product' FROM quotes;`)
+  db.exec(seed)
+  db.exec(`INSERT INTO users (id, email, name, role, active) VALUES (3, 'staff@example.com', 'Staff', 'staff', 1), (4, 'old@example.com', 'Old', 'owner', 0)`)
 })
 afterEach(() => db.close())
 
 const row = (id: number) => db.prepare('SELECT state, production_status, production_slot, production_override_by, production_override_reason FROM orders WHERE id = ?').get(id)
-const activity = () => db.prepare('SELECT actor_id, entity_id, action, after FROM activity_log ORDER BY id').all()
-// The intended start: guarded UPDATE + activity insert conditional on it, in one D1 batch.
-const start = (orderId: number, slot: 1 | 2, actor = STAFF, overrideBy: number | null = null, reason: string | null = null) => t.db.batch([
-  t.db.prepare(START_PRODUCTION_SQL[0]).bind(slot, overrideBy, reason, orderId),
-  t.db.prepare(START_PRODUCTION_SQL[1]).bind(actor, orderId),
-])
-const cancel = (orderId: number) => t.db.prepare(CANCEL_ORDER_SQL).bind(orderId).run()
-// Direct writes that skip the domain and the start statement entirely.
-const forceSlot2 = (orderId: number, by: number | null, reason: string | null) => db.prepare(
-  "UPDATE orders SET production_status = 'in_production', production_slot = 2, production_override_by = ?, production_override_reason = ? WHERE id = ?").run(by, reason, orderId)
+const activityCount = () => (db.prepare('SELECT COUNT(*) AS n FROM activity_log').get() as { n: number }).n
+const overrides = () => db.prepare(`SELECT actor_id, entity_id, after FROM activity_log WHERE action = 'production_override' ORDER BY id`).all()
+const exec = (sql: string, ...p: (string | number | null)[]) => () => db.prepare(sql).run(...p)
+// A direct write into slot 2 that skips the domain and the writer entirely.
+const forceSlot2 = (orderId: number, by: number | null, reason: string | null) =>
+  exec(`UPDATE orders SET production_status = 'in_production', production_slot = 2, production_override_by = ?, production_override_reason = ? WHERE id = ?`, by, reason, orderId)()
+const version = (id: number) => (db.prepare('SELECT version FROM orders WHERE id = ?').get(id) as { version: number }).version
+const start = (orderId: number, slot: 1 | 2, overrideBy: number | null = null, reason: string | null = null) =>
+  applyProductionChange(t.db, { orderId, actorId: overrideBy ?? OWNER, from: 'ready', to: 'in_production', expectedVersion: version(orderId), slot: { slot, overrideBy, reason } })
 
-it('combines domain slot selection with the database cap and releases slots at QC', async () => {
-  const first = chooseSlot({ occupied: [], override: false, role: 'staff' })
-  if (!first.ok) throw new Error('Expected first slot')
-  await start(1, first.slot)
-  await expect(start(2, 1)).rejects.toThrow(/UNIQUE constraint failed/)
-  expect(chooseSlot({ occupied: [1], override: true, role: 'staff', reason: 'rush' }).ok).toBe(false)
-  const second = chooseSlot({ occupied: [1], override: true, role: 'owner', reason: 'rush' })
-  if (!second.ok) throw new Error('Expected override slot')
-  await start(2, second.slot, OWNER, OWNER, 'rush')
-  await expect(start(3, 2, OWNER, OWNER, 'rush')).rejects.toThrow(/UNIQUE constraint failed/)
-  expect(chooseSlot({ occupied: [1, 2], override: true, role: 'owner', reason: 'rush' }).ok).toBe(false)
-  db.exec("UPDATE orders SET production_status='quality_control', production_slot=NULL WHERE id=1")
-  const next = chooseSlot({ occupied: [2], override: false, role: 'staff' })
-  if (!next.ok) throw new Error('Expected released slot')
-  await start(3, next.slot)
-  expect(row(2)).toMatchObject({ production_slot: 2 })
+describe('slot exactly while in_production, only on active orders', () => {
+  it('refuses a slot without in_production, in_production without a slot, and a slot outside 1–2', () => {
+    expect(exec(`UPDATE orders SET production_slot = 2 WHERE id = 5`)).toThrow(/production_slot_invalid|production_override_invalid/)
+    expect(exec(`UPDATE orders SET production_slot = NULL WHERE id = 3`)).toThrow(/production_slot_invalid/)
+    expect(exec(`UPDATE orders SET production_status = 'quality_control' WHERE id = 3`)).toThrow(/production_slot_invalid/)
+    expect(exec(`UPDATE orders SET production_status = 'in_production' WHERE id = 5`)).toThrow(/production_slot_invalid/)
+    expect(exec(`UPDATE orders SET production_slot = 3 WHERE id = 3`)).toThrow(/CHECK constraint failed/)
+    expect(exec(`INSERT INTO orders (number, customer_id, source, title, production_status) VALUES ('2026-0900', 1, 'phone', 'x', 'in_production')`)).toThrow(/production_slot_invalid/)
+    expect(exec(`INSERT INTO orders (number, customer_id, source, title, production_status, production_slot) VALUES ('2026-0901', 1, 'phone', 'x', 'ready', 2)`)).toThrow(/production_slot_invalid|production_override_invalid/)
+    expect(row(3)).toMatchObject({ production_status: 'in_production', production_slot: 1 })
+  })
+
+  it('a cancelled or closed order cannot hold a slot, by any column or rowid alias', () => {
+    for (const sql of [`UPDATE orders SET state = 'cancelled' WHERE id = 3`, `UPDATE orders SET state = 'closed' WHERE rowid = 3`,
+      `UPDATE orders SET oid = oid, state = 'cancelled' WHERE id = 3`, `UPDATE orders SET _rowid_ = 3, state = 'cancelled' WHERE _rowid_ = 3`]) {
+      expect(exec(sql), sql).toThrow(/production_slot_invalid/)
+    }
+    // Starting a cancelled order by hand: refused even with slot 1 free.
+    db.exec(`UPDATE orders SET production_status = 'quality_control', production_slot = NULL WHERE id = 3`)
+    expect(exec(`UPDATE orders SET production_status = 'in_production', production_slot = 1 WHERE id = 24`)).toThrow(/production_slot_invalid/)
+    expect(row(24)).toMatchObject({ state: 'cancelled', production_slot: null })
+  })
+
+  it('at most one job per slot: a second slot-1 job hits one_job_per_slot', () => {
+    expect(exec(`UPDATE orders SET production_status = 'in_production', production_slot = 1 WHERE id = 5`)).toThrow(/UNIQUE constraint failed: orders\.production_slot/)
+  })
+
+  it('every status is reachable with the right slot (the CHECK vocabulary is complete)', () => {
+    db.exec(`UPDATE orders SET production_status = 'quality_control', production_slot = NULL WHERE id = 3`)
+    for (const status of PRODUCTION_STATUSES) db.prepare('UPDATE orders SET production_status = ?, production_slot = ? WHERE id = 5').run(status, status === 'in_production' ? 1 : null)
+    expect(exec(`UPDATE orders SET production_status = 'completed' WHERE id = 5`)).toThrow(/CHECK constraint failed/)
+  })
 })
 
-it('enforces status/slot checks and the complete NEXT vocabulary', () => {
-  expect(() => db.exec("UPDATE orders SET production_status='in_production', production_slot=3 WHERE id=1")).toThrow(/CHECK constraint failed/)
-  expect(() => db.exec("UPDATE orders SET production_status='in_production' WHERE id=1")).toThrow(/CHECK constraint failed/)
-  expect(() => db.exec('UPDATE orders SET production_slot=1 WHERE id=1')).toThrow(/CHECK constraint failed/)
-  expect(() => db.exec("UPDATE orders SET production_status='completed' WHERE id=1")).toThrow(/CHECK constraint failed/)
-  for (const status of PRODUCTION_STATUSES) {
-    db.prepare('UPDATE orders SET production_status=?, production_slot=? WHERE id=1').run(status, status === 'in_production' ? 1 : null)
+describe('slot 2: the owner override', () => {
+  it('blocks every direct-SQL route into slot 2 that is not a valid owner override', () => {
+    expect(() => forceSlot2(5, STAFF, 'rush')).toThrow(/production_override_invalid/)
+    expect(() => forceSlot2(5, INACTIVE_OWNER, 'rush')).toThrow(/production_override_invalid/)
+    expect(() => forceSlot2(5, 99, 'rush')).toThrow(/production_override_invalid|FOREIGN KEY/)
+    for (const reason of [null, '', '   ']) expect(() => forceSlot2(5, OWNER, reason)).toThrow(/production_override_invalid/)
+    expect(() => forceSlot2(5, null, 'rush')).toThrow(/production_override_invalid/)
+    // The slot-1 job can't move itself into slot 2: that leaves slot 1 empty.
+    expect(exec(`UPDATE orders SET production_slot = 2, production_override_by = 1, production_override_reason = 'rush' WHERE id = 3`)).toThrow(/production_override_invalid/)
+    // Override columns can't decorate a job that isn't in slot 2, nor a waiting one.
+    expect(exec(`UPDATE orders SET production_override_by = 1, production_override_reason = 'x' WHERE id = 3`)).toThrow(/production_slot_invalid/)
+    expect(exec(`UPDATE orders SET production_override_reason = 'x' WHERE id = 5`)).toThrow(/production_slot_invalid/)
+    // Slot 1 empty: no override is possible, even for an active owner, by UPDATE or INSERT.
+    db.exec(`UPDATE orders SET production_status = 'quality_control', production_slot = NULL WHERE id = 3`)
+    expect(() => forceSlot2(5, OWNER, 'rush')).toThrow(/production_override_invalid/)
+    expect(exec(`INSERT INTO orders (number, customer_id, source, title, production_status, production_slot, production_override_by, production_override_reason)
+      VALUES ('2026-0902', 1, 'phone', 'x', 'in_production', 2, 1, 'rush')`)).toThrow(/production_override_invalid/)
+    expect(row(5)).toMatchObject({ production_status: 'ready', production_slot: null })
+    expect(overrides()).toEqual([])
+  })
+
+  it('a valid override takes slot 2 with exactly one audit row; who and why are fixed; it never moves into slot 1', () => {
+    forceSlot2(5, OWNER, 'district rush')
+    expect(row(5)).toMatchObject({ production_slot: 2, production_override_by: OWNER, production_override_reason: 'district rush' })
+    expect(overrides()).toEqual([{ actor_id: OWNER, entity_id: 5, after: '{"reason":"district rush","running_order_id":3}' }])
+    expect(exec(`UPDATE orders SET production_override_reason = 'edited' WHERE id = 5`)).toThrow(/production_override_immutable/)
+    expect(exec(`UPDATE orders SET production_override_by = 2 WHERE id = 5`)).toThrow(/production_override_immutable/)
+    // Slot 1 frees up; the slot-2 job stays where it is.
+    db.exec(`UPDATE orders SET production_status = 'quality_control', production_slot = NULL WHERE id = 3`)
+    expect(exec(`UPDATE orders SET production_slot = 1, production_override_by = NULL, production_override_reason = NULL WHERE id = 5`)).toThrow(/production_slot_invalid/)
+    expect(row(5)).toMatchObject({ production_slot: 2 })
+    // Leaving production clears the override with the slot.
+    db.exec(`UPDATE orders SET production_status = 'quality_control', production_slot = NULL, production_override_by = NULL, production_override_reason = NULL WHERE id = 5`)
+    expect(row(5)).toMatchObject({ production_slot: null, production_override_by: null, production_override_reason: null })
+    expect(overrides()).toHaveLength(1)
+  })
+})
+
+describe('the writer under a race', () => {
+  it('two starts that both read slot 1 free: one wins, the other rolls back whole and logs nothing', async () => {
+    db.exec(`UPDATE orders SET production_status = 'quality_control', production_slot = NULL WHERE id = 3`)
+    const before = activityCount()
+    expect(await start(5, 1)).toBe(true)
+    await expect(start(17, 1)).rejects.toThrow(/UNIQUE constraint failed: orders\.production_slot/)
+    expect(row(17)).toMatchObject({ production_status: 'ready', production_slot: null })
+    expect(activityCount()).toBe(before + 1)
+  })
+  it('an override that lost its slot-1 job meanwhile is refused by the trigger', async () => {
+    db.exec(`UPDATE orders SET production_status = 'quality_control', production_slot = NULL WHERE id = 3`)
+    await expect(start(5, 2, OWNER, 'rush')).rejects.toThrow(/production_override_invalid/)
+    expect(row(5)).toMatchObject({ production_status: 'ready', production_slot: null })
+    expect(overrides()).toEqual([])
+  })
+  it('a third job is refused even for an owner', async () => {
+    expect(await start(5, 2, OWNER, 'rush')).toBe(true)
+    await expect(start(17, 2, OWNER, 'another')).rejects.toThrow(/UNIQUE constraint failed: orders\.production_slot/)
+    expect(overrides()).toHaveLength(1)
+  })
+})
+
+describe('migration 0005 on existing rows', () => {
+  const upTo4 = () => {
+    const sqlite = new DatabaseSync(':memory:')
+    const all = migrations()
+    for (const sql of all.slice(0, 4)) applyMigration(sqlite, sql)
+    sqlite.exec(`INSERT INTO users (id, email, name, role) VALUES (1, 'o@x', 'O', 'owner');
+      INSERT INTO customers (id, kind, name) VALUES (1, 'individual', 'C');`)
+    const order = (id: number, status: string, state = 'active') => sqlite.prepare(
+      `INSERT INTO orders (id, number, customer_id, source, title, production_status, state) VALUES (?, ?, 1, 'phone', 't', ?, ?)`).run(id, `2026-${String(id).padStart(4, '0')}`, status, state)
+    return { sqlite, order, m5: () => applyMigration(sqlite, all[4]!) }
   }
-})
-
-it('rejects the second transactional start after both callers read a free slot', async () => {
-  // Both requests read "slot 1 free" before either writes; D1 serializes the batches.
-  await start(1, 1)
-  await expect(start(2, 1)).rejects.toThrow(/UNIQUE constraint failed/)
-  expect(row(2)).toMatchObject({ production_status: 'ready', production_slot: null })
-  expect(activity()).toEqual([{ actor_id: STAFF, entity_id: 1, action: 'production_started', after: '{"slot":1}' }])
-})
-
-it('a losing start of the same order changes nothing and logs nothing; only ready, active orders start', async () => {
-  await start(1, 1)
-  const [update, log] = await start(1, 1)
-  expect([update.meta.changes, log.meta.changes]).toEqual([0, 0])
-  expect(row(1)).toMatchObject({ production_status: 'in_production', production_slot: 1 })
-  const [notReady] = await start(4, 1)
-  expect(notReady.meta.changes).toBe(0)
-  expect(row(4)).toMatchObject({ production_status: 'awaiting_artwork', production_slot: null })
-  db.exec("UPDATE orders SET state='cancelled' WHERE id=3")
-  db.exec("UPDATE orders SET production_status='quality_control', production_slot=NULL WHERE id=1")
-  const [cancelled] = await start(3, 1)
-  expect(cancelled.meta.changes).toBe(0)
-  expect(activity()).toHaveLength(1)
-})
-
-it('blocks every direct-SQL route into slot 2 that is not a valid owner override', async () => {
-  // Slot 1 empty: no override is possible, even for an active owner.
-  expect(() => forceSlot2(1, OWNER, 'rush')).toThrow(/production_override_invalid/)
-  expect(() => db.prepare("INSERT INTO orders (id, production_status, production_slot, production_override_by, production_override_reason) VALUES (9, 'in_production', 2, 1, 'rush')").run())
-    .toThrow(/production_override_invalid/)
-  await start(1, 1)
-  expect(() => forceSlot2(2, STAFF, 'rush')).toThrow(/production_override_invalid/)
-  expect(() => forceSlot2(2, INACTIVE_OWNER, 'rush')).toThrow(/production_override_invalid/)
-  expect(() => forceSlot2(2, 99, 'rush')).toThrow(/production_override_invalid|FOREIGN KEY/)
-  for (const reason of [null, '', '   ']) expect(() => forceSlot2(2, OWNER, reason)).toThrow(/CHECK constraint failed/)
-  expect(() => forceSlot2(2, null, 'rush')).toThrow(/production_override_invalid|CHECK constraint failed/)
-  // Moving the slot-1 job itself into slot 2 leaves slot 1 empty: refused.
-  expect(() => db.prepare('UPDATE orders SET production_slot = 2, production_override_by = 1, production_override_reason = ? WHERE id = 1').run('rush'))
-    .toThrow(/production_override_invalid/)
-  // Override columns can't decorate a non-slot-2 row.
-  expect(() => db.exec("UPDATE orders SET production_override_by = 1, production_override_reason = 'x' WHERE id = 1")).toThrow(/CHECK constraint failed/)
-  expect(row(2)).toMatchObject({ production_status: 'ready', production_slot: null })
-  expect(activity()).toHaveLength(1)
-})
-
-it('a valid owner override takes slot 2, logs exactly one audit row, and its who/why are fixed', async () => {
-  await start(1, 1)
-  db.exec('DELETE FROM activity_log')
-  forceSlot2(2, OWNER, 'district rush')
-  expect(row(2)).toMatchObject({ production_slot: 2, production_override_by: OWNER, production_override_reason: 'district rush' })
-  expect(activity()).toEqual([{ actor_id: OWNER, entity_id: 2, action: 'production_override', after: '{"reason":"district rush","running_order_id":1}' }])
-  expect(() => db.exec("UPDATE orders SET production_override_reason = 'edited' WHERE id = 2")).toThrow(/production_override_immutable/)
-  // The start statement takes the same path: override + start rows, one of each.
-  db.exec("UPDATE orders SET production_status='quality_control', production_slot=NULL, production_override_by=NULL, production_override_reason=NULL WHERE id=2")
-  db.exec('DELETE FROM activity_log')
-  await start(3, 2, OWNER, OWNER, 'second rush')
-  expect(activity().map(a => (a as { action: string }).action).sort()).toEqual(['production_override', 'production_started'])
-})
-
-it('cancelling releases the slot of a running slot-1 or slot-2 job', async () => {
-  await start(1, 1)
-  await start(2, 2, OWNER, OWNER, 'rush')
-  expect(() => db.exec("UPDATE orders SET state='cancelled' WHERE id=1")).toThrow(/CHECK constraint failed/)
-  expect((await cancel(2)).meta.changes).toBe(1)
-  expect(row(2)).toEqual({ state: 'cancelled', production_status: 'ready', production_slot: null, production_override_by: null, production_override_reason: null })
-  expect((await cancel(1)).meta.changes).toBe(1)
-  expect(row(1)).toMatchObject({ state: 'cancelled', production_status: 'ready', production_slot: null })
-  expect((await cancel(1)).meta.changes).toBe(0)
-  expect((await cancel(4)).meta.changes).toBe(1)
-  expect(row(4)).toMatchObject({ state: 'cancelled', production_status: 'awaiting_artwork' })
-  // Both slots are free again.
-  await start(3, 1)
-})
-
-it('a stored ready whose readiness no longer holds does not start (the start re-asserts GATE_OK)', async () => {
-  // Prep went back to in progress, but nothing re-derived the status yet.
-  db.exec("UPDATE orders SET prep_status = 'in_progress' WHERE id = 1")
-  // Materials required, one purchase ordered and only partly received.
-  db.exec("UPDATE orders SET materials_required = 1 WHERE id = 2; INSERT INTO order_purchases (id, order_id, status, quantity) VALUES (1, 2, 'ordered', 10); INSERT INTO purchase_receipts VALUES (1, 4)")
-  for (const id of [1, 2]) {
-    const [update, log] = await start(id, 1)
-    expect([update.meta.changes, log.meta.changes]).toEqual([0, 0])
-    expect(row(id)).toMatchObject({ production_status: 'ready', production_slot: null })
-  }
-  expect(activity()).toEqual([])
-  db.exec('INSERT INTO purchase_receipts VALUES (1, 6)')
-  await start(2, 1)
-  expect(row(2)).toMatchObject({ production_status: 'in_production', production_slot: 1 })
+  it('gives the one running active order slot 1 and drops an inactive running order to ready', () => {
+    const { sqlite, order, m5 } = upTo4()
+    order(1, 'in_production'); order(2, 'in_production', 'cancelled'); order(3, 'quality_control')
+    m5()
+    expect(sqlite.prepare('SELECT id, production_status, production_slot, units_completed, queue_position FROM orders ORDER BY id').all()).toEqual([
+      { id: 1, production_status: 'in_production', production_slot: 1, units_completed: 0, queue_position: null },
+      { id: 2, production_status: 'ready', production_slot: null, units_completed: 0, queue_position: null },
+      { id: 3, production_status: 'quality_control', production_slot: null, units_completed: 0, queue_position: null },
+    ])
+  })
+  it('refuses to guess between two running active orders: the whole migration rolls back', () => {
+    const { sqlite, order, m5 } = upTo4()
+    order(1, 'in_production'); order(2, 'in_production')
+    expect(m5).toThrow(/CHECK constraint failed/)
+    const cols = (sqlite.prepare(`SELECT name FROM pragma_table_info('orders')`).all() as { name: string }[]).map((c) => c.name)
+    expect(cols).not.toContain('production_slot')
+    expect(sqlite.prepare(`SELECT name FROM sqlite_master WHERE name LIKE '%m0005%'`).all()).toEqual([])
+  })
 })

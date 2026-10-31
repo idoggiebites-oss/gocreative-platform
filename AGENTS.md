@@ -33,7 +33,10 @@ the files don't say, say "not in the notes".
   `checkOrderProductionMove`, which uses `readiness()` and `productionFlow`) and by the
   awaiting-status re-derive. Starts re-check the full five-item gate inside the SQL
   UPDATE, and `tests/api/gate-parity.test.ts` keeps that SQL in step with `readiness()`.
-  Never add a third path.
+  Never add a third path. (`cancelOrder` only drops a running job to the derived status
+  as part of cancelling.) A start also takes a production slot (`chooseSlot`; migration
+  0005's triggers and `one_job_per_slot` enforce one job, or two with an owner override);
+  every other move clears the slot in the same UPDATE.
 - Public routes (`/api/public/*`) must never return internal notes, employee
   data, or another customer's records. Every such route gets a boundary test.
 - Hiding something in the UI is not access control. Enforce it on the server.

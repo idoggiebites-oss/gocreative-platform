@@ -323,3 +323,47 @@ Business-rule choices made while building the M3 API. Each can be overturned.
 ## 2026-10-31 — Purchases are never deleted; quantities capped (Codex review of 6c6b7b5)
 - `order_purchases` refuses DELETE and id changes, so DELETE + INSERT can't undo a cancellation. A mistaken purchase is cancelled.
 - Purchase and receipt quantities are capped at 1,000,000 in the schema (the route's limit), keeping SQL sums within JS safe integers so the SQL gate and readiness() can't disagree.
+
+### 2026-10-31 — M4 production queue (server), Claude; for Arturo to confirm
+Business-rule choices made while building the M4 API. Each can be overturned.
+- **One job runs; an owner may run a second with a reason.** A start takes slot 1. While
+  slot 1 is busy, a start is refused with the running job's number, unless an active owner
+  overrides with a non-blank reason; that job takes slot 2. Two is the cap, override or not.
+  Staff can't override (403). The database enforces every part of this (migration 0005).
+- **The override flag is ignored when slot 1 is free.** The job simply takes slot 1 and no
+  override is recorded.
+- **A slot-2 job stays in slot 2** when the slot-1 job finishes. It is never promoted. The
+  next normal start takes slot 1, so two jobs can run again without a new override. (From
+  PHASE2_PLAN §4.3; re-stated because it is what the family will notice.)
+- **Restart after quality control** (QC → in production) goes through the same start: full
+  readiness re-checked and a free slot needed. Units completed are kept.
+- **Pausing** (in production → pre-production) lands on whatever readiness says now, e.g.
+  awaiting authorization if the PO was revoked mid-run. It frees the slot and keeps units
+  completed.
+- **Cancelling a running job** drops it to the derived pre-production status (M1 behaviour),
+  and now also clears its slot, override and queue position in the same write. This is the
+  one cancel path; the M0 `CANCEL_ORDER_SQL` (which dropped to a fixed `ready`) is deleted.
+- **Units completed** can be recorded and corrected up or down while the job is in production
+  or in quality control (QC finds miscounts), never before it starts or after production
+  complete. The cap is the order's total product quantity (sum of product lines; charges and
+  discounts don't count). Each change is an activity row.
+- **Queue order:** Ready to start is sorted by the manual position, then due date (none last),
+  then oldest first. A newly ready order has no position, so it lands after every placed
+  order until someone reorders. Starting a job clears its position; a paused order that
+  becomes ready again goes to the end.
+- **Reorder is race-safe by snapshot, not by version.** The page sends the list it saw and
+  the new order. The write applies only if the queue is still exactly what the page saw
+  (nobody reordered, nothing became ready or left), else 409 and nothing is written. One
+  activity row per reorder (not per order). Reordering bumps no order's version, so it never
+  forces someone with an order page open to reload.
+- **Dashboard Action required** lists only pre-production orders (awaiting_* or ready): quotes
+  = awaiting quote (no accepted current quote, including declined or items changed); missing
+  artwork = not received or changes requested (under review is the customer's move, so it
+  isn't listed); pending POs = PO required and latest not approved (or none); materials =
+  purchasing needed and an ordered purchase not fully received. Customers awaiting pickup and
+  checks ready for collection are typed, always-empty lists until M5.
+- **Upcoming** on the dashboard is the first five of Ready to start.
+- **Existing live rows (migration 0005):** a cancelled or closed order still marked in
+  production drops to `ready`, as cancelling does. One running active order gets slot 1. If
+  two or more active orders are running, the migration fails on purpose and changes nothing:
+  someone must decide which job is really running before it is applied.

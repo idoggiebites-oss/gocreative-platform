@@ -94,12 +94,13 @@ describe('orders list', () => {
   test('cancelled orders are excluded from in_production and ready views and counts', async () => {
     const t = setup()
     const before = (await t.json<OrdersListResponse>(await t.call('GET', '/orders'))).counts
-    t.sqlite.exec(`UPDATE orders SET state = 'cancelled' WHERE number IN ('2026-0003', '2026-0006')`) // in_production, production_complete
+    // quality_control (the in_production view), production_complete. A running order can't be cancelled without its slot (0005).
+    t.sqlite.exec(`UPDATE orders SET state = 'cancelled' WHERE number IN ('2026-0004', '2026-0006')`)
     const get = async (view: string) => t.json<OrdersListResponse>(await t.call('GET', `/orders?view=${view}&limit=200`))
     const nums = (r: OrdersListResponse) => (r.rows as { number: string }[]).map((x) => x.number)
     const ip = await get('in_production')
     const rd = await get('ready')
-    expect(nums(ip)).not.toContain('2026-0003')
+    expect(nums(ip)).not.toContain('2026-0004')
     expect(nums(rd)).not.toContain('2026-0006')
     expect(ip.counts.in_production).toBe(before.in_production - 1)
     expect(ip.counts.ready).toBe(before.ready - 1)
@@ -199,15 +200,18 @@ describe('production status change', () => {
     expect(t.prod('2026-0011').production_status).toBe('awaiting_authorization')
     expect(t.activityCount()).toBe(before)
   })
+  // The seed runs 2026-0003 in slot 1; moving it to QC (freeing the slot) lets 2026-0005 start without an override.
+  const freeSlot = (t: ReturnType<typeof setup>) => t.sqlite.exec(`UPDATE orders SET production_status = 'quality_control', production_slot = NULL WHERE number = '2026-0003'`)
   test('valid one-step move logs exactly one activity row', async () => {
     const t = setup()
+    freeSlot(t)
     const before = t.activityCount()
     const res = await patch(t, '2026-0005', 'in_production')
     expect(res.status).toBe(200)
     expect(t.prod('2026-0005').production_status).toBe('in_production')
     expect(t.activityCount()).toBe(before + 1)
     expect(t.one<{ actor_id: number; action: string; before: string; after: string }>('SELECT * FROM activity_log ORDER BY id DESC LIMIT 1')).toMatchObject({
-      actor_id: 1, action: 'production_status_changed', before: '{"production_status":"ready"}',
+      actor_id: 1, action: 'production_started', before: '{"production_status":"ready"}', after: '{"production_status":"in_production","slot":1}',
     })
   })
   test('skipping a stage is 409', async () => {
@@ -253,6 +257,7 @@ describe('production status change', () => {
   })
   test('batch atomicity: a failing activity insert rolls the status back', async () => {
     const t = setup()
+    freeSlot(t)
     t.boom()
     const res = await patch(t, '2026-0005', 'in_production')
     expect(res.status).toBe(500)
@@ -271,8 +276,9 @@ describe('production change from a stale page', () => {
     expect(t.prod('2026-0005').production_status).toBe('ready')
     expect(t.activityCount()).toBe(before)
     // The SQL guard on its own (route check bypassed): the stale version changes nothing.
+    t.sqlite.exec(`UPDATE orders SET production_status = 'quality_control', production_slot = NULL WHERE number = '2026-0003'`) // slot 1 free
     const loaded = (await dbo.loadForProductionChange(t.db, '2026-0005'))!
-    expect(await dbo.applyProductionChange(t.db, { orderId: loaded.id, actorId: 1, from: loaded.from, to: 'in_production', expectedVersion: v0 })).toBe(false)
+    expect(await dbo.applyProductionChange(t.db, { orderId: loaded.id, actorId: 1, from: loaded.from, to: 'in_production', expectedVersion: v0, slot: { slot: 1, overrideBy: null, reason: null } })).toBe(false)
     expect(t.activityCount()).toBe(before)
   })
   test('expectedVersion is required', async () => {
@@ -284,10 +290,11 @@ describe('production change from a stale page', () => {
 describe('stale production gate', () => {
   test('PO revoked between read and write: no change, no activity', async () => {
     const t = setup()
+    t.sqlite.exec(`UPDATE orders SET production_status = 'quality_control', production_slot = NULL WHERE number = '2026-0003'`) // slot 1 free
     const loaded = (await dbo.loadForProductionChange(t.db, '2026-0005'))! // ready, PO 6 approved
     t.sqlite.exec(`UPDATE purchase_orders SET status = 'rejected' WHERE id = 6`)
     const before = t.activityCount()
-    expect(await dbo.applyProductionChange(t.db, { orderId: loaded.id, actorId: 1, from: loaded.from, to: 'in_production', expectedVersion: loaded.version })).toBe(false)
+    expect(await dbo.applyProductionChange(t.db, { orderId: loaded.id, actorId: 1, from: loaded.from, to: 'in_production', expectedVersion: loaded.version, slot: { slot: 1, overrideBy: null, reason: null } })).toBe(false)
     expect(t.prod('2026-0005').production_status).toBe('ready')
     expect(t.activityCount()).toBe(before)
   })
@@ -395,7 +402,7 @@ describe('dashboard due window', () => {
   const o = (id: number, dueDate: string) => ({
     id, number: `N${id}`, customerName: 'c', title: 't', artworkStatus: 'approved' as const, productionStatus: 'ready' as const,
     dueDate, latestPoStatus: null, latestPoAmountCents: null, quoteStatus: null,
-    createdAt: '2026-10-01T00:00:00.000Z', quoteSentAt: null,
+    createdAt: '2026-10-01T00:00:00.000Z', quoteSentAt: null, poRequired: false, materialsAwaiting: false,
   })
   test('half-open [today, today+7) for dueIn7Days and dueThisWeek', () => {
     const today = '2026-10-30'

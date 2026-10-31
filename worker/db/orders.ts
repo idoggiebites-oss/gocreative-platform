@@ -103,7 +103,8 @@ const ACTIVITY_KEYS = ['production_status', 'state', 'po_status', 'po_id', 'artw
   'quote_status', 'order_number', 'repeat_of', 'authorization_method', 'fields',
   'title', 'due_date', 'contact_id', 'source', 'po_required', 'payment_terms', 'artwork_required', 'materials_required', 'assignee_id',
   'artwork_id', 'lineage_id', 'artwork_version', 'design_name', 'approval_status', 'approved_via', 'po_number', 'amount_cents',
-  'purchase_id', 'purchase_status', 'supplier_name', 'description', 'quantity', 'ordered_on', 'received_on', 'prep_status']
+  'purchase_id', 'purchase_status', 'supplier_name', 'description', 'quantity', 'ordered_on', 'received_on', 'prep_status',
+  'slot', 'units_completed', 'running_order_id']
 
 const likeEscape = (q: string) => q.replace(/[\\%_]/g, (ch) => `\\${ch}`)
 
@@ -167,8 +168,14 @@ export async function orderCounts(db: D1Database): Promise<OrderCounts> {
 
 export async function listActiveDashOrders(db: D1Database): Promise<DashOrder[]> {
   // ponytail: loads every active order and counts in JS; a small shop has hundreds. Move to SQL aggregates if it ever has thousands.
-  const { results } = await db.prepare(`WITH base AS (${BASE}) SELECT * FROM base WHERE state = 'active'`).all<BaseRow>()
+  // materials_awaiting: purchasing is needed and an ordered purchase hasn't fully arrived (receipts summed, as in MATERIALS_OK).
+  const { results } = await db.prepare(`WITH base AS (${BASE}) SELECT base.*, (SELECT o.materials_required = 1 AND EXISTS (SELECT 1 FROM order_purchases p
+      WHERE p.order_id = o.id AND p.status = 'ordered'
+      AND (SELECT COALESCE(SUM(r.quantity), 0) FROM purchase_receipts r WHERE r.purchase_id = p.id) < p.quantity) FROM orders o WHERE o.id = base.id) AS materials_awaiting
+    FROM base WHERE state = 'active'`).all<BaseRow & { materials_awaiting: 0 | 1 }>()
   return results.map((r) => ({
+    poRequired: r.po_required === 1,
+    materialsAwaiting: r.materials_awaiting === 1,
     id: r.id,
     number: r.number,
     customerName: r.customer_name,
@@ -234,6 +241,8 @@ type OrderRow = {
   authorization_method: AuthorizationMethod | null; authorization_notes: string | null; items_revision: number
   payment_terms: PaymentTerms; materials_required: 0 | 1; prep_status: PrepStatus
   production_status: ProductionStatus; assignee_id: number | null
+  production_slot: 1 | 2 | null; production_override_by: number | null; production_override_reason: string | null
+  queue_position: number | null; units_completed: number
   invoice_ref: string | null; payment_ref: string | null; state: OrderState; version: number
   created_at: string; updated_at: string
   artwork_status: OrderArtworkStatus // derived (ARTWORK_STATUS), not a column
@@ -367,22 +376,37 @@ const LOG_IF_CHANGED = `INSERT INTO activity_log (actor_kind, actor_id, entity_t
 
 /**
  * THE only writer of orders.production_status for a user-requested change (rederive() below is the
- * other). Callers must have passed checkOrderProductionMove. The readiness the move depended on is
- * re-asserted in the UPDATE itself: a start needs the full gate, a move between pre-production statuses
- * must land on the derived one. Returns false when the order moved or readiness no longer holds
- * (nothing logged, nothing changed).
+ * other). Callers must have passed checkOrderProductionMove, and for a start chosen the slot with chooseSlot.
+ * One batch: the UPDATE (guarded by the from-status and the client's version, bumping it) and its activity row.
+ * The readiness the move depended on is re-asserted in the UPDATE itself: a start (from ready, or a restart from
+ * quality_control) needs the full gate and a free slot; a move to a pre-production status must land on the derived one.
+ * A start writes the slot and, for slot 2, the owner override (the migration 0005 triggers check it and log the
+ * production_override row); every other move clears the slot and override columns in the same UPDATE, so leaving
+ * in_production frees the slot. Returns false when the order moved or readiness no longer holds (nothing logged,
+ * nothing changed). Throws when a start loses the slot race (one_job_per_slot, production_override_invalid): the route
+ * maps that to 409.
  */
-export async function applyProductionChange(db: D1Database, p: { orderId: number; actorId: number; from: ProductionStatus; to: ProductionStatus; expectedVersion: number }) {
-  const guard = p.to === 'in_production' ? ` AND ${GATE_OK}`
+export async function applyProductionChange(db: D1Database, p: {
+  orderId: number; actorId: number; from: ProductionStatus; to: ProductionStatus; expectedVersion: number
+  slot?: { slot: 1 | 2; overrideBy: number | null; reason: string | null }
+}) {
+  const start = p.to === 'in_production'
+  if (start !== (p.slot !== undefined)) throw new Error('applyProductionChange: a start needs a slot, and only a start takes one')
+  const [set, setBinds]: [string, Value[]] = p.slot
+    ? ['production_slot = ?, production_override_by = ?, production_override_reason = ?, queue_position = NULL', [p.slot.slot, p.slot.overrideBy, p.slot.reason]]
+    : ['production_slot = NULL, production_override_by = NULL, production_override_reason = NULL', []]
+  const guard = start ? ` AND production_slot IS NULL AND ${GATE_OK}`
     : (PRE_PRODUCTION_STATUSES as readonly string[]).includes(p.to) ? ` AND ${PRE_PRODUCTION} = ?` : ''
-  const binds: (string | number)[] = [p.to, p.orderId, p.from, p.expectedVersion, ...(guard.endsWith('?') ? [p.to] : [])]
+  const binds: Value[] = [p.to, ...setBinds, p.orderId, p.from, p.expectedVersion, ...(guard.endsWith('?') ? [p.to] : [])]
   const [update] = await db.batch([
     db
-      .prepare(`UPDATE orders SET production_status = ?, version = version + 1, updated_at = ${NOW} WHERE id = ? AND production_status = ? AND version = ? AND state = 'active'${guard}`)
+      .prepare(`UPDATE orders SET production_status = ?, ${set}, version = version + 1, updated_at = ${NOW}
+        WHERE id = ? AND production_status = ? AND version = ? AND state = 'active'${guard}`)
       .bind(...binds),
     db
       .prepare(LOG_IF_CHANGED)
-      .bind(p.actorId, p.orderId, 'production_status_changed', JSON.stringify({ production_status: p.from }), JSON.stringify({ production_status: p.to })),
+      .bind(p.actorId, p.orderId, start ? 'production_started' : 'production_status_changed', JSON.stringify({ production_status: p.from }),
+        JSON.stringify({ production_status: p.to, ...(p.slot ? { slot: p.slot.slot } : {}) })),
   ])
   return (update?.meta.changes ?? 0) > 0
 }
@@ -611,13 +635,15 @@ export function revokeAuthorization(db: D1Database, p: Guarded & { reason: strin
 }
 
 /**
- * CANCEL_ORDER_SQL's pattern (productionSql.ts) without the M4 slot columns: a running job drops back to the
- * pre-production status readiness derives (the re-derive's own expression), so nothing stays "in production".
+ * THE cancel (PHASE2_PLAN §4.3): a running job drops back to the pre-production status readiness derives (the
+ * re-derive's own expression), and its slot, override and queue position are cleared in the same UPDATE, so a
+ * cancelled order never holds a slot (the migration 0005 triggers refuse it) and reopening re-derives before any start.
  */
 export function cancelOrder(db: D1Database, p: Guarded & { reason: string; productionFrom: ProductionStatus; productionTo: ProductionStatus }) {
   return orderWrite(db, {
     ...p, action: 'order_cancelled',
-    set: [[`state = 'cancelled'`], [`production_status = CASE WHEN production_status = 'in_production' THEN ${PRE_PRODUCTION} ELSE production_status END`]],
+    set: [[`state = 'cancelled'`], [`production_status = CASE WHEN production_status = 'in_production' THEN ${PRE_PRODUCTION} ELSE production_status END`],
+      ['production_slot = NULL'], ['production_override_by = NULL'], ['production_override_reason = NULL'], ['queue_position = NULL']],
     before: { state: 'active', production_status: p.productionFrom }, after: { state: 'cancelled', production_status: p.productionTo, reason: p.reason },
   })
 }
