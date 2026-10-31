@@ -248,3 +248,17 @@ longer be edited, and changes go in 0003+.
   (approved ⇄ changes requested), and changes requested clears the approval fields. Approval notes are stored
   on the version and never copied into the activity log.
 - **Migration numbering:** M2a took 0003, so M3–M5's migrations become 0004–0006.
+
+### 2026-10-31 — PO corrections and replacements; streamed uploads (Claude, from Codex's M2a security review; Arturo can overturn)
+- **An approved PO is read-only.** Its number and amount can't be edited (409
+  `po_approved_locked`). A correction is a new PO.
+- **A new PO while the latest one is approved is refused** unless it is an
+  explicit replacement with a reason (`replaceApproved` + `reason`), recorded as
+  `po_replaced`. The order then needs the new PO approved before production. This
+  is conservative; if GoCreative's districts routinely issue a second PO alongside
+  an approved one, revisit it.
+- **Uploads stream into R2** with an incremental SHA-256 instead of being held in
+  memory. Content-Length is required (411 otherwise). The 50 MB cap is one constant
+  and can rise, since memory no longer scales with file size.
+- **A stored file is deleted only on a certain rollback.** On any uncertain outcome
+  it is kept: an unreferenced object is harmless, a missing referenced one is not.
