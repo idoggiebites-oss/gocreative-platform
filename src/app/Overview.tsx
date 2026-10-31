@@ -1,12 +1,15 @@
+import type { ReactNode } from 'react'
 import { Link } from 'react-router'
 import type { ActionRequired as ActionRequiredData, ActionRow, AttentionReason, DashboardMetrics, NeedsAttentionRow, ProductionJob } from '@shared/api'
 import { useI18n } from '@/i18n'
 import { useDashboard } from '@/lib/api'
+import { CheckActions } from './CheckActions'
 import { H2, SEC } from './form'
+import { PickupActions } from './PickupActions'
 import { CurrentJob } from './Production'
 import { useJobSummary } from './ProductionControls'
 import QueryBoundary from './QueryBoundary'
-import { CARD, Chip, MUTED, PAGE, Sentence, StackedRows, TD, TH, useRowLink, type Tone } from './ui'
+import { CARD, Chip, FULFILMENT_TONE, MUTED, PAGE, Sentence, StackedRows, TD, TH, useRowLink, type Tone } from './ui'
 
 const REASON_TONE: Record<AttentionReason, Tone> = {
   overdue: 'red', artwork_changes_requested: 'red', po_waiting: 'amber', new_inquiry: 'blue', ready_waiting: 'green', quote_waiting: 'amber',
@@ -162,6 +165,49 @@ function CurrentProduction({ jobs }: { jobs: ProductionJob[] }) {
   )
 }
 
+function ReadyForPickup({ rows }: { rows: ActionRequiredData['awaitingPickup'] }) {
+  const { m, fmt } = useI18n()
+  const t = m.dash.ready
+  return (
+    <section aria-labelledby="rfp" className={CARD}>
+      <div className={SEC}><h2 id="rfp" className={H2}>{t.title}</h2><span className={MUTED}>{t.count(rows.length)}</span></div>
+      {rows.length === 0 ? <p className="px-4 pb-4 text-[13px] text-muted-foreground">{t.empty}</p> : (
+        <ul aria-label={t.title}>
+          {rows.map((r) => (
+            <li key={r.number} data-ready={r.number} className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-secondary px-4 py-3 text-[13px]">
+              <div className="flex min-w-0 flex-[1_1_220px] flex-col">
+                <span className="flex flex-wrap items-baseline gap-x-2"><Link to={`/app/orders/${r.number}`} className="num font-medium text-foreground no-underline hover:text-primary hover:underline">{r.number}</Link><span>{r.customerName}</span></span>
+                <span className={MUTED}>{[r.title, r.dueDate ? m.production.due(fmt.date(r.dueDate)) : null].filter(Boolean).join(' · ')}</span>
+              </div>
+              <Chip tone={FULFILMENT_TONE[r.fulfilmentStatus]}>{m.labels.fulfilmentStatus[r.fulfilmentStatus]}</Chip>
+              <PickupActions number={r.number} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
+
+function OutstandingPayments({ data }: { data: { count: number; totalCents: number; oldestDays?: number } }) {
+  const { m, fmt } = useI18n()
+  const t = m.dash.outstandingPayments
+  return (
+    <section aria-labelledby="osp" className={`${CARD} flex flex-col gap-2 px-4 py-3.5`}>
+      <div className="flex items-center justify-between gap-2">
+        <h2 id="osp" className={H2}>{t.title}</h2>
+        <Link to="/app/payments" className="text-[13px] text-primary no-underline hover:text-(--brand-hover)">{t.page}</Link>
+      </div>
+      {data.count === 0 ? <p className="text-[13px] text-muted-foreground">{t.none}</p> : (
+        <>
+          <span className="num text-2xl font-semibold tracking-[-0.02em]" data-outstanding={data.totalCents}>{fmt.money(data.totalCents)}</span>
+          <span className={MUTED}>{t.orders(data.count)}{data.oldestDays !== undefined && <> · {t.oldest(data.oldestDays)}</>}</span>
+        </>
+      )}
+    </section>
+  )
+}
+
 function Upcoming({ jobs }: { jobs: ProductionJob[] }) {
   const { m } = useI18n()
   const sum = useJobSummary()
@@ -195,13 +241,19 @@ const MORE_ROWS = 3
 function ActionRequired({ data }: { data: ActionRequiredData }) {
   const { m, fmt } = useI18n()
   const t = m.dash.action
-  const groups: { key: keyof ActionRequiredData; rows: (ActionRow & { why?: string })[] }[] = [
+  const groups: { key: keyof ActionRequiredData; rows: (ActionRow & { why?: string; id?: number; extra?: ReactNode })[] }[] = [
     { key: 'quotes', rows: data.quotes.map((r) => ({ ...r, why: r.quoteStatus ? m.labels.quoteStatus[r.quoteStatus] : t.noQuote })) },
     { key: 'missingArtwork', rows: data.missingArtwork.map((r) => ({ ...r, why: m.labels.artworkStatus[r.artworkStatus] })) },
     { key: 'pendingPos', rows: data.pendingPos.map((r) => ({ ...r, why: r.poStatus ? m.labels.poStatus[r.poStatus] : t.noPo })) },
     { key: 'materialsAwaiting', rows: data.materialsAwaiting.map((r) => ({ ...r, why: t.materials })) },
-    { key: 'awaitingPickup', rows: data.awaitingPickup },
-    { key: 'checksToCollect', rows: data.checksToCollect },
+    { key: 'awaitingPickup', rows: data.awaitingPickup.map((r) => ({ ...r, why: m.labels.fulfilmentStatus[r.fulfilmentStatus] })) },
+    {
+      key: 'checksToCollect',
+      rows: data.checksToCollect.map((r) => ({
+        ...r, id: r.checkId, why: r.availableOn ? t.checkReadyOn(fmt.money(r.expectedCents), fmt.date(r.availableOn)) : t.checkReady(fmt.money(r.expectedCents)),
+        extra: <CheckActions check={{ id: r.checkId, orderNumber: r.number, status: 'ready_for_collection', expectedCents: r.expectedCents, checkNumber: null }} />,
+      })),
+    },
   ]
   const shown = groups.filter((g) => g.rows.length > 0)
   if (shown.length === 0) return null
@@ -217,11 +269,12 @@ function ActionRequired({ data }: { data: ActionRequiredData }) {
             </div>
             <ul className="flex flex-col gap-1.5 text-[13px]">
               {g.rows.slice(0, MORE_ROWS).map((r) => (
-                <li key={r.number}>
+                <li key={r.id ?? r.number} className="flex flex-col gap-1.5">
                   <Link to={`/app/orders/${r.number}`} className="flex min-w-0 flex-col text-foreground no-underline hover:text-primary">
                     <span className="truncate"><b className="num font-medium">{r.number}</b> {r.customerName}</span>
                     <span className={MUTED}>{[r.why, r.dueDate ? m.production.due(fmt.date(r.dueDate)) : null].filter(Boolean).join(' · ')}</span>
                   </Link>
+                  {r.extra}
                 </li>
               ))}
             </ul>
@@ -251,6 +304,8 @@ export default function Overview() {
           <CurrentProduction jobs={d.currentJobs} />
           <Upcoming jobs={d.upcoming} />
           <ActionRequired data={d.actionRequired} />
+          <ReadyForPickup rows={d.actionRequired.awaitingPickup} />
+          <OutstandingPayments data={d.outstandingPayments} />
           <div className="flex flex-wrap items-start gap-5">
             <Attention rows={d.needsAttention} />
             <div className="flex min-w-0 flex-[1_1_300px] flex-col gap-5">

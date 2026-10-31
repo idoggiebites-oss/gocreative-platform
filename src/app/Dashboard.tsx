@@ -1,5 +1,5 @@
 import { Route, Routes } from 'react-router'
-import { Banknote, FileCheck, Image } from 'lucide-react'
+import { FileCheck, Image } from 'lucide-react'
 import { useI18n } from '@/i18n'
 import AppShell from './AppShell'
 import ComingSoon from './ComingSoon'
@@ -9,6 +9,7 @@ import NewOrder from './NewOrder'
 import OrderDetail from './OrderDetail'
 import OrderList from './OrderList'
 import Overview from './Overview'
+import PaymentsPage from './PaymentsPage'
 import Production from './Production'
 import SettingsPage from './SettingsPage'
 
@@ -27,7 +28,7 @@ export default function Dashboard() {
         <Route path="artwork" element={<ComingSoon icon={Image} title={m.nav.artwork} line={m.empty.artwork} phase={3} />} />
         <Route path="purchase-orders" element={<ComingSoon icon={FileCheck} title={m.nav.purchaseOrders} line={m.empty.purchaseOrders} phase={3} />} />
         <Route path="production" element={<Production />} />
-        <Route path="payments" element={<ComingSoon icon={Banknote} title={m.nav.payments} line={m.empty.payments} phase={5} />} />
+        <Route path="payments" element={<PaymentsPage />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>
     </Routes>
