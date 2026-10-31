@@ -208,3 +208,12 @@ M1, M3/M4 and M5 in PHASE2_PLAN.md ("Carried forward from the M0 review").
 - **New order:** editing the customer text un-chooses the customer; Save is disabled until one is picked.
 - **Quote rules in one place:** `quoteActionsOpen` and `acceptBlockCode` live in `worker/domain/quotes.ts`.
 - **Copy:** authorization and quote-decision sentences are whole strings per method/status, typed so a missing key fails tsc.
+
+### 2026-10-31 — M1 live (Arturo: "Yes migrate and deploy")
+Re-checked first: the remote held only the 2 users. Migration 0002 was applied
+remotely (quotes and quote_items present, estimates gone, 14 triggers, the new
+order columns), then the Worker was deployed (version d163d17c). Anonymous and
+forged-token requests to every page and API route still redirect to Access.
+Signed in, the new Customers page renders. The database is empty, ready for real
+customers and orders. From now on every migration must preserve data: 0002 may no
+longer be edited, and changes go in 0003+.

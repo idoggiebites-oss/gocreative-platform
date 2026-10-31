@@ -253,7 +253,7 @@ logic it can test, Claude for design, integration and verification).
   Payment corrections are an audited **void** that keeps the row and its `request_id`, never a
   hard delete.
 
-### M1 — Customers, orders, quotes, authorization (brief Step 2) → acceptance 1, 2, 3, 4, 6 — built and Codex-reviewed 2026-10-31; remote migration + deploy await Arturo's go
+### M1 — Customers, orders, quotes, authorization (brief Step 2) → acceptance 1, 2, 3, 4, 6 — built, Codex-reviewed, **live 2026-10-31**
 - [x] Migration 0002 + schema tests. *(Opus; Codex reviews)*
 - [x] Customers API: list/search, detail, create/edit, contacts. *(Sonnet)*
 - [x] Orders write API: create from customer defaults, edit header (conflict guard), items
