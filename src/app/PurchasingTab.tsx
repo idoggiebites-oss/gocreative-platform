@@ -11,7 +11,8 @@ import { Chip, MUTED, PURCHASE_TONE } from './ui'
 
 type Detail = OrderDetailResponse
 type Dialog = { kind: 'add' } | { kind: 'edit' | 'ordered' | 'receipt' | 'cancel'; id: number }
-/** What every dialog gets: the CURRENT purchase from the purchases query (undefined if gone), and whether that query is refetching. */
+/** What every dialog gets: the CURRENT purchase from the purchases query (undefined if gone), and whether that query is not fresh
+ * (refetching, or its last refetch failed and the list shown is the old cache): conflict recovery waits for a successful refresh. */
 type Live = { p: PurchaseRecord | undefined; fetching: boolean }
 
 const sm = cn(BTN, BTN_SM)
@@ -274,5 +275,5 @@ function List({ d, purchases, fetching, autoAdd, onAutoAdd }: { d: Detail; purch
 
 export function PurchasingTab({ d, autoAdd, onAutoAdd }: { d: Detail; autoAdd: boolean; onAutoAdd: () => void }) {
   const query = usePurchases(d.order.number)
-  return <QueryBoundary query={query}>{(r) => <List d={d} purchases={r.purchases} fetching={query.isFetching} autoAdd={autoAdd} onAutoAdd={onAutoAdd} />}</QueryBoundary>
+  return <QueryBoundary query={query}>{(r) => <List d={d} purchases={r.purchases} fetching={query.isFetching || query.isError} autoAdd={autoAdd} onAutoAdd={onAutoAdd} />}</QueryBoundary>
 }

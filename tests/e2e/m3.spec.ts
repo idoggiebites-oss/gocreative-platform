@@ -200,6 +200,27 @@ test('a purchase edit open behind another browser\'s save: its typing survives a
   await b.context().close()
 })
 
+test('conflict recovery waits for a SUCCESSFUL purchases refresh: a failed one keeps Save blocked (Codex review of 9fc0d62)', async ({ page }, info) => {
+  test.skip(info.project.name !== 'desktop')
+  const o = await makeOrder(page, 'Failed refresh')
+  const w: W = { number: o.number, version: o.version }
+  const id = await write(page, w, 'post', '/purchases', { description: 'Refresh tees', quantity: 4, notes: 'original' })
+  await openPurchasing(page, o.number)
+  const card = page.locator(`[data-purchase="${id}"]`)
+  await card.getByRole('button', { name: 'Edit' }).click()
+  await dialog(page).getByLabel('Notes').fill('A stale try')
+  await write(page, w, 'patch', `/purchases/${id}`, { notes: 'From elsewhere' }) // someone else saves; the page doesn't know
+  await page.route(`**/api/app/orders/${o.number}/purchases`, (r) => r.fulfill({ status: 500, body: '{}' }))
+  await dialog(page).getByRole('button', { name: 'Save' }).click()
+  await expect(dialog(page).getByRole('status')).toContainText('Someone else changed this')
+  await page.waitForTimeout(1500) // the order refetch lands; the purchases one fails (and retries fail)
+  await expect(dialog(page).getByRole('button', { name: 'Save' })).toBeDisabled() // stale purchase values must not pair with the new version
+  await page.unroute(`**/api/app/orders/${o.number}/purchases`)
+  await refetch(page)
+  await expect(dialog(page).getByLabel('Notes')).toHaveValue('From elsewhere')
+  await expect(dialog(page).getByRole('button', { name: 'Save' })).toBeEnabled()
+})
+
 test('a receipt dialog behind another browser\'s delivery reloads the remaining quantity, and a cancelled purchase disables Save', async ({ page }, info) => {
   test.skip(info.project.name !== 'desktop')
   const o = await makeOrder(page, 'Receipt conflict')
@@ -285,7 +306,7 @@ test('phone: the dialog\'s Save and Cancel are reachable and nothing scrolls sid
     const d = dialog(page)
     await d.locator('input[type=checkbox]').check()
     const save = d.locator('button[type=submit]')
-    const cancel = d.locator('button[type=button]').last()
+    const cancel = d.getByRole('button', { name: lang === 'en' ? 'Cancel' : 'Cancelar', exact: true })
     for (const btn of [cancel, save]) {
       await btn.scrollIntoViewIfNeeded()
       await expect(btn).toBeVisible()
