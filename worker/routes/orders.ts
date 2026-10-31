@@ -3,7 +3,7 @@ import type { Context } from 'hono'
 import { z } from 'zod'
 import type { AppEnv } from '../auth'
 import { ORDER_VIEWS } from '../../shared/api'
-import type { ApiErrorCode, DashboardResponse, OrderDetailResponse, OrdersListResponse } from '../../shared/api'
+import type { ApiErrorCode, DashboardResponse, OrderDetailResponse, OrdersListResponse, PoChangeResponse } from '../../shared/api'
 import { PO_STATUSES, PRODUCTION_STATUSES } from '../../shared/enums'
 import { buildDashboard } from '../domain/dashboard'
 import { parseOrderNumber } from '../domain/orderNumber'
@@ -75,7 +75,7 @@ export function orderRoutes() {
     .patch('/orders/:number/purchase-orders/:poId', async (c) => {
       const n = number.safeParse(c.req.param('number'))
       const id = poId.safeParse(c.req.param('poId'))
-      const body = z.object({ to: z.enum(PO_STATUSES) }).safeParse(await c.req.json().catch(() => null))
+      const body = z.object({ to: z.enum(PO_STATUSES), expectedVersion: z.number().int().min(0) }).safeParse(await c.req.json().catch(() => null))
       if (!n.success) return bad(c, n.error)
       if (!id.success) return bad(c, id.error)
       if (!body.success) return bad(c, body.error)
@@ -83,11 +83,14 @@ export function orderRoutes() {
       if (!loaded) return c.json({ error: 'Purchase order not found', code: 'not_found' satisfies ApiErrorCode }, 404)
       const check = checkPoTransition(loaded.po.status, body.data.to)
       if (!check.ok) return c.json({ error: check.error, code: 'po_transition_not_allowed' satisfies ApiErrorCode }, 409)
-      // The re-derive in the same batch moves a pre-production status to whatever readiness says after the change.
-      const { changed, productionStatus } = await db.applyPoChange(c.env.DB, {
-        orderId: loaded.orderId, poId: loaded.po.id, actorId: c.get('user').id, from: loaded.po.status, to: body.data.to,
+      const stale = () => c.json({ error: 'Order changed, reload and retry', code: 'conflict_retry' satisfies ApiErrorCode }, 409)
+      if (body.data.expectedVersion !== loaded.version) return stale()
+      // Guarded by the client's version; bumps it, and the re-derive in the same batch moves a pre-production status
+      // to whatever readiness says after the change.
+      const { changed, productionStatus, version } = await db.applyPoChange(c.env.DB, {
+        orderId: loaded.orderId, poId: loaded.po.id, actorId: c.get('user').id, version: body.data.expectedVersion, from: loaded.po.status, to: body.data.to,
       })
-      if (!changed) return c.json({ error: 'Purchase order changed, reload and retry', code: 'conflict_retry' satisfies ApiErrorCode }, 409)
-      return c.json({ poId: loaded.po.id, status: body.data.to, productionStatus })
+      if (!changed) return stale()
+      return c.json<PoChangeResponse>({ poId: loaded.po.id, status: body.data.to, productionStatus, version })
     })
 }

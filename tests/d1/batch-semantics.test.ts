@@ -77,7 +77,9 @@ test('the real write paths: the re-derive after a PO revoke, a stale version, th
   const activity = () => count('SELECT COUNT(*) AS n FROM activity_log')
   // Order 5 is ready on approved PO 6: revoking moves it back, with the PO row and the re-derive row.
   let before = await activity()
-  expect(await dbo.applyPoChange(db, { orderId: 5, poId: 6, actorId: 1, from: 'approved', to: 'rejected' })).toEqual({ changed: true, productionStatus: 'awaiting_authorization' })
+  const v5 = (await dbo.orderState(db, { id: 5 }))!.version
+  expect(await dbo.applyPoChange(db, { orderId: 5, poId: 6, actorId: 1, version: v5, from: 'approved', to: 'rejected' }))
+    .toEqual({ changed: true, productionStatus: 'awaiting_authorization', version: v5 + 2 }) // the PO change and the re-derive each bump it
   expect(await activity()).toBe(before + 2)
   // A write with a stale version changes and logs nothing, even with data statements ahead of the guard.
   const o = (await dbo.getOrderByNumber(db, '2026-0022'))!
@@ -93,4 +95,33 @@ test('the real write paths: the re-derive after a PO revoke, a stale version, th
   expect(await dbo.orderState(db, { number: '2031-0001' })).toMatchObject({ productionStatus: 'awaiting_quote', version: 0 })
   // Migration 0002's triggers raise on workerd with a message the routes can map.
   await expect(db.prepare(`UPDATE quotes SET total_cents = 1 WHERE status = 'accepted'`).run()).rejects.toThrow(/quote_frozen/)
+})
+
+// Codex review of cce1dc9: the fixes lean on SQL that node:sqlite accepts; prove workerd's D1 runs it the same way.
+test('a refused create or repeat uses no number: the conditional counter upsert (INSERT … SELECT … WHERE … ON CONFLICT … RETURNING)', async () => {
+  const counters = async () => JSON.stringify((await db.prepare('SELECT * FROM counters ORDER BY year').all()).results)
+  const orders = () => count('SELECT COUNT(*) AS n FROM orders')
+  const base = { actorId: 1, source: 'phone', title: 'x', dueDate: null, poRequired: true, paymentTerms: 'due_after_pickup', artworkRequired: true, productionStatus: 'awaiting_quote', items: [] } satisfies Partial<Parameters<typeof dbo.createOrder>[1]>
+  // A live contact: the year's row is created on first use, then counts up.
+  expect(await dbo.createOrder(db, { ...base, year: 2032, customerId: 1, contactId: 2 })).toBe(1)
+  expect(await dbo.createOrder(db, { ...base, year: 2032, customerId: 1, contactId: 2 })).toBe(2)
+  await db.prepare(`UPDATE customer_contacts SET archived_at = '2026-10-01T00:00:00Z' WHERE id IN (2, 7)`).run()
+  const [c0, o0, a0] = [await counters(), await orders(), await count('SELECT COUNT(*) AS n FROM activity_log')]
+  expect(await dbo.createOrder(db, { ...base, year: 2032, customerId: 1, contactId: 2 })).toBeNull() // existing year row
+  expect(await dbo.createOrder(db, { ...base, year: 2033, customerId: 1, contactId: 2 })).toBeNull() // no year row yet
+  expect(await dbo.repeatOrder(db, { year: 2032, actorId: 1, sourceId: 15, source: 'phone', dueDate: null, productionStatus: 'awaiting_quote' })).toBeNull() // contact 7
+  expect([await counters(), await orders(), await count('SELECT COUNT(*) AS n FROM activity_log')]).toEqual([c0, o0, a0])
+})
+
+test('replace items on workerd: retained lines updated in place, a new line before the last row never takes its id', async () => {
+  const n = (await dbo.createOrder(db, { year: 2034, actorId: 1, customerId: 6, contactId: null, source: 'phone', title: 'x', dueDate: null, poRequired: false,
+    paymentTerms: 'due_at_pickup', artworkRequired: true, productionStatus: 'awaiting_quote',
+    items: [{ kind: 'charge', description: 'Setup', product: null, garmentColor: null, method: null, sizes: null, quantity: 1, unitPriceCents: 100, notes: null }] }))!
+  const o = (await dbo.orderState(db, { number: `2034-000${n}` }))!
+  const id = (await db.prepare('SELECT id FROM orders WHERE number = ?').bind(o.number).first<{ id: number }>())!.id
+  const [kept] = await dbo.listItems(db, id)
+  const line = { kind: 'charge', description: 'New', product: null, garmentColor: null, method: null, sizes: null, quantity: 1, unitPriceCents: 50, notes: null } as const
+  expect(await dbo.replaceItems(db, { orderId: id, version: o.version, actorId: 1, items: [line, { ...kept!, notes: 'kept' }], itemsRevision: { from: 0, to: 1 } })).not.toBeNull()
+  const after = await dbo.listItems(db, id)
+  expect(after.map((i) => [i.id === kept!.id, i.description, i.notes])).toEqual([[true, 'Setup', 'kept'], [false, 'New', null]])
 })

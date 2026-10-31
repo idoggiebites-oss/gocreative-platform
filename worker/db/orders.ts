@@ -376,22 +376,26 @@ export async function loadForPoChange(db: D1Database, number: string, poId: numb
   const o = await getOrderByNumber(db, number)
   if (!o) return null
   const po = await db.prepare('SELECT id, status FROM purchase_orders WHERE id = ? AND order_id = ?').bind(poId, o.id).first<{ id: number; status: PoStatus }>()
-  return po && { orderId: o.id, po }
+  return po && { orderId: o.id, version: o.version, po }
 }
 
 /**
- * Updates the PO (guarded by its previous status) with its own activity row, then re-derives the pre-production
- * status from readiness at write time (rederive). Each row exists only if its UPDATE changed one.
- * Returns whether the PO changed, and the persisted production status.
+ * Updates the PO (guarded by its previous status and the order's version), bumps the order's version, logs, then
+ * re-derives the pre-production status from readiness at write time (rederive). Each statement after the first runs
+ * only if the one before it changed a row, so a lost race changes and logs nothing. Every applied PO change bumps the
+ * version, even when the production status stays, so an order write from before it is refused (Codex review of cce1dc9).
+ * Returns whether it applied, and the persisted production status and version.
  */
-export async function applyPoChange(db: D1Database, p: { orderId: number; poId: number; actorId: number; from: PoStatus; to: PoStatus }) {
-  const [update] = await db.batch([
-    db.prepare(`UPDATE purchase_orders SET status = ?, updated_at = ${NOW} WHERE id = ? AND status = ?`).bind(p.to, p.poId, p.from),
+export async function applyPoChange(db: D1Database, p: { orderId: number; poId: number; actorId: number; version: number; from: PoStatus; to: PoStatus }) {
+  const results = await db.batch([
+    db.prepare(`UPDATE purchase_orders SET status = ?, updated_at = ${NOW} WHERE id = ? AND order_id = ? AND status = ? AND ${GUARD}`)
+      .bind(p.to, p.poId, p.orderId, p.from, p.orderId, p.version),
+    db.prepare(`UPDATE orders SET version = version + 1, updated_at = ${NOW} WHERE id = ? AND version = ? AND changes() > 0`).bind(p.orderId, p.version),
     db.prepare(LOG_IF_CHANGED).bind(p.actorId, p.orderId, 'po_status_changed', JSON.stringify({ po_id: p.poId, po_status: p.from }), JSON.stringify({ po_id: p.poId, po_status: p.to })),
     ...rederive(db, p.orderId, p.actorId, 'po_sync'),
   ])
-  const row = await db.prepare('SELECT production_status FROM orders WHERE id = ?').bind(p.orderId).first<{ production_status: ProductionStatus }>()
-  return { changed: (update?.meta.changes ?? 0) > 0, productionStatus: row!.production_status }
+  const row = await db.prepare('SELECT production_status, version FROM orders WHERE id = ?').bind(p.orderId).first<{ production_status: ProductionStatus; version: number }>()
+  return { changed: (results[1]?.meta.changes ?? 0) > 0, productionStatus: row!.production_status, version: row!.version }
 }
 
 // ---- the re-derive ----
@@ -439,6 +443,8 @@ type OrderWrite = {
   orderId: number; version: number; actorId: number; action: ActivityAction; before?: object; after?: object
   /** `column = expr` fragments, each a constant from this file (never user input), with their binds. */
   set?: [sql: string, ...binds: Value[]][]
+  /** An extra condition on the order UPDATE (a constant from this file, correlated on `orders`), with its binds. */
+  where?: [sql: string, ...binds: Value[]]
   data?: Stmt[]
 }
 async function orderWrite(db: D1Database, w: OrderWrite): Promise<OrderStateRow | null> {
@@ -446,8 +452,8 @@ async function orderWrite(db: D1Database, w: OrderWrite): Promise<OrderStateRow 
   const data = w.data ?? []
   const results = await db.batch([
     ...data,
-    db.prepare(`UPDATE orders SET ${set.map(([sql]) => `${sql}, `).join('')}version = version + 1, updated_at = ${NOW} WHERE id = ? AND version = ?`)
-      .bind(...set.flatMap(([, ...binds]) => binds), w.orderId, w.version),
+    db.prepare(`UPDATE orders SET ${set.map(([sql]) => `${sql}, `).join('')}version = version + 1, updated_at = ${NOW} WHERE id = ? AND version = ?${w.where ? ` AND ${w.where[0]}` : ''}`)
+      .bind(...set.flatMap(([, ...binds]) => binds), w.orderId, w.version, ...(w.where?.slice(1) ?? [])),
     db.prepare(LOG_IF_CHANGED).bind(w.actorId, w.orderId, w.action, toJson(w.before), toJson(w.after)),
     ...rederive(db, w.orderId, w.actorId, w.action),
   ])
@@ -464,11 +470,16 @@ const ITEM_COLS = 'kind, description, product, garment_color, method, sizes, qua
 const itemBinds = (i: Omit<ItemWrite, 'id' | 'notes'>): Value[] =>
   [i.kind, i.description, i.product, i.garmentColor, i.method, i.sizes ? JSON.stringify(i.sizes) : null, i.quantity, i.unitPriceCents]
 
+// Removed lines are deleted and retained ones updated in place before any new line is inserted, so a new line can
+// never be handed a retained line's id (delete-all-then-insert could, when the retained line was the table's last row).
+const ITEM_SET = `${ITEM_COLS.split(', ').map((c) => `${c} = ?`).join(', ')}, notes = ?`
 const replaceItemsStmts = (db: D1Database, orderId: number, version: number, items: ItemWrite[]) => [
-  db.prepare(`DELETE FROM order_items WHERE order_id = ? AND ${GUARD}`).bind(orderId, orderId, version),
-  // An existing item keeps its id; a new one gets a fresh id.
-  ...items.map((i) => db.prepare(`INSERT INTO order_items (id, order_id, ${ITEM_COLS}, notes) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${GUARD}`)
-    .bind(i.id ?? null, orderId, ...itemBinds(i), i.notes, orderId, version)),
+  db.prepare(`DELETE FROM order_items WHERE order_id = ? AND id NOT IN (SELECT value FROM json_each(?)) AND ${GUARD}`)
+    .bind(orderId, JSON.stringify(items.flatMap((i) => (i.id === undefined ? [] : [i.id]))), orderId, version),
+  ...items.filter((i) => i.id !== undefined).map((i) => db.prepare(`UPDATE order_items SET ${ITEM_SET} WHERE id = ? AND order_id = ? AND ${GUARD}`)
+    .bind(...itemBinds(i), i.notes, i.id!, orderId, orderId, version)),
+  ...items.filter((i) => i.id === undefined).map((i) => db.prepare(`INSERT INTO order_items (order_id, ${ITEM_COLS}, notes) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${GUARD}`)
+    .bind(orderId, ...itemBinds(i), i.notes, orderId, version)),
 ]
 const quoteLineStmts = (db: D1Database, quoteIdSql: string, quoteIdBinds: Value[], orderId: number, version: number, lines: QuoteLineWrite[]) =>
   lines.map((l, position) => db.prepare(`INSERT INTO quote_items (quote_id, position, ${ITEM_COLS}, line_total_cents)
@@ -484,11 +495,16 @@ const HEADER_COLUMNS = {
 } as const
 export type HeaderField = keyof typeof HEADER_COLUMNS
 export type HeaderChange = Partial<Record<HeaderField, Value>>
+// The contact is this order's customer's and not archived: re-checked inside the write, because routes read first.
+const CONTACT_OK = `EXISTS (SELECT 1 FROM customer_contacts cc WHERE cc.id = ? AND cc.customer_id = orders.customer_id AND cc.archived_at IS NULL)`
+/** Returns null on a stale version, or when the contact being set is no longer this customer's live contact. */
 export function updateOrderHeader(db: D1Database, p: Guarded & { changes: HeaderChange; before: HeaderChange; noPurchasing: boolean }) {
   const keys = Object.keys(p.changes) as HeaderField[]
   const cols = (o: HeaderChange) => Object.fromEntries(keys.map((k) => [HEADER_COLUMNS[k], o[k] ?? null]))
+  const contactId = p.changes.contactId
   return orderWrite(db, {
     ...p, action: p.noPurchasing ? 'no_purchasing_confirmed' : 'order_updated',
+    where: typeof contactId === 'number' ? [CONTACT_OK, contactId] : undefined,
     set: keys.map((k) => [`${HEADER_COLUMNS[k]} = ?`, p.changes[k] ?? null]),
     before: cols(p.before), after: { ...cols(p.changes), fields: keys.map((k) => HEADER_COLUMNS[k]) },
   })
@@ -593,47 +609,58 @@ export async function addNote(db: D1Database, p: { orderId: number; actorId: num
 // ---- new orders ----
 // The year's counter row is created on first use (the remote counters table starts empty) and handed out
 // atomically; the order INSERT reads the number back in the same batch, so a failed batch burns no number.
-const COUNTER_SQL = `INSERT INTO counters (name, year, next) VALUES ('order', ?, 2)
+// A refused create burns none either: the upsert and every statement after it carry the same prerequisite (`ok`),
+// so when it fails nothing runs, NEW_NUMBER (which would then name the previous order) is never used, and the
+// function returns null. RAISE() is trigger-only in SQLite, hence a shared predicate rather than an abort.
+// The INSERT … SELECT has its WHERE before ON CONFLICT (SQLite's upsert parsing rule); tests/d1 runs it on workerd.
+const COUNTER_SQL = (ok: string) => `INSERT INTO counters (name, year, next) SELECT 'order', ?, 2 WHERE ${ok}
   ON CONFLICT (name, year) DO UPDATE SET next = next + 1 RETURNING next - 1 AS n`
 /** The number just handed out, formatted like domain/orderNumber.formatOrderNumber (orders-write.test.ts checks they agree). */
 export const NEW_NUMBER = `(SELECT printf('%d-%04d', year, next - 1) FROM counters WHERE name = 'order' AND year = ?)`
-const counterN = (r: { results?: unknown[] } | undefined) => (r!.results![0] as { n: number }).n
+const counterN = (r: { results?: unknown[] } | undefined) => (r?.results?.[0] as { n: number } | undefined)?.n ?? null
 
 export async function createOrder(db: D1Database, p: {
   year: number; actorId: number; customerId: number; contactId: number | null; source: OrderSource; title: string; dueDate: string | null
   poRequired: boolean; paymentTerms: PaymentTerms; artworkRequired: boolean; productionStatus: ProductionStatus; items: ItemWrite[]
-}) {
+}): Promise<number | null> {
+  // The contact must be the customer's and not archived, re-checked here so a moved or archived contact can't slip in.
+  const ok = `(? IS NULL OR EXISTS (SELECT 1 FROM customer_contacts cc WHERE cc.id = ? AND cc.customer_id = ? AND cc.archived_at IS NULL))`
+  const okBinds = [p.contactId, p.contactId, p.customerId]
   const [counter] = await db.batch([
-    db.prepare(COUNTER_SQL).bind(p.year),
-    // The contact must belong to the customer, re-checked here so a moved contact can't slip in.
+    db.prepare(COUNTER_SQL(ok)).bind(p.year, ...okBinds),
     db.prepare(`INSERT INTO orders (number, customer_id, contact_id, source, title, due_date, po_required, payment_terms, artwork_required, production_status, created_by)
-        SELECT ${NEW_NUMBER.replace('?', '?1')}, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11
-        WHERE ?3 IS NULL OR EXISTS (SELECT 1 FROM customer_contacts cc WHERE cc.id = ?3 AND cc.customer_id = ?2 AND cc.archived_at IS NULL)`)
-      .bind(p.year, p.customerId, p.contactId, p.source, p.title, p.dueDate, p.poRequired ? 1 : 0, p.paymentTerms, p.artworkRequired ? 1 : 0, p.productionStatus, p.actorId),
-    ...p.items.map((i) => db.prepare(`INSERT INTO order_items (order_id, ${ITEM_COLS}, notes) SELECT o.id, ?, ?, ?, ?, ?, ?, ?, ?, ? FROM orders o WHERE o.number = ${NEW_NUMBER}`)
-      .bind(...itemBinds(i), i.notes, p.year)),
+        SELECT ${NEW_NUMBER}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${ok}`)
+      .bind(p.year, p.customerId, p.contactId, p.source, p.title, p.dueDate, p.poRequired ? 1 : 0, p.paymentTerms, p.artworkRequired ? 1 : 0, p.productionStatus, p.actorId, ...okBinds),
+    ...p.items.map((i) => db.prepare(`INSERT INTO order_items (order_id, ${ITEM_COLS}, notes) SELECT o.id, ?, ?, ?, ?, ?, ?, ?, ?, ? FROM orders o WHERE o.number = ${NEW_NUMBER} AND ${ok}`)
+      .bind(...itemBinds(i), i.notes, p.year, ...okBinds)),
     db.prepare(`INSERT INTO activity_log (actor_kind, actor_id, entity_type, entity_id, action, after)
-        SELECT 'user', ?, 'order', id, 'created', json_object('order_number', number, 'production_status', production_status) FROM orders WHERE number = ${NEW_NUMBER}`)
-      .bind(p.actorId, p.year),
+        SELECT 'user', ?, 'order', id, 'created', json_object('order_number', number, 'production_status', production_status) FROM orders WHERE number = ${NEW_NUMBER} AND ${ok}`)
+      .bind(p.actorId, p.year, ...okBinds),
   ])
   return counterN(counter)
 }
 
-/** A new order for the same customer with a copy of the source's items (no quotes, artwork, POs or authorization). */
-export async function repeatOrder(db: D1Database, p: { year: number; actorId: number; sourceId: number; source: OrderSource; dueDate: string | null; productionStatus: ProductionStatus }) {
+/**
+ * A new order for the same customer with a copy of the source's items (no quotes, artwork, POs or authorization).
+ * The contact is copied only while it is still the customer's live contact; otherwise nothing is created and no number
+ * is used (null). An archived contact is refused rather than dropped, so staff pick the new contact on purpose.
+ */
+export async function repeatOrder(db: D1Database, p: { year: number; actorId: number; sourceId: number; source: OrderSource; dueDate: string | null; productionStatus: ProductionStatus }): Promise<number | null> {
+  const ok = `EXISTS (SELECT 1 FROM orders src WHERE src.id = ? AND (src.contact_id IS NULL OR EXISTS (SELECT 1 FROM customer_contacts cc
+    WHERE cc.id = src.contact_id AND cc.customer_id = src.customer_id AND cc.archived_at IS NULL)))`
   const [counter] = await db.batch([
-    db.prepare(COUNTER_SQL).bind(p.year),
+    db.prepare(COUNTER_SQL(ok)).bind(p.year, p.sourceId),
     db.prepare(`INSERT INTO orders (number, customer_id, contact_id, source, title, due_date, po_required, payment_terms, artwork_required, production_status, created_by)
-        SELECT ${NEW_NUMBER}, customer_id, contact_id, ?, title || ' (repeat)', ?, po_required, payment_terms, artwork_required, ?, ? FROM orders WHERE id = ?`)
-      .bind(p.year, p.source, p.dueDate, p.productionStatus, p.actorId, p.sourceId),
+        SELECT ${NEW_NUMBER}, customer_id, contact_id, ?, title || ' (repeat)', ?, po_required, payment_terms, artwork_required, ?, ? FROM orders WHERE id = ? AND ${ok}`)
+      .bind(p.year, p.source, p.dueDate, p.productionStatus, p.actorId, p.sourceId, p.sourceId),
     db.prepare(`INSERT INTO order_items (order_id, ${ITEM_COLS}, notes) SELECT n.id, ${ITEM_COLS.split(', ').map((c) => `i.${c}`).join(', ')}, i.notes
-        FROM order_items i JOIN orders n ON n.number = ${NEW_NUMBER} WHERE i.order_id = ? ORDER BY i.id`).bind(p.year, p.sourceId),
+        FROM order_items i JOIN orders n ON n.number = ${NEW_NUMBER} WHERE i.order_id = ? AND ${ok} ORDER BY i.id`).bind(p.year, p.sourceId, p.sourceId),
     db.prepare(`INSERT INTO activity_log (actor_kind, actor_id, entity_type, entity_id, action, after)
         SELECT 'user', ?, 'order', n.id, 'created', json_object('order_number', n.number, 'repeat_of', s.number, 'production_status', n.production_status)
-        FROM orders n JOIN orders s ON s.id = ? WHERE n.number = ${NEW_NUMBER}`).bind(p.actorId, p.sourceId, p.year),
+        FROM orders n JOIN orders s ON s.id = ? WHERE n.number = ${NEW_NUMBER} AND ${ok}`).bind(p.actorId, p.sourceId, p.year, p.sourceId),
     db.prepare(`INSERT INTO activity_log (actor_kind, actor_id, entity_type, entity_id, action, after)
-        SELECT 'user', ?, 'order', ?, 'order_repeated', json_object('order_number', number) FROM orders WHERE number = ${NEW_NUMBER}`)
-      .bind(p.actorId, p.sourceId, p.year),
+        SELECT 'user', ?, 'order', ?, 'order_repeated', json_object('order_number', number) FROM orders WHERE number = ${NEW_NUMBER} AND ${ok}`)
+      .bind(p.actorId, p.sourceId, p.year, p.sourceId),
   ])
   return counterN(counter)
 }

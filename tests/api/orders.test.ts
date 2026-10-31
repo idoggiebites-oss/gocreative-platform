@@ -272,7 +272,26 @@ describe('stale production gate', () => {
 })
 
 describe('purchase order status change', () => {
-  const patch = (t: ReturnType<typeof setup>, n: string, po: number, to: string) => t.call('PATCH', `/orders/${n}/purchase-orders/${po}`, { to })
+  const version = (t: ReturnType<typeof setup>, n: string) => t.one<{ version: number }>('SELECT version FROM orders WHERE number = ?', n).version
+  const patch = (t: ReturnType<typeof setup>, n: string, po: number, to: string) => t.call('PATCH', `/orders/${n}/purchase-orders/${po}`, { to, expectedVersion: version(t, n) })
+
+  test('every applied PO change bumps the order version, even when the production status stays (Codex review of cce1dc9)', async () => {
+    const t = setup()
+    const v0 = version(t, '2026-0011')
+    const res = await t.call('PATCH', '/orders/2026-0011/purchase-orders/12', { to: 'under_review', expectedVersion: v0 })
+    expect(await t.json(res)).toEqual({ poId: 12, status: 'under_review', productionStatus: 'awaiting_authorization', version: v0 + 1 })
+    expect(version(t, '2026-0011')).toBe(v0 + 1)
+    // A write from the old version is refused: an order edit and a second PO change alike.
+    expect(await t.json(await t.call('PATCH', '/orders/2026-0011', { expectedVersion: v0, title: 'stale' }))).toMatchObject({ code: 'conflict_retry' })
+    const before = t.activityCount()
+    expect(await t.json(await t.call('PATCH', '/orders/2026-0011/purchase-orders/12', { to: 'rejected', expectedVersion: v0 }))).toMatchObject({ code: 'conflict_retry' })
+    expect(t.one<{ status: string }>('SELECT status FROM purchase_orders WHERE id = 12').status).toBe('under_review')
+    expect(t.activityCount()).toBe(before)
+    // The batch holds the guard on its own (a write between the route's read and the batch), and expectedVersion is required.
+    expect(await dbo.applyPoChange(t.db, { orderId: 11, poId: 12, actorId: 1, version: v0, from: 'under_review', to: 'rejected' })).toMatchObject({ changed: false })
+    expect(t.activityCount()).toBe(before)
+    expect((await t.call('PATCH', '/orders/2026-0011/purchase-orders/12', { to: 'rejected' })).status).toBe(400)
+  })
 
   test('approving moves awaiting_authorization to ready when artwork is approved', async () => {
     const t = setup()
@@ -280,7 +299,7 @@ describe('purchase order status change', () => {
     const before = t.activityCount()
     const res = await patch(t, '2026-0011', 12, 'approved')
     expect(res.status).toBe(200)
-    expect(await t.json(res)).toEqual({ poId: 12, status: 'approved', productionStatus: 'ready' })
+    expect(await t.json(res)).toEqual({ poId: 12, status: 'approved', productionStatus: 'ready', version: 2 }) // the PO change and the re-derive each bump it
     expect(t.prod('2026-0011').production_status).toBe('ready')
     expect(t.activityCount()).toBe(before + 2)
     const [po, sync] = t.sqlite.prepare('SELECT action, before, after FROM activity_log ORDER BY id DESC LIMIT 2').all().reverse() as { action: string; before: string; after: string }[]
@@ -293,8 +312,8 @@ describe('purchase order status change', () => {
     const loaded = (await dbo.loadForPoChange(t.db, '2026-0011', 12))!
     t.sqlite.exec(`UPDATE orders SET production_status = 'awaiting_artwork' WHERE number = '2026-0011'`)
     const before = t.activityCount()
-    const r = await dbo.applyPoChange(t.db, { orderId: loaded.orderId, poId: 12, actorId: 1, from: 'under_review', to: 'approved' })
-    expect(r).toEqual({ changed: true, productionStatus: 'ready' })
+    const r = await dbo.applyPoChange(t.db, { orderId: loaded.orderId, poId: 12, actorId: 1, version: loaded.version, from: 'under_review', to: 'approved' })
+    expect(r).toMatchObject({ changed: true, productionStatus: 'ready' })
     expect(t.activityCount()).toBe(before + 2)
     expect(t.one<{ before: string; after: string }>('SELECT before, after FROM activity_log ORDER BY id DESC LIMIT 1'))
       .toEqual({ before: '{"production_status":"awaiting_artwork"}', after: '{"production_status":"ready","reason":"po_sync"}' })
@@ -303,7 +322,7 @@ describe('purchase order status change', () => {
     const t = setup()
     t.sqlite.exec(`UPDATE purchase_orders SET status = 'under_review' WHERE id = 12`)
     const before = t.activityCount()
-    const r = await dbo.applyPoChange(t.db, { orderId: 11, poId: 12, actorId: 1, from: 'received', to: 'under_review' })
+    const r = await dbo.applyPoChange(t.db, { orderId: 11, poId: 12, actorId: 1, version: 0, from: 'received', to: 'under_review' })
     expect(r.changed).toBe(false)
     expect(t.activityCount()).toBe(before)
   })
@@ -315,7 +334,7 @@ describe('purchase order status change', () => {
   test('revoking approval moves an order at ready back to awaiting_authorization (M1c re-derive)', async () => {
     const t = setup()
     const res = await patch(t, '2026-0005', 6, 'rejected')
-    expect(await t.json(res)).toEqual({ poId: 6, status: 'rejected', productionStatus: 'awaiting_authorization' })
+    expect(await t.json(res)).toMatchObject({ poId: 6, status: 'rejected', productionStatus: 'awaiting_authorization' })
     expect(t.prod('2026-0005').production_status).toBe('awaiting_authorization')
     const d = await t.json<OrderDetailResponse>(await t.call('GET', '/orders/2026-0005'))
     expect(d.gate).toEqual({ ok: false, reasons: ['authorization.po_not_approved'] })
@@ -402,9 +421,9 @@ describe('error codes', () => {
     expect(await code(t, await t.call('PATCH', '/orders/2026-9999/production', { to: 'ready' }))).toMatchObject({ code: 'not_found' })
     expect(await code(t, await t.call('PATCH', '/orders/2026-0005/production', { to: 'nonsense' }))).toMatchObject({ code: 'invalid_request' })
     expect(await code(t, await t.call('PATCH', '/orders/2026-0005/production', { to: 'quality_control' }))).toMatchObject({ code: 'transition_not_allowed' })
-    expect(await code(t, await t.call('PATCH', '/orders/2026-0011/purchase-orders/99999', { to: 'approved' }))).toMatchObject({ code: 'not_found' })
+    expect(await code(t, await t.call('PATCH', '/orders/2026-0011/purchase-orders/99999', { to: 'approved', expectedVersion: 0 }))).toMatchObject({ code: 'not_found' })
     // PO 12 is 'received'; received -> approved is not a legal move
-    expect(await code(t, await t.call('PATCH', '/orders/2026-0011/purchase-orders/12', { to: 'approved' }))).toMatchObject({ code: 'po_transition_not_allowed' })
+    expect(await code(t, await t.call('PATCH', '/orders/2026-0011/purchase-orders/12', { to: 'approved', expectedVersion: 0 }))).toMatchObject({ code: 'po_transition_not_allowed' })
   })
   test('a closed gate is gate_failed with reason codes', async () => {
     const t = setup()

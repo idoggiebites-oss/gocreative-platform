@@ -46,8 +46,9 @@ const item = z.object({
   if (!valid.ok) ctx.addIssue({ code: 'custom', message: valid.error })
 })
 const items = z.array(item).max(200)
-const reason = z.object({ reason: text(500), expectedVersion: expectedVersion.optional() })
-const optionalVersion = z.object({ expectedVersion: expectedVersion.optional() })
+// Every guarded write requires the version the client acted on; the server's own read is never substituted for it.
+const reason = z.object({ reason: text(500), expectedVersion })
+const versioned = z.object({ expectedVersion })
 
 const STARTED: readonly ProductionStatus[] = ['in_production', 'quality_control', 'production_complete']
 // Trigger messages from migration 0002 that are the database restating a rule the route checks first.
@@ -60,8 +61,8 @@ const written = (c: C, state: db.OrderStateRow | null, extra: Partial<OrderWrite
 const today = () => businessToday(new Date())
 const year = () => Number(today().slice(0, 4))
 
-/** Parses :number and the body, loads the order (404), and hands the guard version to the handler. */
-function withOrder<S extends z.ZodType>(schema: S, fn: (c: C, o: Order, body: z.infer<S>, version: number) => Promise<Response>) {
+/** Parses :number and the body, loads the order (404), and refuses a stale expectedVersion before anything runs. */
+function withOrder<S extends z.ZodType>(schema: S, fn: (c: C, o: Order, body: z.infer<S>) => Promise<Response>) {
   return async (c: C) => {
     const n = number.safeParse(c.req.param('number'))
     if (!n.success) return bad(c, n.error)
@@ -69,11 +70,17 @@ function withOrder<S extends z.ZodType>(schema: S, fn: (c: C, o: Order, body: z.
     if (!body.success) return bad(c, body.error)
     const o = await db.getOrderByNumber(c.env.DB, n.data)
     if (!o) return refuse(c, 'not_found', 'Order not found', 404)
-    // A client that read an older version is refused before anything runs; the batch re-checks it either way.
+    // A client that read an older version is refused before anything runs; the batch re-checks the version the
+    // client sent (body.expectedVersion, never o.version) either way.
     const sent = (body.data as { expectedVersion?: number }).expectedVersion
     if (sent !== undefined && sent !== o.version) return conflict(c)
-    return fn(c, o, body.data, o.version)
+    return fn(c, o, body.data)
   }
+}
+/** Why a contact-guarded write changed nothing: the contact was archived meanwhile, or the order moved on. */
+async function contactRefusal(c: C, contactId: number | null) {
+  const contact = contactId === null ? null : await db.getContactCustomer(c.env.DB, contactId)
+  return contact?.archived ? refuse(c, 'contact_archived', 'Contact is archived') : conflict(c)
 }
 const notActive = (c: C) => refuse(c, 'order_not_active', 'Order is cancelled or closed')
 const started = (c: C) => refuse(c, 'production_started', 'Production has started; items and quotes are frozen')
@@ -130,6 +137,7 @@ export function orderWriteRoutes() {
         dueDate: b.dueDate ?? null, poRequired, paymentTerms: b.paymentTerms ?? customer.default_payment_terms, artworkRequired: b.artworkRequired,
         productionStatus: initialStatus(b.artworkRequired, poRequired), items: b.items.map((i) => ({ ...toWrite(i), id: undefined })),
       })
+      if (n === null) return contactRefusal(c, b.contactId ?? null) // nothing written, no number used
       const state = await db.orderState(c.env.DB, { number: formatOrderNumber(y, n) })
       return state ? c.json<OrderWriteResponse>(state, 201) : conflict(c)
     })
@@ -139,7 +147,7 @@ export function orderWriteRoutes() {
       source: z.enum(ORDER_SOURCES).optional(), poRequired: z.boolean().optional(), paymentTerms: z.enum(PAYMENT_TERMS).optional(),
       artworkRequired: z.boolean().optional(), materialsRequired: z.boolean().optional(), confirmNoPurchasing: z.boolean().optional(),
       assigneeId: id.nullable().optional(),
-    }), async (c, o, b, version) => {
+    }), async (c, o, b) => {
       if (o.state !== 'active') return notActive(c)
       const current: Record<db.HeaderField, string | number | null> = {
         title: o.title, dueDate: o.due_date, contactId: o.contact_id, source: o.source, poRequired: o.po_required, paymentTerms: o.payment_terms,
@@ -163,10 +171,12 @@ export function orderWriteRoutes() {
         return refuse(c, 'invalid_request', 'Assignee must be an active user', 400)
       }
       if (!Object.keys(changes).length) return written(c, await db.orderState(c.env.DB, { id: o.id }))
-      return written(c, await db.updateOrderHeader(c.env.DB, { orderId: o.id, version, actorId: c.get('user').id, changes, before: current, noPurchasing }))
+      const state = await db.updateOrderHeader(c.env.DB, { orderId: o.id, version: b.expectedVersion, actorId: c.get('user').id, changes, before: current, noPurchasing })
+      if (!state && changes.contactId) return contactRefusal(c, changes.contactId as number)
+      return written(c, state)
     }))
 
-    .put('/orders/:number/items', withOrder(z.object({ expectedVersion, items }), async (c, o, b, version) => {
+    .put('/orders/:number/items', withOrder(z.object({ expectedVersion, items }), async (c, o, b) => {
       if (o.state !== 'active') return notActive(c)
       if (STARTED.includes(o.production_status)) return started(c)
       const before = await db.listItems(c.env.DB, o.id)
@@ -177,24 +187,24 @@ export function orderWriteRoutes() {
       const after = b.items.map(toWrite)
       const bump = itemsChangeRequiresReapproval(before, after) ? 1 : 0
       return written(c, await db.replaceItems(c.env.DB, {
-        orderId: o.id, version, actorId: c.get('user').id, items: after, itemsRevision: { from: o.items_revision, to: o.items_revision + bump },
+        orderId: o.id, version: b.expectedVersion, actorId: c.get('user').id, items: after, itemsRevision: { from: o.items_revision, to: o.items_revision + bump },
       }))
     }))
 
-    .post('/orders/:number/quotes', withOrder(optionalVersion, async (c, o, _b, version) => {
+    .post('/orders/:number/quotes', withOrder(versioned, async (c, o, b) => {
       if (o.state !== 'active') return notActive(c)
       if (STARTED.includes(o.production_status)) return started(c)
       const snap = snapshotOr409(c, await db.listItems(c.env.DB, o.id))
       if (snap instanceof Response) return snap
       const plan = planNewVersion(await db.listQuotes(c.env.DB, o.id))
       const state = await db.createQuote(c.env.DB, {
-        orderId: o.id, version, actorId: c.get('user').id, quoteVersion: plan.version, itemsRevision: o.items_revision,
+        orderId: o.id, version: b.expectedVersion, actorId: c.get('user').id, quoteVersion: plan.version, itemsRevision: o.items_revision,
         totals: snap.totals, lines: quoteLines(snap.lines), supersedeIds: plan.supersedeIds.map(Number),
       })
       return written(c, state, { quote: { version: plan.version, status: 'draft' } })
     }))
 
-    .post('/orders/:number/quotes/:version/refresh', withOrder(optionalVersion, async (c, o, _b, version) => {
+    .post('/orders/:number/quotes/:version/refresh', withOrder(versioned, async (c, o, b) => {
       if (o.state !== 'active') return notActive(c)
       if (STARTED.includes(o.production_status)) return started(c)
       const q = (await db.listQuotes(c.env.DB, o.id)).find((x) => String(x.version) === c.req.param('version'))
@@ -203,12 +213,12 @@ export function orderWriteRoutes() {
       const snap = snapshotOr409(c, await db.listItems(c.env.DB, o.id))
       if (snap instanceof Response) return snap
       return written(c, await db.refreshQuote(c.env.DB, {
-        orderId: o.id, version, actorId: c.get('user').id, quoteId: q.id, quoteVersion: q.version, itemsRevision: o.items_revision,
+        orderId: o.id, version: b.expectedVersion, actorId: c.get('user').id, quoteId: q.id, quoteVersion: q.version, itemsRevision: o.items_revision,
         totals: snap.totals, lines: quoteLines(snap.lines),
       }), { quote: { version: q.version, status: 'draft' } })
     }))
 
-    .post('/orders/:number/quotes/:version/duplicate', withOrder(optionalVersion, async (c, o, _b, version) => {
+    .post('/orders/:number/quotes/:version/duplicate', withOrder(versioned, async (c, o, b) => {
       if (o.state !== 'active') return notActive(c)
       if (STARTED.includes(o.production_status)) return started(c)
       const quotes = await db.listQuotes(c.env.DB, o.id)
@@ -223,12 +233,12 @@ export function orderWriteRoutes() {
       if (snap instanceof Response) return snap
       const plan = planNewVersion(quotes)
       return written(c, await db.createQuote(c.env.DB, {
-        orderId: o.id, version, actorId: c.get('user').id, quoteVersion: plan.version, itemsRevision, totals: snap.totals,
+        orderId: o.id, version: b.expectedVersion, actorId: c.get('user').id, quoteVersion: plan.version, itemsRevision, totals: snap.totals,
         lines: quoteLines(snap.lines), supersedeIds: plan.supersedeIds.map(Number), replaceItems: restored, duplicateOf: source.version,
       }), { quote: { version: plan.version, status: 'draft' } })
     }))
 
-    .patch('/orders/:number/quotes/:version', withOrder(z.object({ to: z.enum(['sent', 'accepted', 'declined']), expectedVersion: expectedVersion.optional() }), async (c, o, b, version) => {
+    .patch('/orders/:number/quotes/:version', withOrder(z.object({ to: z.enum(['sent', 'accepted', 'declined']), expectedVersion }), async (c, o, b) => {
       if (o.state !== 'active') return notActive(c)
       const q = (await db.listQuotes(c.env.DB, o.id)).find((x) => String(x.version) === c.req.param('version'))
       if (!q) return refuse(c, 'not_found', 'Quote not found', 404)
@@ -243,43 +253,50 @@ export function orderWriteRoutes() {
         }
         if (q.items_revision !== o.items_revision) return refuse(c, 'quote_stale', 'The items changed after this quote was made')
       }
-      return written(c, await db.changeQuoteStatus(c.env.DB, { orderId: o.id, version, actorId: c.get('user').id, quoteId: q.id, quoteVersion: q.version, from: q.status, to: b.to }),
+      return written(c, await db.changeQuoteStatus(c.env.DB, { orderId: o.id, version: b.expectedVersion, actorId: c.get('user').id, quoteId: q.id, quoteVersion: q.version, from: q.status, to: b.to }),
         { quote: { version: q.version, status: b.to } })
     }))
 
     .post('/orders/:number/repeat', withOrder(z.object({ source: z.enum(ORDER_SOURCES), dueDate: businessDate.nullish() }), async (c, o, b) => {
+      // The contact is copied, so it must still be the customer's live contact (the SQL re-checks it).
+      if (o.contact_id !== null) {
+        const contact = await db.getContactCustomer(c.env.DB, o.contact_id)
+        if (contact?.customer_id !== o.customer_id) return refuse(c, 'contact_not_for_customer', "The source order's contact is not this customer's")
+        if (contact.archived) return refuse(c, 'contact_archived', "The source order's contact is archived")
+      }
       const y = year()
       const n = await db.repeatOrder(c.env.DB, {
         year: y, actorId: c.get('user').id, sourceId: o.id, source: b.source, dueDate: b.dueDate ?? null,
         productionStatus: initialStatus(o.artwork_required === 1, o.po_required === 1),
       })
+      if (n === null) return contactRefusal(c, o.contact_id) // nothing written, no number used
       const state = await db.orderState(c.env.DB, { number: formatOrderNumber(y, n) })
       return state ? c.json<OrderWriteResponse>(state, 201) : conflict(c)
     }))
 
-    .post('/orders/:number/authorization', withOrder(z.object({ method: z.enum(AUTHORIZATION_METHODS), notes: optText(2000), expectedVersion: expectedVersion.optional() }), async (c, o, b, version) => {
+    .post('/orders/:number/authorization', withOrder(z.object({ method: z.enum(AUTHORIZATION_METHODS), notes: optText(2000), expectedVersion }), async (c, o, b) => {
       if (o.state !== 'active') return notActive(c)
       // Direct authorization never substitutes for a required PO.
       if (o.po_required === 1) return refuse(c, 'po_required', 'This order needs a purchase order')
-      return written(c, await db.recordAuthorization(c.env.DB, { orderId: o.id, version, actorId: c.get('user').id, method: b.method, notes: b.notes, previous: o.authorization_method }))
+      return written(c, await db.recordAuthorization(c.env.DB, { orderId: o.id, version: b.expectedVersion, actorId: c.get('user').id, method: b.method, notes: b.notes, previous: o.authorization_method }))
     }))
 
-    .delete('/orders/:number/authorization', withOrder(reason, async (c, o, b, version) => {
+    .delete('/orders/:number/authorization', withOrder(reason, async (c, o, b) => {
       if (o.state !== 'active') return notActive(c)
       if (!o.authorized_at) return refuse(c, 'not_authorized', 'This order has no direct authorization')
-      return written(c, await db.revokeAuthorization(c.env.DB, { orderId: o.id, version, actorId: c.get('user').id, reason: b.reason, previous: o.authorization_method }))
+      return written(c, await db.revokeAuthorization(c.env.DB, { orderId: o.id, version: b.expectedVersion, actorId: c.get('user').id, reason: b.reason, previous: o.authorization_method }))
     }))
 
-    .post('/orders/:number/cancel', withOrder(reason, async (c, o, b, version) => {
+    .post('/orders/:number/cancel', withOrder(reason, async (c, o, b) => {
       if (o.state !== 'active') return refuse(c, 'transition_not_allowed', 'Only an active order can be cancelled')
       const productionTo = o.production_status === 'in_production'
         ? readiness(await db.readinessInput(c.env.DB, o)).preProductionStatus : o.production_status
-      return written(c, await db.cancelOrder(c.env.DB, { orderId: o.id, version, actorId: c.get('user').id, reason: b.reason, productionFrom: o.production_status, productionTo }))
+      return written(c, await db.cancelOrder(c.env.DB, { orderId: o.id, version: b.expectedVersion, actorId: c.get('user').id, reason: b.reason, productionFrom: o.production_status, productionTo }))
     }))
 
-    .post('/orders/:number/reopen', withOrder(optionalVersion, async (c, o, _b, version) => {
+    .post('/orders/:number/reopen', withOrder(versioned, async (c, o, b) => {
       if (o.state !== 'cancelled') return refuse(c, 'transition_not_allowed', 'Only a cancelled order can be reopened')
-      return written(c, await db.reopenOrder(c.env.DB, { orderId: o.id, version, actorId: c.get('user').id }))
+      return written(c, await db.reopenOrder(c.env.DB, { orderId: o.id, version: b.expectedVersion, actorId: c.get('user').id }))
     }))
 
     .post('/orders/:number/notes', withOrder(z.object({ body: text(5000) }), async (c, o, b) => {

@@ -16,11 +16,11 @@ function setup(withSeed = true) {
   const { db, sqlite } = createTestD1()
   sqlite.exec(withSeed ? seed : MINIMAL)
   const app = new Hono<AppEnv>().route('/api/app', appRoutes())
-  const call = (method: string, path: string, body?: unknown, auth = true) =>
+  const call = (method: string, path: string, body?: unknown, auth = true, DB = db) =>
     app.request(
       `http://localhost/api/app${path}`,
       { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) },
-      auth ? { DB: db, DEV_AUTH_EMAIL: 'owner1@example.com' } : { DB: db, ACCESS_AUD: 'a', ACCESS_TEAM_DOMAIN: 't.cloudflareaccess.com' },
+      auth ? { DB, DEV_AUTH_EMAIL: 'owner1@example.com' } : { DB, ACCESS_AUD: 'a', ACCESS_TEAM_DOMAIN: 't.cloudflareaccess.com' },
     )
   const one = <T>(sql: string, ...p: (string | number)[]) => sqlite.prepare(sql).get(...p) as T
   const all = <T>(sql: string, ...p: (string | number)[]) => sqlite.prepare(sql).all(...p) as T[]
@@ -221,7 +221,7 @@ describe('replace items', () => {
 describe('quotes', () => {
   test('a new version snapshots the items and supersedes the older open versions', async () => {
     const t = setup()
-    const res = await t.send('POST', '/orders/2026-0023/quotes')
+    const res = await t.send('POST', '/orders/2026-0023/quotes', { expectedVersion: t.v('2026-0023') })
     expect(res).toMatchObject({ status: 200, body: { quote: { version: 3, status: 'draft' } } })
     expect(quotesOf(t, '2026-0023').map((q) => [q.version, q.status])).toEqual([[1, 'superseded'], [2, 'superseded'], [3, 'draft']])
     expect(quotesOf(t, '2026-0023')[2]).toMatchObject({ items_revision: 1, total_cents: 6000 + 144000 + 36000 })
@@ -229,33 +229,33 @@ describe('quotes', () => {
       .toEqual([{ kind: 'product', product: 'Lanyard', line_total_cents: 6000 }, { kind: 'product', product: 'Polo shirt', line_total_cents: 144000 }, { kind: 'product', product: 'Tumbler', line_total_cents: 36000 }])
     expect(t.lastActivity()).toMatchObject({ action: 'quote_created', after: '{"quote_version":3,"items_revision":1}' })
     // An accepted quote is superseded by a new version too (order 17).
-    await t.send('POST', '/orders/2026-0017/quotes')
+    await t.send('POST', '/orders/2026-0017/quotes', { expectedVersion: t.v('2026-0017') })
     expect(quotesOf(t, '2026-0017').map((q) => q.status)).toEqual(['superseded', 'draft'])
     expect(t.order('2026-0017').production_status).toBe('awaiting_quote')
   })
   test('a discount larger than the total is 409, nothing written', async () => {
     const t = setup()
     t.sqlite.exec(`INSERT INTO order_items (order_id, kind, description, quantity, unit_price_cents) VALUES (25, 'discount', 'Too much', 1, 999999)`)
-    await t.refused('POST', '/orders/2026-0025/quotes', {}, 409, 'discount_exceeds_total')
+    await t.refused('POST', '/orders/2026-0025/quotes', { expectedVersion: t.v('2026-0025') }, 409, 'discount_exceeds_total')
     expect(quotesOf(t, '2026-0025')).toEqual([])
   })
   test('send then accept: timestamps set, the status re-derived', async () => {
     const t = setup()
-    await t.send('POST', '/orders/2026-0025/quotes')
-    const sent = await t.send('PATCH', '/orders/2026-0025/quotes/1', { to: 'sent' })
+    await t.send('POST', '/orders/2026-0025/quotes', { expectedVersion: t.v('2026-0025') })
+    const sent = await t.send('PATCH', '/orders/2026-0025/quotes/1', { expectedVersion: t.v('2026-0025'), to: 'sent' })
     expect(sent.body).toMatchObject({ quote: { version: 1, status: 'sent' }, productionStatus: 'awaiting_quote' })
-    const accepted = await t.send('PATCH', '/orders/2026-0025/quotes/1', { to: 'accepted' })
+    const accepted = await t.send('PATCH', '/orders/2026-0025/quotes/1', { expectedVersion: t.v('2026-0025'), to: 'accepted' })
     expect(accepted.body).toMatchObject({ quote: { status: 'accepted' }, productionStatus: 'awaiting_authorization' })
     expect(quotesOf(t, '2026-0025')[0]).toMatchObject({ status: 'accepted', sent_at: expect.any(String), decided_at: expect.any(String) })
-    await t.refused('PATCH', '/orders/2026-0025/quotes/1', { to: 'declined' }, 409, 'invalid_quote_transition')
-    await t.refused('PATCH', '/orders/2026-0025/quotes/9', { to: 'sent' }, 404, 'not_found')
+    await t.refused('PATCH', '/orders/2026-0025/quotes/1', { expectedVersion: t.v('2026-0025'), to: 'declined' }, 409, 'invalid_quote_transition')
+    await t.refused('PATCH', '/orders/2026-0025/quotes/9', { expectedVersion: t.v('2026-0025'), to: 'sent' }, 404, 'not_found')
   })
   test('accepting a quote made before the items changed is 409 quote_stale', async () => {
     const t = setup()
     t.sqlite.exec(`UPDATE order_items SET unit_price_cents = 1000 WHERE id = 51; UPDATE orders SET items_revision = 1 WHERE id = 25`)
-    await t.send('POST', '/orders/2026-0025/quotes')
+    await t.send('POST', '/orders/2026-0025/quotes', { expectedVersion: t.v('2026-0025') })
     t.sqlite.exec(`UPDATE orders SET items_revision = 2 WHERE id = 25`)
-    await t.refused('PATCH', '/orders/2026-0025/quotes/1', { to: 'accepted' }, 409, 'quote_stale')
+    await t.refused('PATCH', '/orders/2026-0025/quotes/1', { expectedVersion: t.v('2026-0025'), to: 'accepted' }, 409, 'quote_stale')
     // Order 14 in the seed: v1 accepted at revision 1, items now at revision 2; a refresh of a new draft fixes it.
     expect(quotesOf(t, '2026-0025')[0]?.status).toBe('draft')
   })
@@ -263,8 +263,8 @@ describe('quotes', () => {
     const t = setup()
     const v = t.v('2026-0025')
     await t.send('PUT', '/orders/2026-0025/items', { expectedVersion: v, items: [{ kind: 'charge', description: 'Design fee', quantity: 1, unitPriceCents: 5000 }] })
-    await t.send('POST', '/orders/2026-0025/quotes')
-    await t.refused('PATCH', '/orders/2026-0025/quotes/1', { to: 'accepted' }, 409, 'no_product_line')
+    await t.send('POST', '/orders/2026-0025/quotes', { expectedVersion: t.v('2026-0025') })
+    await t.refused('PATCH', '/orders/2026-0025/quotes/1', { expectedVersion: t.v('2026-0025'), to: 'accepted' }, 409, 'no_product_line')
     const o = t.order('2026-0025')
     const q = t.one<{ id: number }>('SELECT id FROM quotes WHERE order_id = 25')
     const before = t.activityCount()
@@ -274,30 +274,30 @@ describe('quotes', () => {
   })
   test('trigger errors reach the client as 409 with their code', async () => {
     const t = setup()
-    await t.send('POST', '/orders/2026-0025/quotes')
+    await t.send('POST', '/orders/2026-0025/quotes', { expectedVersion: t.v('2026-0025') })
     t.sqlite.exec(`CREATE TEMP TRIGGER frozen BEFORE UPDATE OF status ON quotes BEGIN SELECT RAISE(ABORT, 'quote_frozen'); END`)
-    await t.refused('PATCH', '/orders/2026-0025/quotes/1', { to: 'sent' }, 409, 'quote_frozen')
+    await t.refused('PATCH', '/orders/2026-0025/quotes/1', { expectedVersion: t.v('2026-0025'), to: 'sent' }, 409, 'quote_frozen')
   })
   test('refresh re-snapshots a draft from the current items; a sent quote refuses', async () => {
     const t = setup()
     const items = itemsOf(t, '2026-0023')
     t.sqlite.exec(`UPDATE order_items SET unit_price_cents = 500 WHERE id = ${items[0]!.id}; UPDATE orders SET items_revision = 2 WHERE id = 23`)
-    const res = await t.send('POST', '/orders/2026-0023/quotes/2/refresh')
+    const res = await t.send('POST', '/orders/2026-0023/quotes/2/refresh', { expectedVersion: t.v('2026-0023') })
     expect(res.body).toMatchObject({ quote: { version: 2, status: 'draft' } })
     expect(quotesOf(t, '2026-0023')[1]).toMatchObject({ items_revision: 2, total_cents: 5000 + 144000 + 36000 })
     expect(t.lastActivity()).toMatchObject({ action: 'quote_refreshed' })
-    await t.refused('POST', '/orders/2026-0022/quotes/1/refresh', {}, 409, 'quote_not_draft')
+    await t.refused('POST', '/orders/2026-0022/quotes/1/refresh', { expectedVersion: t.v('2026-0022') }, 409, 'quote_not_draft')
   })
   test('duplicate copies a version back into the items and makes a new draft from it', async () => {
     const t = setup()
     // Order 23: v1 (superseded) has the old polo price 2400, v2 (draft) has 2200; the items carry 2400.
     t.sqlite.exec(`UPDATE order_items SET unit_price_cents = 2200 WHERE id = 46; UPDATE orders SET items_revision = 2 WHERE id = 23`)
-    const res = await t.send('POST', '/orders/2026-0023/quotes/1/duplicate')
+    const res = await t.send('POST', '/orders/2026-0023/quotes/1/duplicate', { expectedVersion: t.v('2026-0023') })
     expect(res.body).toMatchObject({ quote: { version: 3, status: 'draft' }, itemsRevision: 3 })
     expect(itemsOf(t, '2026-0023').map((i) => [i.product, i.unit_price_cents])).toEqual([['Lanyard', 600], ['Polo shirt', 2400], ['Tumbler', 1800]])
     expect(quotesOf(t, '2026-0023').map((q) => [q.version, q.status, q.items_revision])).toEqual([[1, 'superseded', 1], [2, 'superseded', 1], [3, 'draft', 3]])
     // Duplicating what the items already are is not a customer-facing change.
-    const again = await t.send('POST', '/orders/2026-0023/quotes/3/duplicate')
+    const again = await t.send('POST', '/orders/2026-0023/quotes/3/duplicate', { expectedVersion: t.v('2026-0023') })
     expect(again.body).toMatchObject({ quote: { version: 4 }, itemsRevision: 3 })
   })
 })
@@ -325,44 +325,39 @@ describe('repeat order', () => {
 describe('direct authorization', () => {
   test('recorded only on a non-PO order, re-derives, and revoking drops a ready order back', async () => {
     const t = setup()
-    await t.refused('POST', '/orders/2026-0005/authorization', { method: 'phone' }, 409, 'po_required')
+    await t.refused('POST', '/orders/2026-0005/authorization', { expectedVersion: t.v('2026-0005'), method: 'phone' }, 409, 'po_required')
     // Order 21: quote accepted, not authorized.
-    const rec = await t.send('POST', '/orders/2026-0021/authorization', { method: 'signed_form', notes: 'Form on file' })
+    const rec = await t.send('POST', '/orders/2026-0021/authorization', { expectedVersion: t.v('2026-0021'), method: 'signed_form', notes: 'Form on file' })
     expect(rec.body.productionStatus).toBe('awaiting_materials') // artwork approved, materials still needed
     expect(t.order('2026-0021')).toMatchObject({ authorized_by: 1, authorization_method: 'signed_form', authorization_notes: 'Form on file', authorized_at: expect.stringMatching(/Z$/) })
     // Order 17 is ready; revoking needs a reason and moves it back to awaiting_authorization.
-    await t.refused('DELETE', '/orders/2026-0017/authorization', {}, 400, 'invalid_request')
-    const rev = await t.send('DELETE', '/orders/2026-0017/authorization', { reason: 'Customer withdrew approval' })
+    await t.refused('DELETE', '/orders/2026-0017/authorization', { expectedVersion: t.v('2026-0017') }, 400, 'invalid_request')
+    const rev = await t.send('DELETE', '/orders/2026-0017/authorization', { expectedVersion: t.v('2026-0017'), reason: 'Customer withdrew approval' })
     expect(rev.body.productionStatus).toBe('awaiting_authorization')
     expect(t.order('2026-0017')).toMatchObject({ authorized_at: null, authorized_by: null, authorization_method: null, authorization_notes: null })
     const logs = t.all<{ action: string; after: string }>('SELECT action, after FROM activity_log WHERE entity_id = 17 ORDER BY id DESC LIMIT 2')
     expect(logs.map((l) => l.action)).toEqual(['production_status_changed', 'authorization_revoked'])
     expect(JSON.parse(logs[1]!.after)).toEqual({ reason: 'Customer withdrew approval' })
-    await t.refused('DELETE', '/orders/2026-0017/authorization', { reason: 'again' }, 409, 'not_authorized')
+    await t.refused('DELETE', '/orders/2026-0017/authorization', { expectedVersion: t.v('2026-0017'), reason: 'again' }, 409, 'not_authorized')
   })
-  test('the re-derive never moves an order in production or later', async () => {
-    const t = setup()
-    // Order 19 is in quality control on a direct authorization.
-    expect((await t.send('DELETE', '/orders/2026-0019/authorization', { reason: 'x' })).body.productionStatus).toBe('quality_control')
-    expect(t.order('2026-0019').production_status).toBe('quality_control')
-  })
+  // "The re-derive never moves an order in production or later" is parameterised over all three statuses below.
 })
 
 describe('cancel, reopen, notes', () => {
   test('cancelling a running job drops it to the derived pre-production status; reopening re-derives', async () => {
     const t = setup()
     t.sqlite.exec(`UPDATE purchase_orders SET status = 'rejected' WHERE id = 3`) // order 3 is in production
-    await t.refused('POST', '/orders/2026-0003/cancel', {}, 400, 'invalid_request')
-    const res = await t.send('POST', '/orders/2026-0003/cancel', { reason: 'District cancelled the PO' })
+    await t.refused('POST', '/orders/2026-0003/cancel', { expectedVersion: t.v('2026-0003') }, 400, 'invalid_request')
+    const res = await t.send('POST', '/orders/2026-0003/cancel', { expectedVersion: t.v('2026-0003'), reason: 'District cancelled the PO' })
     expect(res.body).toMatchObject({ state: 'cancelled', productionStatus: 'awaiting_authorization' })
     expect(JSON.parse(t.lastActivity().after!)).toEqual({ state: 'cancelled', production_status: 'awaiting_authorization', reason: 'District cancelled the PO' })
-    await t.refused('POST', '/orders/2026-0003/cancel', { reason: 'again' }, 409, 'transition_not_allowed')
+    await t.refused('POST', '/orders/2026-0003/cancel', { expectedVersion: t.v('2026-0003'), reason: 'again' }, 409, 'transition_not_allowed')
     await t.refused('PUT', '/orders/2026-0003/items', { expectedVersion: t.v('2026-0003'), items: [] }, 409, 'order_not_active')
     t.sqlite.exec(`UPDATE purchase_orders SET status = 'approved' WHERE id = 3`)
-    const reopened = await t.send('POST', '/orders/2026-0003/reopen')
+    const reopened = await t.send('POST', '/orders/2026-0003/reopen', { expectedVersion: t.v('2026-0003') })
     expect(reopened.body).toMatchObject({ state: 'active', productionStatus: 'ready' })
-    await t.refused('POST', '/orders/2026-0003/reopen', {}, 409, 'transition_not_allowed')
-    await t.refused('POST', '/orders/2026-0001/reopen', {}, 409, 'transition_not_allowed') // closed is not reopened
+    await t.refused('POST', '/orders/2026-0003/reopen', { expectedVersion: t.v('2026-0003') }, 409, 'transition_not_allowed')
+    await t.refused('POST', '/orders/2026-0001/reopen', { expectedVersion: t.v('2026-0001') }, 409, 'transition_not_allowed') // closed is not reopened
   })
   test('a note is stored with its author and logged without its body', async () => {
     const t = setup()
@@ -384,11 +379,11 @@ describe('atomicity and vocabulary', () => {
       ['POST', '/orders', { customerId: 6, source: 'phone', title: 'x', items: [tee] }],
       ['PATCH', '/orders/2026-0022', { expectedVersion: 0, title: 'x' }],
       ['PUT', '/orders/2026-0022/items', { expectedVersion: 0, items: [tee] }],
-      ['POST', '/orders/2026-0023/quotes', {}],
-      ['PATCH', '/orders/2026-0022/quotes/1', { to: 'accepted' }],
+      ['POST', '/orders/2026-0023/quotes', { expectedVersion: t.v('2026-0023') }],
+      ['PATCH', '/orders/2026-0022/quotes/1', { expectedVersion: t.v('2026-0022'), to: 'accepted' }],
       ['POST', '/orders/2026-0015/repeat', { source: 'phone' }],
-      ['POST', '/orders/2026-0021/authorization', { method: 'phone' }],
-      ['POST', '/orders/2026-0022/cancel', { reason: 'x' }],
+      ['POST', '/orders/2026-0021/authorization', { expectedVersion: t.v('2026-0021'), method: 'phone' }],
+      ['POST', '/orders/2026-0022/cancel', { expectedVersion: t.v('2026-0022'), reason: 'x' }],
       ['POST', '/orders/2026-0022/notes', { body: 'x' }],
     ] as const) expect((await t.call(method, path, body)).status, `${method} ${path}`).toBe(500)
     expect(snapshot()).toBe(before)
@@ -396,16 +391,16 @@ describe('atomicity and vocabulary', () => {
   test('the writes log only codes from ACTIVITY_ACTIONS', async () => {
     const t = setup()
     await t.send('PATCH', '/orders/2026-0016', { expectedVersion: 0, materialsRequired: false, confirmNoPurchasing: true, title: 'x' })
-    await t.send('POST', '/orders/2026-0023/quotes')
-    await t.send('PATCH', '/orders/2026-0023/quotes/3', { to: 'sent' })
-    await t.send('POST', '/orders/2026-0023/quotes/1/duplicate')
-    await t.send('POST', '/orders/2026-0023/quotes/4/refresh')
+    await t.send('POST', '/orders/2026-0023/quotes', { expectedVersion: t.v('2026-0023') })
+    await t.send('PATCH', '/orders/2026-0023/quotes/3', { expectedVersion: t.v('2026-0023'), to: 'sent' })
+    await t.send('POST', '/orders/2026-0023/quotes/1/duplicate', { expectedVersion: t.v('2026-0023') })
+    await t.send('POST', '/orders/2026-0023/quotes/4/refresh', { expectedVersion: t.v('2026-0023') })
     await t.send('POST', '/orders/2026-0015/repeat', { source: 'phone' })
-    await t.send('POST', '/orders/2026-0021/authorization', { method: 'phone' })
-    await t.send('DELETE', '/orders/2026-0021/authorization', { reason: 'x' })
+    await t.send('POST', '/orders/2026-0021/authorization', { expectedVersion: t.v('2026-0021'), method: 'phone' })
+    await t.send('DELETE', '/orders/2026-0021/authorization', { expectedVersion: t.v('2026-0021'), reason: 'x' })
     await t.send('PATCH', '/orders/2026-0022', { expectedVersion: 0, title: 'y' })
-    await t.send('POST', '/orders/2026-0022/cancel', { reason: 'x' })
-    await t.send('POST', '/orders/2026-0022/reopen')
+    await t.send('POST', '/orders/2026-0022/cancel', { expectedVersion: t.v('2026-0022'), reason: 'x' })
+    await t.send('POST', '/orders/2026-0022/reopen', { expectedVersion: t.v('2026-0022') })
     await t.call('POST', '/orders/2026-0022/notes', { body: 'x' })
     await t.send('PUT', '/orders/2026-0025/items', { expectedVersion: 0, items: [tee] })
     const actions = t.all<{ action: string }>('SELECT DISTINCT action FROM activity_log').map((r) => r.action)
@@ -426,5 +421,131 @@ describe('business dates', () => {
     expect(d.metrics.dueIn7Days).toEqual({ count: 1, overdue: 1 }) // UTC would say both overdue
     expect(d.dueThisWeek.map((r) => r.number)).toEqual(['2026-0002'])
     expect(d.needsAttention.map((r) => [r.number, r.reason, r.reasonDays])).toEqual([['2026-0001', 'overdue', 1]])
+  })
+})
+
+// ---- Codex review of cce1dc9 ----
+
+/** A D1 that runs `act` right after the first read whose SQL contains `match`: a write landing between the route's read and its batch. */
+function afterRead(db: T['db'], match: string, act: () => void): T['db'] {
+  let done = false
+  type S = { bind: (...v: unknown[]) => S; first: (c?: string) => Promise<unknown> }
+  const wrap = (s: S): S => ({
+    ...s,
+    bind: (...v) => wrap(s.bind(...v)),
+    first: async (c) => {
+      const r = await s.first(c)
+      if (!done) {
+        done = true
+        act()
+      }
+      return r
+    },
+  })
+  const d = db as unknown as { prepare: (sql: string) => S; batch: unknown }
+  return { prepare: (sql: string) => (sql.includes(match) ? wrap(d.prepare(sql)) : d.prepare(sql)), batch: d.batch } as unknown as T['db']
+}
+const CONTACT_READ = 'FROM customer_contacts WHERE id = ?'
+const archive = (t: T, contactId: number) => t.sqlite.exec(`UPDATE customer_contacts SET archived_at = '2026-10-01T00:00:00Z' WHERE id = ${contactId}`)
+const ledger = (t: T) => JSON.stringify([t.all('SELECT * FROM counters'), t.all('SELECT id, number FROM orders'), t.activityCount()])
+
+describe('Codex review of cce1dc9', () => {
+  test('replace items: a new line placed before the retained max-id item never takes its id', async () => {
+    const t = setup()
+    const n = (await t.send('POST', '/orders', { customerId: 6, source: 'phone', title: 'x', items: [tee] })).body.number
+    const [kept] = itemsOf(t, n)
+    expect(kept!.id).toBe(t.one<{ m: number }>('SELECT MAX(id) AS m FROM order_items').m) // the table's last row
+    const res = await t.send('PUT', `/orders/${n}/items`, { expectedVersion: 0, items: [{ ...tee, product: 'New hoodie' }, { ...tee, id: kept!.id, notes: 'kept' }] })
+    expect(res.status).toBe(200)
+    const after = itemsOf(t, n)
+    expect(after).toHaveLength(2)
+    expect(after.find((i) => i.id === kept!.id)).toMatchObject({ product: 'Gildan tee', notes: 'kept' })
+    expect(after.find((i) => i.id !== kept!.id)).toMatchObject({ product: 'New hoodie' })
+    // A removed line is deleted, a retained one keeps its id.
+    await t.send('PUT', `/orders/${n}/items`, { expectedVersion: 1, items: [{ ...tee, id: kept!.id }] })
+    expect(itemsOf(t, n).map((i) => i.id)).toEqual([kept!.id])
+  })
+
+  test('repeat: a source whose contact is archived is refused, no order, no number used', async () => {
+    const t = setup()
+    archive(t, 7) // order 15's contact
+    const before = ledger(t)
+    await t.refused('POST', '/orders/2026-0015/repeat', { source: 'email' }, 409, 'contact_archived')
+    expect(ledger(t)).toBe(before)
+    // The SQL holds the same rule when the archive lands after the route's check.
+    expect(await dbo.repeatOrder(t.db, { year: 2026, actorId: 1, sourceId: 15, source: 'email', dueDate: null, productionStatus: 'awaiting_quote' })).toBeNull()
+    expect(ledger(t)).toBe(before)
+  })
+
+  test('header: a contact archived between the route read and the batch is 409 contact_archived, nothing applied or logged', async () => {
+    const t = setup()
+    const o = t.order('2026-0007')
+    const before = ledger(t)
+    const res = await t.call('PATCH', '/orders/2026-0007', { expectedVersion: 0, contactId: 2 }, true, afterRead(t.db, CONTACT_READ, () => archive(t, 2)))
+    expect(res.status).toBe(409)
+    expect(((await res.json()) as { code: string }).code).toBe('contact_archived')
+    expect(t.order('2026-0007')).toMatchObject({ contact_id: o.contact_id, version: o.version })
+    expect(ledger(t)).toBe(before)
+    // db level: the guarded UPDATE itself refuses.
+    expect(await dbo.updateOrderHeader(t.db, { orderId: o.id, version: o.version, actorId: 1, changes: { contactId: 2 }, before: { contactId: o.contact_id as number }, noPurchasing: false })).toBeNull()
+    expect(ledger(t)).toBe(before)
+  })
+
+  test('create: a contact archived just before the batch is refused and uses no order number', async () => {
+    const t = setup()
+    const before = ledger(t)
+    const res = await t.call('POST', '/orders', { customerId: 1, contactId: 2, source: 'phone', title: 'x', items: [tee] }, true, afterRead(t.db, CONTACT_READ, () => archive(t, 2)))
+    expect(res.status).toBe(409)
+    expect(((await res.json()) as { code: string }).code).toBe('contact_archived')
+    expect(ledger(t)).toBe(before)
+    expect(await dbo.createOrder(t.db, { year: 2026, actorId: 1, customerId: 1, contactId: 2, source: 'phone', title: 'x', dueDate: null, poRequired: true,
+      paymentTerms: 'due_after_pickup', artworkRequired: true, productionStatus: 'awaiting_quote', items: [{ ...tee, notes: null, description: null } as dbo.ItemWrite] })).toBeNull()
+    expect(ledger(t)).toBe(before)
+  })
+
+  test('expectedVersion is required on every guarded write: omitted is 400, nothing written', async () => {
+    const t = setup()
+    await t.send('POST', '/orders/2026-0025/quotes', { expectedVersion: 0 })
+    for (const [method, path, body] of [
+      ['POST', '/orders/2026-0023/quotes', {}],
+      ['POST', '/orders/2026-0023/quotes/2/refresh', {}],
+      ['POST', '/orders/2026-0023/quotes/1/duplicate', {}],
+      ['PATCH', '/orders/2026-0025/quotes/1', { to: 'sent' }],
+      ['POST', '/orders/2026-0021/authorization', { method: 'phone' }],
+      ['DELETE', '/orders/2026-0017/authorization', { reason: 'x' }],
+      ['POST', '/orders/2026-0022/cancel', { reason: 'x' }],
+      ['POST', '/orders/2026-0024/reopen', {}],
+    ] as const) await t.refused(method, path, body, 400, 'invalid_request')
+  })
+
+  test('two staff from the same version: the second is 409 and its stale values are not applied', async () => {
+    const t = setup()
+    // Both read order 17 at version 0 (authorized in person). A revokes; B, still looking at v0, re-records.
+    expect((await t.send('DELETE', '/orders/2026-0017/authorization', { reason: 'Customer withdrew', expectedVersion: 0 })).status).toBe(200)
+    await t.refused('POST', '/orders/2026-0017/authorization', { method: 'phone', expectedVersion: 0 }, 409, 'conflict_retry')
+    await t.refused('POST', '/orders/2026-0017/cancel', { reason: 'x', expectedVersion: 0 }, 409, 'conflict_retry')
+    expect(t.order('2026-0017')).toMatchObject({ authorized_at: null, authorization_method: null, state: 'active', production_status: 'awaiting_authorization' })
+  })
+
+  test('the route refuses an unacceptable snapshot on its own, not only through the trigger', async () => {
+    const t = setup()
+    await t.send('POST', '/orders/2026-0025/quotes', { expectedVersion: 0 })
+    // Sizes that don't add up: a product line is present, so quotes_accept_needs_product lets it through.
+    t.sqlite.exec(`UPDATE quote_items SET sizes = '{"M":1}' WHERE kind = 'product' AND quote_id = (SELECT id FROM quotes WHERE order_id = 25)`)
+    await t.refused('PATCH', '/orders/2026-0025/quotes/1', { to: 'accepted', expectedVersion: t.v('2026-0025') }, 409, 'invalid_request')
+    expect(quotesOf(t, '2026-0025')[0]?.status).toBe('draft')
+    // Proof the database alone would have accepted it.
+    const o = t.order('2026-0025')
+    const q = t.one<{ id: number }>('SELECT id FROM quotes WHERE order_id = 25')
+    expect(await dbo.changeQuoteStatus(t.db, { orderId: o.id, version: o.version, actorId: 1, quoteId: q.id, quoteVersion: 1, from: 'draft', to: 'accepted' })).not.toBeNull()
+  })
+
+  test.each(['in_production', 'quality_control', 'production_complete'])('the re-derive never moves an order at %s', async (status) => {
+    const t = setup()
+    // Order 19 is on a direct authorization; revoking it would drop a pre-production order to awaiting_authorization.
+    t.sqlite.exec(`UPDATE orders SET production_status = '${status}' WHERE id = 19`)
+    const res = await t.send('DELETE', '/orders/2026-0019/authorization', { reason: 'x', expectedVersion: t.v('2026-0019') })
+    expect(res).toMatchObject({ status: 200, body: { productionStatus: status } })
+    expect(t.order('2026-0019')).toMatchObject({ production_status: status, authorized_at: null })
   })
 })

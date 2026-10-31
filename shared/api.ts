@@ -143,8 +143,9 @@ export type OrderDetailResponse = {
 
 export type ProductionChangeRequest = { to: ProductionStatus }
 export type ProductionChangeResponse = { number: string; productionStatus: ProductionStatus; state: OrderState }
-export type PoChangeRequest = { to: PoStatus }
-export type PoChangeResponse = { poId: number; status: PoStatus; productionStatus: ProductionStatus }
+/** expectedVersion is the order's version; every applied PO change bumps it (the new one comes back as version). */
+export type PoChangeRequest = { to: PoStatus; expectedVersion: number }
+export type PoChangeResponse = { poId: number; status: PoStatus; productionStatus: ProductionStatus; version: number }
 // ---- order writes (M1c) ----
 export type ItemInput = {
   /** An existing item's id keeps its identity (and so its place in the reapproval comparison); omit for a new line. */
@@ -171,9 +172,11 @@ export type UpdateOrderRequest = {
   materialsRequired?: boolean; confirmNoPurchasing?: boolean; assigneeId?: number | null
 }
 export type ReplaceItemsRequest = { expectedVersion: number; items: ItemInput[] }
-export type QuoteChangeRequest = { to: 'sent' | 'accepted' | 'declined'; expectedVersion?: number }
-export type AuthorizationRequest = { method: AuthorizationMethod; notes?: string | null; expectedVersion?: number }
-export type ReasonRequest = { reason: string; expectedVersion?: number }
+export type QuoteChangeRequest = { to: 'sent' | 'accepted' | 'declined'; expectedVersion: number }
+export type AuthorizationRequest = { method: AuthorizationMethod; notes?: string | null; expectedVersion: number }
+export type ReasonRequest = { reason: string; expectedVersion: number }
+/** Body of new quote, refresh, duplicate and reopen. */
+export type VersionedRequest = { expectedVersion: number }
 /** Every order write answers with the order's state after the write (re-read from the database). */
 export type OrderWriteResponse = {
   number: string; version: number; productionStatus: ProductionStatus; itemsRevision: number; state: OrderState
