@@ -1,4 +1,3 @@
-import { useRef } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type {
   CheckClearRequest, CheckCollectRequest, CheckCreateRequest, CheckDepositRequest, CheckReadyRequest, CheckWriteResponse, CollectPickupRequest,
@@ -228,8 +227,13 @@ export const usePayments = (number: string) =>
  * failure (network error, double click), so the server records it once. A success, or any change to the details, starts
  * a new submission, so two identical payments entered one after the other are both recorded. newSubmission() forces one.
  */
+/** Unresolved submissions live at module level, by order, so closing and reopening the dialog (or using the Payments page) keeps the retry identity. */
+const pendingPayments = new Map<string, { key: string; requestId: string }>()
 export function useRecordPayment(number: string) {
-  const submission = useRef<{ key: string; requestId: string } | null>(null)
+  const submission = {
+    get current() { return pendingPayments.get(number) ?? null },
+    set current(v: { key: string; requestId: string } | null) { if (v) pendingPayments.set(number, v); else pendingPayments.delete(number) },
+  }
   const write = useOrderWrite(number, async (base, b: RecordPaymentRequest) => {
     const res = await send<RecordPaymentResponse>('POST', `${base}/payments`, b)
     if (submission.current?.requestId === b.requestId) submission.current = null

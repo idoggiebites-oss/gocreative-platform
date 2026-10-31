@@ -20,7 +20,7 @@ function CollectDialog({ check, onClose }: { check: CheckLike; onClose: () => vo
   const cents = parseDollarsToCents(amount)
   const valid = cents !== null && cents >= 1
   // The check moves are guarded by the check's own status, so the live status (from the parent's query) decides.
-  const gone = check.status !== 'ready_for_collection'
+  const gone = check.status !== 'ready_for_collection' && check.status !== 'awaiting_payment'
   return (
     <FormDialog
       open onOpenChange={(o) => !o && onClose()} title={t.collect} description={t.collectBody} submitLabel={t.collect} pending={w.isPending}
@@ -67,7 +67,7 @@ export function CheckActions({ check }: { check: CheckLike }) {
     <div className="flex flex-col gap-1.5">
       <div className="flex flex-wrap items-center gap-1.5">
         {s === 'awaiting_payment' && one(t.ready, ready, false)}
-        {s === 'ready_for_collection' && <button type="button" className={smPrimary} aria-label={aria(t.collect)} onClick={() => setDialog(true)}>{t.collect}</button>}
+        {(s === 'ready_for_collection' || s === 'awaiting_payment') && <button type="button" className={smPrimary} aria-label={aria(t.collect)} onClick={() => setDialog(true)}>{t.collect}</button>}
         {s === 'collected' && one(t.deposit, deposit)}
         {s === 'deposited' && one(t.clear, clear)}
       </div>
