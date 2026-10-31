@@ -137,10 +137,10 @@ export function OrderActions({ d }: { d: Detail }) {
 
 // ---------------------------------------------------------------- readiness
 
-const SOON: Record<string, string> = { artwork: 'M2', materials: 'M3', preparation: 'M3' }
+const SOON: Record<string, string> = { materials: 'M3', preparation: 'M3' }
 const STATE_TONE: Record<'complete' | 'pending' | 'not_required', Tone> = { complete: 'green', pending: 'amber', not_required: 'gray' }
 
-export function ReadinessCard({ d, po, goTab }: { d: Detail; po: ReactNode; goTab: (t: 'po') => void }) {
+export function ReadinessCard({ d, po, goTab }: { d: Detail; po: ReactNode; goTab: (t: 'po' | 'artwork') => void }) {
   const { m, fmt } = useI18n()
   const t = m.order.readiness
   const w = useOrderWrite(d)
@@ -173,11 +173,11 @@ export function ReadinessCard({ d, po, goTab }: { d: Detail; po: ReactNode; goTa
       return newVersion
     }
     if (key === 'authorization') {
-      if (order.poRequired) return d.purchaseOrders.length > 0 ? btn(m.order.gate.viewPo, () => goTab('po')) : null
+      if (order.poRequired) return d.purchaseOrders.length > 0 ? btn(m.order.gate.viewPo, () => goTab('po')) : btn(m.files.po.request, () => goTab('po'), true)
       return state === 'pending' ? btn(t.recordAuthorization, () => setDialog('auth'), true) : null
     }
     if (key === 'artwork') {
-      if (state === 'pending') return <>{btn(t.artworkNotRequired, () => run('PATCH', undefined, { artworkRequired: false }))}{soon('artwork', t.uploadArtwork)}</>
+      if (state === 'pending') return <>{btn(t.artworkNotRequired, () => run('PATCH', undefined, { artworkRequired: false }))}{btn(t.uploadArtwork, () => goTab('artwork'), true)}</>
       if (state === 'not_required') return btn(t.artworkRequired, () => run('PATCH', undefined, { artworkRequired: true }))
     }
     if (key === 'materials' && state === 'pending') return <>{btn(t.noPurchasing, () => setDialog('nopurchasing'))}{soon('materials', t.recordPurchase)}</>

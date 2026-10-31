@@ -4,11 +4,12 @@ import { Plus, SearchX } from 'lucide-react'
 import type { ContactPatchRequest, ContactRequest, ContactResponse, CustomerContact, CustomerDetailResponse, CustomerPatchRequest, CustomerResponse, NoteResponse } from '@shared/api'
 import { CUSTOMER_KINDS, PAYMENT_TERMS, type CustomerKind, type PaymentTerms } from '@shared/enums'
 import { useI18n } from '@/i18n'
-import { isConflict, send, useCustomer, useSend } from '@/lib/api'
+import { isConflict, send, useCustomer, useCustomerArtwork, useSend } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { KIND_TONE, isEmail } from './CustomerList'
 import { BTN, BTN_PRIMARY, BTN_SM, Check, Field, FormDialog, H2, INPUT, LINK, MutationError, SEC, TEXTAREA } from './form'
 import QueryBoundary from './QueryBoundary'
+import { Thumb } from './uploads'
 import { CARD, Chip, MUTED, PAGE, PRODUCTION_TONE, QUOTE_TONE, TD, TH } from './ui'
 
 type Detail = CustomerDetailResponse
@@ -157,6 +158,34 @@ function Notes({ d }: { d: Detail }) {
   )
 }
 
+function SavedArtwork({ id }: { id: number }) {
+  const { m } = useI18n()
+  const t = m.files.saved
+  const q = useCustomerArtwork(id)
+  const designs = q.data?.designs ?? []
+  return (
+    <section className={CARD} aria-labelledby="sa">
+      <div className={SEC}><h2 id="sa" className={H2}>{t.title}</h2></div>
+      {q.isPending ? null : designs.length === 0 ? <p className="px-4 pb-4 text-[13px] text-muted-foreground">{t.empty}</p> : (
+        <ul className="flex flex-wrap gap-3.5 px-4 pb-4">
+          {designs.map((x) => {
+            const cur = x.versions[0]!
+            const name = x.name ?? cur.file.filename ?? m.files.art.untitled
+            return (
+              <li key={x.lineageId} className="relative flex w-[100px] flex-col gap-1">
+                <Thumb file={cur.file} size={100} label={name} />
+                <Link to={`/app/orders/${x.orderNumber}`} className="truncate text-xs font-medium text-foreground no-underline after:absolute after:inset-0 after:content-[''] hover:text-primary" title={name}>{name}</Link>
+                <span className={MUTED}>{t.versions(x.versions.length)}</span>
+                <span className={`${MUTED} num`}>{t.onOrder(x.orderNumber)}</span>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </section>
+  )
+}
+
 function Customer({ d }: { d: Detail }) {
   const { m, fmt, lang } = useI18n()
   const t = m.customers
@@ -188,6 +217,7 @@ function Customer({ d }: { d: Detail }) {
       <div className="flex flex-wrap items-start gap-4">
         <div className="flex min-w-0 flex-[999_1_640px] flex-col gap-4">
           <Contacts d={d} />
+          <SavedArtwork id={c.id} />
           <section className={CARD} aria-labelledby="oh">
             <div className={SEC}><h2 id="oh" className={H2}>{t.orderHistory}</h2></div>
             {d.orders.length === 0 ? <p className="px-4 pb-4 text-[13px] text-muted-foreground">{t.noOrders}</p> : (

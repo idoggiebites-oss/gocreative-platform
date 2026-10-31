@@ -13,8 +13,10 @@ import { checkOrderProductionMove } from '../../worker/domain/productionFlow'
 import { allowedPoTransitions } from '../../worker/domain/purchaseOrder'
 import { BTN, BTN_PRIMARY, MutationError as MoveError } from './form'
 import { ItemsQuoteTab, NoteComposer, OrderActions, ReadinessCard, DetailsEditor } from './OrderPanels'
+import { ArtworkTab } from './ArtworkTab'
+import { PoTab } from './PoTab'
 import QueryBoundary from './QueryBoundary'
-import { CARD, Chip, ChipTrigger, MUTED, PAGE, PO_TONE, PRODUCTION_TONE, ARTWORK_TONE, TD, TH, type Tone } from './ui'
+import { CARD, Chip, ChipTrigger, MUTED, PAGE, PO_TONE, PRODUCTION_TONE, ARTWORK_TONE, type Tone } from './ui'
 
 type Detail = OrderDetailResponse
 type PoMutation = UseMutationResult<unknown, Error, { poId: number; to: PoStatus }>
@@ -124,32 +126,6 @@ function GateBanner({ d, c, openPo }: { d: Detail; c: Controls; openPo: () => vo
           {c.po.isPending ? m.order.changing : m.order.gate.recordApproval}
         </button>
       )}
-    </div>
-  )
-}
-
-function PoTab({ d, c }: { d: Detail; c: Controls }) {
-  const { m, fmt } = useI18n()
-  if (d.purchaseOrders.length === 0) return <p className="px-4 py-8 text-center text-[13px] text-muted-foreground">{m.order.po.empty}</p>
-  return (
-    <div className="flex flex-col gap-2 pb-3">
-      <div className="overflow-x-auto">
-        <table className="w-full border-collapse text-[13px]">
-          <thead><tr><th className={TH}>{m.order.po.number}</th><th className={cn(TH, 'text-right')}>{m.order.po.amount}</th><th className={TH}>{m.order.po.status}</th><th className={TH}>{m.order.po.updated}</th></tr></thead>
-          <tbody>
-            {d.purchaseOrders.map((p, i) => (
-              <tr key={p.id}>
-                <td className={`${TD} num font-medium`}>{p.poNumber ?? m.common.dash}{i === 0 && <span className={`${MUTED} ml-2 font-normal`}>{m.order.po.latest}</span>}</td>
-                <td className={cn(TD, 'num text-right')}>{p.amountCents === null ? m.common.dash : fmt.money(p.amountCents)}</td>
-                <td className={TD}><div className="flex flex-col items-start gap-1 py-1"><PoMenu po={p} status={p.status} mut={c.po} /></div></td>
-                <td className={cn(TD, 'num')}>{fmt.relative(p.updatedAt)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <div className="px-4"><MoveError error={c.po.error} /></div>
-      <p className={`${MUTED} px-4`}>{m.order.po.uploadNote}</p>
     </div>
   )
 }
@@ -309,12 +285,10 @@ function Order({ d }: { d: Detail }) {
             </TabsList>
             <TabsContent value="items"><ItemsQuoteTab d={d} /></TabsContent>
             <TabsContent value="artwork">
-              <div className="flex flex-col gap-3 p-4 text-[13px]">
-                <div className="flex items-center gap-2"><span className="text-muted-foreground">{m.order.artwork.status}</span><Chip tone={ARTWORK_TONE[d.order.artworkStatus]}>{m.labels.artworkStatus[d.order.artworkStatus]}</Chip></div>
-                <p className={MUTED}>{m.order.artwork.body}</p>
-              </div>
+              <div className="flex items-center gap-2 px-4 pt-3.5 text-[13px]"><span className="text-muted-foreground">{m.order.artwork.status}</span><Chip tone={ARTWORK_TONE[d.order.artworkStatus]}>{m.labels.artworkStatus[d.order.artworkStatus]}</Chip></div>
+              <ArtworkTab d={d} />
             </TabsContent>
-            <TabsContent value="po"><PoTab d={d} c={c} /></TabsContent>
+            <TabsContent value="po"><PoTab d={d} menu={(p) => <><PoMenu po={p} status={p.status} mut={c.po} /></>} /><div className="px-4 pb-3 empty:hidden"><MoveError error={c.po.error} /></div></TabsContent>
             <TabsContent value="production"><ProductionTab d={d} c={c} moves={moves} /></TabsContent>
             <TabsContent value="activity"><ActivityTab d={d} /></TabsContent>
           </Tabs>

@@ -61,7 +61,7 @@ export function MutationError({ error }: { error: Error | null }) {
   const { m } = useI18n()
   if (!error) return null
   const refused = error instanceof ApiError && error.status === 409
-  const codes: Record<string, string | undefined> = m.api.errors
+  const codes: Record<string, string | undefined> = { ...m.api.moreErrors, ...m.api.errors }
   const reasons: Record<string, string | undefined> = m.order.gate.reasons
   const detail = error instanceof ApiError
     ? [error.body.code ? codes[error.body.code] : undefined, ...(error.body.reasons ?? []).map((r) => reasons[r] ?? m.api.unknownReason)].filter(Boolean).join(' ')
@@ -113,8 +113,8 @@ const FALLBACK_FOCUS = 'main'
 
 /** A modal form: Enter submits, Esc cancels. Focus goes back to whatever opened it (or the page's main area if that element is gone). */
 
-export function FormDialog({ open, onOpenChange, title, description, submitLabel, pending, error, onSubmit, children, disabled }: {
-  open: boolean; onOpenChange: (o: boolean) => void; title: string; description?: string; submitLabel: string; pending: boolean; error: Error | null
+export function FormDialog({ open, onOpenChange, title, description, submitLabel, pendingLabel, pending, error, onSubmit, children, disabled }: {
+  open: boolean; onOpenChange: (o: boolean) => void; title: string; description?: string; submitLabel: string; pendingLabel?: string; pending: boolean; error: Error | null
   onSubmit: () => void; children: ReactNode; disabled?: boolean
 }) {
   const { m } = useI18n()
@@ -149,7 +149,7 @@ export function FormDialog({ open, onOpenChange, title, description, submitLabel
           <MutationError error={error} />
           <div className="flex justify-end gap-2">
             <button type="button" className={BTN} onClick={() => onOpenChange(false)}>{m.common.cancel}</button>
-            <button type="submit" disabled={pending || disabled} className={cn(BTN, BTN_PRIMARY)}>{pending ? m.common.saving : submitLabel}</button>
+            <button type="submit" disabled={pending || disabled} className={cn(BTN, BTN_PRIMARY)}>{pending ? (pendingLabel ?? m.common.saving) : submitLabel}</button>
           </div>
         </form>
       </DialogContent>
