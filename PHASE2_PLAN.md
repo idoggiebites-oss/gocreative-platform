@@ -273,11 +273,11 @@ logic it can test, Claude for design, integration and verification).
       new version resets approval; PO document upload. *(Opus, same task)*
 - [x] UI: artwork tab (designs, versions, previews, approve), PO documents. *(Sonnet)*
 
-### M3 — Purchasing and preparation (brief Step 3) → acceptance 7, 8, 10
-- [ ] Migration 0003; suppliers (JDS default, add new); purchases; receipts (partial);
+### M3 — Purchasing and preparation (brief Step 3) → acceptance 7, 8, 10 — built and Codex-reviewed ("M3 ready") 2026-10-31; migration 0004 + deploy await Arturo's go
+- [x] Migration 0004 (0003 went to M2); suppliers (JDS default, add new); purchases; receipts (partial);
       "No purchasing needed"; prep status; **gate extended to all five items** in the domain
       and in the SQL guard, with the parity test. *(Sonnet for CRUD; Opus for the gate change)*
-- [ ] UI: purchasing panel, receipts, prep, **readiness checklist** at the top of the workspace. *(Sonnet)*
+- [x] UI: purchasing panel, receipts, prep, **readiness checklist** at the top of the workspace. *(Sonnet)*
 
 ### M4 — Production queue (brief Step 4) → acceptance 9, 11, 12, 17 (production part)
 - [ ] Migration 0004; queue ordering; start / QC / production complete transitions; units
@@ -298,6 +298,7 @@ logic it can test, Claude for design, integration and verification).
       pickup before payment, check collected → deposited → cleared). Together they cover
       acceptance 1–17.
 - [ ] Phase 1 carry-overs: the ES column overflow, focus after "Record approval".
+- [ ] Additive migration: unconditional `BEFORE UPDATE` id guards on `quotes` and `artwork` (their `UPDATE OF` triggers miss `rowid` aliases; direct-DB edits only — Codex, M3 review).
 - [ ] Whole-phase Codex security review; accessibility pass; docs (README setup, ARCHITECTURE
       schema section, DECISIONS, notes); realistic seed for every new state.
 - [ ] Deploy, migrate remote, signed-in smoke test; then the family starts entering real orders.
