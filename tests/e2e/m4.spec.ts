@@ -309,6 +309,12 @@ test('a +10 click behind another person\'s save is refused with a message, not s
   await expect(current(page).getByRole('alert').filter({ hasText: 'Someone else changed this. It has been reloaded; try again.' })).toBeVisible()
   await expect(current(page).getByText('5 of 20').first()).toBeVisible()
   expect((await jobOf(page, a)).unitsCompleted).toBe(5)
+  // Typing a new count starts a new attempt: the old refusal goes, and a successful save shows no message.
+  await page.getByLabel(`Units completed (number): ${a}`).fill('9')
+  await expect(current(page).getByRole('alert')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Save units' }).first().click()
+  await expect(current(page).getByText('9 of 20').first()).toBeVisible()
+  await expect(current(page).getByRole('alert')).toHaveCount(0)
   await clearRunning(page)
 })
 

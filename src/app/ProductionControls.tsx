@@ -84,7 +84,7 @@ export function UnitsEditor({ job, readOnly }: { job: ProductionJob; readOnly?: 
         <button type="button" className={BTN} aria-label={`${t.minus}: ${job.number}`} disabled={w.isPending || job.unitsCompleted <= 0} onClick={() => save(Math.max(0, job.unitsCompleted - 10))}>− 10</button>
         <button type="button" className={BTN} aria-label={`${t.plus}: ${job.number}`} disabled={w.isPending || job.unitsCompleted >= total} onClick={() => save(Math.min(total, job.unitsCompleted + 10))}>+ 10</button>
         <UnitsDraft
-          key={epoch} job={job} w={w} onDirty={() => setDirty(true)}
+          key={epoch} job={job} w={w} onDirty={() => { setDirty(true); setClickError(null) }} // typing starts a new attempt: an old click refusal no longer applies
           onSaved={() => setDirty(false)}
         />
         <span id={`uh-${job.number}`} className={MUTED}>{t.hint(total)}</span>
