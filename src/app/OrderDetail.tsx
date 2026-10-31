@@ -7,7 +7,7 @@ import { PREP_STATUSES, PRODUCTION_STATUSES, type PoStatus, type ProductionStatu
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useI18n } from '@/i18n'
-import { useChangePo, useChangePrep, useChangeProduction, useOrder, useUsers } from '@/lib/api'
+import { useChangePo, useChangePrep, useChangeProduction, useOrder, useProduction, useUsers } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { checkOrderProductionMove } from '../../worker/domain/productionFlow'
 import { allowedPoTransitions } from '../../worker/domain/purchaseOrder'
@@ -15,6 +15,7 @@ import { BTN, BTN_PRIMARY, MutationError as MoveError, Segmented } from './form'
 import { ItemsQuoteTab, NoteComposer, OrderActions, ReadinessCard, DetailsEditor } from './OrderPanels'
 import { ArtworkTab } from './ArtworkTab'
 import { PoTab } from './PoTab'
+import { JobActions, UnitsEditor } from './ProductionControls'
 import { PurchasingTab } from './PurchasingTab'
 import QueryBoundary from './QueryBoundary'
 import { CARD, Chip, ChipTrigger, MUTED, PAGE, PO_TONE, PRODUCTION_TONE, ARTWORK_TONE, type Tone } from './ui'
@@ -131,10 +132,12 @@ function GateBanner({ d, c, openPo }: { d: Detail; c: Controls; openPo: () => vo
   )
 }
 
-function ProductionTab({ d, c, moves }: { d: Detail; c: Controls; moves: ReturnType<typeof useMoves> }) {
+function ProductionTab({ d }: { d: Detail }) {
   const { m } = useI18n()
   const s = d.order.productionStatus
   const prep = useChangePrep(d.order.number)
+  const prod = useProduction()
+  const job = [...(prod.data?.current ?? []), ...(prod.data?.readyToStart ?? []), ...(prod.data?.completed ?? [])].find((j) => j.number === d.order.number)
   return (
     <div className="flex flex-col gap-3 p-4 text-[13px]">
       <div className="flex flex-col gap-1.5">
@@ -143,14 +146,12 @@ function ProductionTab({ d, c, moves }: { d: Detail; c: Controls; moves: ReturnT
         <MoveError error={prep.error} />
       </div>
       <div className="flex flex-wrap items-center gap-2"><span className="text-muted-foreground">{m.order.production.current}</span><Chip tone={PRODUCTION_TONE[s]}>{m.labels.productionStatus[s]}</Chip></div>
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-muted-foreground">{m.order.production.moves}</span>
-        {moves.production.length === 0 && <span className={MUTED}>{m.order.production.none}</span>}
-        {moves.production.map((to) => (
-          <button key={to} type="button" aria-busy={c.prod.isPending || undefined} onClick={() => !c.prod.isPending && c.prod.mutate(to)} className={cn(BTN, 'aria-busy:opacity-60')}>{m.labels.productionStatus[to]}</button>
-        ))}
-      </div>
-      <MoveError error={c.prod.error} />
+      {job ? (
+        <>
+          {(job.productionStatus === 'in_production' || job.productionStatus === 'quality_control') && <UnitsEditor job={job} />}
+          <JobActions job={job} running={prod.data?.current ?? []} />
+        </>
+      ) : <span className={MUTED}>{m.production.orderTab.notInQueue}</span>}
       <p className={d.gate.ok ? MUTED : 'text-xs text-status-amber-fg'}>{d.gate.ok ? m.order.production.gateOk : m.order.gateClosed}</p>
     </div>
   )
@@ -298,7 +299,7 @@ function Order({ d }: { d: Detail }) {
             </TabsContent>
             <TabsContent value="po"><PoTab d={d} menu={(p) => <><PoMenu po={p} status={p.status} mut={c.po} /></>} /><div className="px-4 pb-3 empty:hidden"><MoveError error={c.po.error} /></div></TabsContent>
             <TabsContent value="purchasing"><PurchasingTab d={d} autoAdd={autoAdd} onAutoAdd={() => setAutoAdd(false)} /></TabsContent>
-            <TabsContent value="production"><ProductionTab d={d} c={c} moves={moves} /></TabsContent>
+            <TabsContent value="production"><ProductionTab d={d} /></TabsContent>
             <TabsContent value="activity"><ActivityTab d={d} /></TabsContent>
           </Tabs>
         </section>

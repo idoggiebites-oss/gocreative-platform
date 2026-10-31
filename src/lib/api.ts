@@ -5,7 +5,7 @@ import type {
   SupplierCreateRequest, SupplierResponse, SuppliersResponse,
   ProductionChangeRequest, ProductionResponse, QueueReorderRequest, QueueReorderResponse, UnitsRequest,
 } from '@shared/api'
-import type { CustomerKind, PoStatus, ProductionStatus } from '@shared/enums'
+import type { CustomerKind, PoStatus, ProductionStatus, Role } from '@shared/enums'
 import type { ApiError as ApiErrorBody } from '@shared/api'
 
 /** A non-2xx answer from /api/app. `body.error` is the server's message; 409 means a business rule refused it. */
@@ -201,3 +201,11 @@ export function useReorderQueue() {
     onSettled: () => Promise.all([qc.invalidateQueries({ queryKey: ['production'] }), qc.invalidateQueries({ queryKey: ['dashboard'] })]),
   })
 }
+
+/** The signed-in user; `role` decides what the UI offers (the server enforces it regardless). */
+export const useMe = () =>
+  useQuery({ queryKey: ['me'], queryFn: () => call<{ id: number; email: string; name: string; role: Role }>('/me'), retry, staleTime: 5 * 60_000 })
+
+/** Pause returns to whatever readiness says now; the Production page's rows don't carry it, so read it from the order. */
+export const fetchPauseTarget = async (number: string) =>
+  (await call<OrderDetailResponse>(`/orders/${encodeURIComponent(number)}`)).readiness.preProductionStatus
