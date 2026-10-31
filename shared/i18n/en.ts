@@ -343,12 +343,12 @@ export const en = {
     estCost: 'Estimated unit cost (USD)', actCost: 'Actual unit cost (USD)', costInvalid: 'Enter an amount like 12.50.', expectedOn: 'Expected date', notes: 'Notes',
     lockedNote: 'Once ordered, only the actual cost, expected date and notes can change.',
     totals: (est: string, act: string) => `Estimated ${est} · actual ${act}`, line: (est: string, act: string) => `Estimated ${est} · actual ${act}`,
-    received: (r: number, q: number) => `${r} of ${q} received`, over: (n: number) => `${n} more than ordered`,
+    received: (r: number, q: number) => `${r} of ${q} received`, gone: 'Someone else cancelled or changed this purchase, so it can no longer be changed this way. Close this window to see the current state.', over: (n: number) => `${n} more than ordered`,
     orderedOn: (d: string) => `Ordered ${d}`, expected: (d: string) => `Expected ${d}`, noCost: 'no cost yet',
     markOrdered: 'Mark ordered', orderedTitle: 'Mark as ordered', orderedBody: 'Confirms the materials were actually bought. The app does not place orders.', orderedOnLabel: 'Ordered on', orderedConfirm: 'Mark ordered',
     record: 'Record delivery', recordTitle: 'Record a delivery', recordBody: 'Receipts cannot be edited afterwards. Receiving more than ordered is allowed.', receivedOn: 'Received on', recordConfirm: 'Record delivery',
     cancel: 'Cancel purchase', cancelTitle: 'Cancel this purchase?', cancelBody: 'A cancelled purchase is closed and no longer counts toward materials.', reason: 'Reason', cancelConfirm: 'Cancel purchase', keep: 'Keep',
-    receipts: 'Deliveries', receipt: (q: number, d: string, who: string | null) => `${q} received ${d}${who ? ` by ${who}` : ''}`,
+    receipts: 'Deliveries', receipt: (q: number, d: string, who: string | null) => (who ? `${q} ${q === 1 ? 'piece' : 'pieces'} received on ${d}, recorded by ${who}` : `${q} ${q === 1 ? 'piece' : 'pieces'} received on ${d}`),
   },
   files: {
     upload: {

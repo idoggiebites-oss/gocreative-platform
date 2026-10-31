@@ -1,16 +1,18 @@
 import { useEffect, useState } from 'react'
 import type { OrderDetailResponse, PurchaseRecord } from '@shared/api'
-import { business } from '@shared/business'
 import { formatCentsPlain, parseDollarsToCents } from '@shared/money'
 import { useI18n } from '@/i18n'
 import { isConflict, useCancelPurchase, useCreatePurchase, useCreateSupplier, useMarkPurchaseOrdered, usePurchases, useRecordReceipt, useSuppliers, useUpdatePurchase } from '@/lib/api'
 import { cn } from '@/lib/utils'
-import { BTN, BTN_PRIMARY, BTN_SM, Check, ConflictNotice, Field, FormDialog, H2, INPUT, LBL, MutationError, SEC, TEXTAREA, useEditSession } from './form'
+import { BTN, BTN_PRIMARY, BTN_SM, Check, ConflictNotice, Field, FormDialog, H2, INPUT, MutationError, SEC, TEXTAREA, useEditSession } from './form'
 import QueryBoundary from './QueryBoundary'
+import { SizeGrid } from './SizeGrid'
 import { Chip, MUTED, PURCHASE_TONE } from './ui'
 
 type Detail = OrderDetailResponse
-type Dialog = { kind: 'add' } | { kind: 'edit' | 'ordered' | 'receipt' | 'cancel'; p: PurchaseRecord }
+type Dialog = { kind: 'add' } | { kind: 'edit' | 'ordered' | 'receipt' | 'cancel'; id: number }
+/** What every dialog gets: the CURRENT purchase from the purchases query (undefined if gone), and whether that query is refetching. */
+type Live = { p: PurchaseRecord | undefined; fetching: boolean }
 
 const sm = cn(BTN, BTN_SM)
 const smPrimary = cn(BTN, BTN_SM, BTN_PRIMARY)
@@ -22,28 +24,18 @@ const cellsOf = (sizes: Record<string, number> | null) => Object.fromEntries(Obj
 // '' = left empty (null); undefined = typed but not a dollar amount.
 const cents = (v: string) => (v.trim() === '' ? null : (parseDollarsToCents(v) ?? undefined))
 
-/** The size grid of the order items editor, as a stand-alone control: the sum is the quantity. */
-function SizeGrid({ cells, onChange }: { cells: Record<string, string>; onChange: (c: Record<string, string>) => void }) {
+/** The shared size grid plus the sum that sets the quantity. */
+function SizesWithSum({ cells, onChange }: { cells: Record<string, string>; onChange: (c: Record<string, string>) => void }) {
   const { m } = useI18n()
-  const t = m.purchasing
-  const columns = [...business.sizes, ...Object.keys(cells).filter((k) => !(business.sizes as readonly string[]).includes(k))]
   return (
     <div className="flex flex-col gap-1.5">
-      <div className="flex flex-wrap gap-1">
-        {columns.map((size) => (
-          <label key={size} className="flex w-14 flex-col gap-1">
-            <span className={cn(LBL, 'text-center')} aria-hidden>{size}</span>
-            <input className={cn(INPUT, 'num px-1 text-center')} type="number" inputMode="numeric" min={0} aria-label={t.sizeLabel(size)} value={cells[size] ?? ''} onChange={(e) => onChange({ ...cells, [size]: e.target.value })} />
-          </label>
-        ))}
-      </div>
-      <span className={LBL}>{t.sizesSum(sumOf(cells))}</span>
+      <SizeGrid cells={cells} onChange={onChange} label={m.purchasing.sizeLabel} />
+      <span className="text-xs text-muted-foreground">{m.purchasing.sizesSum(sumOf(cells))}</span>
     </div>
   )
 }
 
-
-function PurchaseDialog({ d, p, onClose }: { d: Detail; p?: PurchaseRecord; onClose: () => void }) {
+function PurchaseDialog({ d, p, edit, fetching, onClose }: { d: Detail; edit: boolean; onClose: () => void } & Live) {
   const { m } = useI18n()
   const t = m.purchasing
   const suppliers = useSuppliers()
@@ -52,14 +44,15 @@ function PurchaseDialog({ d, p, onClose }: { d: Detail; p?: PurchaseRecord; onCl
     supplierId: p ? String(p.supplierId) : '', description: p?.description ?? '', quantity: p ? String(p.quantity) : '', useSizes: !!p?.sizes, sizes: cellsOf(p?.sizes ?? null),
     est: p?.estimatedUnitCostCents == null ? '' : formatCentsPlain(p.estimatedUnitCostCents), act: p?.actualUnitCostCents == null ? '' : formatCentsPlain(p.actualUnitCostCents),
     expectedOn: p?.expectedOn ?? '', notes: p?.notes ?? '',
-  }))
+  }), !fetching)
+  const gone = edit && (!p || p.status === 'cancelled')
   const f = ed.values
   const set = (x: Partial<typeof f>) => ed.setValues({ ...f, ...x })
   const [newName, setNewName] = useState<string | null>(null)
   const [tried, setTried] = useState(false)
   const create = useCreatePurchase(d.order.number)
   const update = useUpdatePurchase(d.order.number)
-  const w = p ? update : create
+  const w = edit ? update : create
   // Once ordered, only the actual cost, expected date and notes can change (the server refuses the rest).
   const locked = !!p && p.status !== 'not_ordered'
   const defaultId = suppliers.data?.suppliers.find((s) => s.isDefault)?.id
@@ -70,8 +63,8 @@ function PurchaseDialog({ d, p, onClose }: { d: Detail; p?: PurchaseRecord; onCl
   const bad = !f.description.trim() || qty < 1 || est === undefined || act === undefined
   return (
     <FormDialog
-      open onOpenChange={(o) => !o && onClose()} title={p ? t.editTitle : t.addTitle} description={p ? (locked ? t.lockedNote : t.editTitle) : t.addBody} submitLabel={p ? m.common.save : t.add}
-      pending={w.isPending} error={isConflict(w.error) ? null : w.error} disabled={ed.blocked}
+      open onOpenChange={(o) => !o && onClose()} title={edit ? t.editTitle : t.addTitle} description={edit ? (locked ? t.lockedNote : t.editTitle) : t.addBody} submitLabel={edit ? m.common.save : t.add}
+      pending={w.isPending} error={isConflict(w.error) ? null : w.error} disabled={ed.blocked || gone}
       onSubmit={() => {
         setTried(true)
         if (bad || newName !== null) return
@@ -82,11 +75,12 @@ function PurchaseDialog({ d, p, onClose }: { d: Detail; p?: PurchaseRecord; onCl
           estimatedUnitCostCents: est ?? null,
         }
         const opts = { onSuccess: onClose, onError: ed.onError }
-        if (!p) create.mutate({ ...mine, ...common }, opts)
-        else update.mutate({ id: p.id, ...(locked ? {} : mine), actualUnitCostCents: act ?? null, ...common }, opts)
+        if (!edit) create.mutate({ ...mine, ...common }, opts)
+        else if (p) update.mutate({ id: p.id, ...(locked ? {} : mine), actualUnitCostCents: act ?? null, ...common }, opts)
       }}
     >
       <ConflictNotice show={ed.conflict} />
+      {gone && <p role="alert" className="text-xs text-status-red-fg">{t.gone}</p>}
       <Field label={t.supplier}>
         <select
           className={INPUT} value={supplierValue} disabled={locked}
@@ -108,13 +102,13 @@ function PurchaseDialog({ d, p, onClose }: { d: Detail; p?: PurchaseRecord; onCl
       )}
       <Field label={t.description}><input className={INPUT} value={f.description} maxLength={200} readOnly={locked} aria-invalid={(tried && !f.description.trim()) || undefined} onChange={(e) => set({ description: e.target.value })} /></Field>
       <Check checked={f.useSizes} onChange={(v) => !locked && set(v ? { useSizes: true } : { useSizes: false, quantity: String(sumOf(f.sizes) || '') })}>{t.useSizes}</Check>
-      {f.useSizes && !locked && <SizeGrid cells={f.sizes} onChange={(sizes) => set({ sizes })} />}
+      {f.useSizes && !locked && <SizesWithSum cells={f.sizes} onChange={(sizes) => set({ sizes })} />}
       <Field label={t.quantity}>
         <input className={cn(INPUT, 'num')} type="number" inputMode="numeric" min={1} readOnly={locked || f.useSizes} aria-invalid={(tried && qty < 1) || undefined} value={f.useSizes ? (qty || '') : f.quantity} onChange={(e) => set({ quantity: e.target.value })} />
       </Field>
       <div className="flex flex-wrap gap-3">
         <Field label={t.estCost} className="flex-[1_1_150px]"><input className={cn(INPUT, 'num')} inputMode="decimal" value={f.est} readOnly={locked} aria-invalid={(tried && est === undefined) || undefined} onChange={(e) => set({ est: e.target.value })} /></Field>
-        {p && <Field label={t.actCost} className="flex-[1_1_150px]"><input className={cn(INPUT, 'num')} inputMode="decimal" value={f.act} aria-invalid={(tried && act === undefined) || undefined} onChange={(e) => set({ act: e.target.value })} /></Field>}
+        {edit && <Field label={t.actCost} className="flex-[1_1_150px]"><input className={cn(INPUT, 'num')} inputMode="decimal" value={f.act} aria-invalid={(tried && act === undefined) || undefined} onChange={(e) => set({ act: e.target.value })} /></Field>}
       </div>
       {tried && (est === undefined || act === undefined) && <p role="alert" className="text-xs text-status-red-fg">{t.costInvalid}</p>}
       <Field label={t.expectedOn}><input className={INPUT} type="date" value={f.expectedOn} onChange={(e) => set({ expectedOn: e.target.value })} /></Field>
@@ -123,28 +117,31 @@ function PurchaseDialog({ d, p, onClose }: { d: Detail; p?: PurchaseRecord; onCl
   )
 }
 
-function OrderedDialog({ d, p, onClose }: { d: Detail; p: PurchaseRecord; onClose: () => void }) {
+function OrderedDialog({ d, p, fetching, onClose }: { d: Detail; onClose: () => void } & Live) {
   const { m, fmt } = useI18n()
   const t = m.purchasing
-  const ed = useEditSession(d.order.version, () => fmt.todayIso())
+  const ed = useEditSession(d.order.version, () => fmt.todayIso(), !fetching)
+  const gone = !p || p.status !== 'not_ordered'
   const w = useMarkPurchaseOrdered(d.order.number)
   return (
     <FormDialog
       open onOpenChange={(o) => !o && onClose()} title={t.orderedTitle} description={t.orderedBody} submitLabel={t.orderedConfirm} pending={w.isPending}
-      error={isConflict(w.error) ? null : w.error} disabled={ed.blocked || !ed.values}
-      onSubmit={() => { ed.clear(); w.mutate({ id: p.id, orderedOn: ed.values, expectedVersion: ed.version }, { onSuccess: onClose, onError: ed.onError }) }}
+      error={isConflict(w.error) ? null : w.error} disabled={ed.blocked || !ed.values || gone}
+      onSubmit={() => { if (!p) return; ed.clear(); w.mutate({ id: p.id, orderedOn: ed.values, expectedVersion: ed.version }, { onSuccess: onClose, onError: ed.onError }) }}
     >
       <ConflictNotice show={ed.conflict} />
-      <p className="text-[13px] text-muted-foreground">{p.description}</p>
+      {gone && <p role="alert" className="text-xs text-status-red-fg">{t.gone}</p>}
+      <p className="text-[13px] text-muted-foreground">{p?.description}</p>
       <Field label={t.orderedOnLabel}><input className={INPUT} type="date" required value={ed.values} onChange={(e) => ed.setValues(e.target.value)} /></Field>
     </FormDialog>
   )
 }
 
-function ReceiptDialog({ d, p, onClose }: { d: Detail; p: PurchaseRecord; onClose: () => void }) {
+function ReceiptDialog({ d, p, fetching, onClose }: { d: Detail; onClose: () => void } & Live) {
   const { m, fmt } = useI18n()
   const t = m.purchasing
-  const ed = useEditSession(d.order.version, () => ({ quantity: String(Math.max(p.quantity - p.receivedQuantity, 1)), useSizes: false, sizes: {} as Record<string, string>, on: fmt.todayIso(), notes: '' }))
+  const ed = useEditSession(d.order.version, () => ({ quantity: String(p ? Math.max(p.quantity - p.receivedQuantity, 1) : 1), useSizes: false, sizes: {} as Record<string, string>, on: fmt.todayIso(), notes: '' }), !fetching)
+  const gone = !p || !['ordered', 'partially_received', 'received'].includes(p.status)
   const f = ed.values
   const set = (x: Partial<typeof f>) => ed.setValues({ ...f, ...x })
   const w = useRecordReceipt(d.order.number)
@@ -152,16 +149,18 @@ function ReceiptDialog({ d, p, onClose }: { d: Detail; p: PurchaseRecord; onClos
   return (
     <FormDialog
       open onOpenChange={(o) => !o && onClose()} title={t.recordTitle} description={t.recordBody} submitLabel={t.recordConfirm} pending={w.isPending}
-      error={isConflict(w.error) ? null : w.error} disabled={ed.blocked || qty < 1 || !f.on}
+      error={isConflict(w.error) ? null : w.error} disabled={ed.blocked || gone || qty < 1 || !f.on}
       onSubmit={() => {
+        if (!p) return
         ed.clear()
         w.mutate({ id: p.id, quantity: qty, sizes: f.useSizes ? sizesOf(f.sizes) : null, receivedOn: f.on, notes: f.notes.trim() || null, expectedVersion: ed.version }, { onSuccess: onClose, onError: ed.onError })
       }}
     >
       <ConflictNotice show={ed.conflict} />
-      <p className="text-[13px] text-muted-foreground">{p.description} · {t.received(p.receivedQuantity, p.quantity)}</p>
+      {gone && <p role="alert" className="text-xs text-status-red-fg">{t.gone}</p>}
+      {p && <p className="text-[13px] text-muted-foreground">{p.description} · {t.received(p.receivedQuantity, p.quantity)}</p>}
       <Check checked={f.useSizes} onChange={(v) => set(v ? { useSizes: true } : { useSizes: false, quantity: String(sumOf(f.sizes) || '') })}>{t.useSizes}</Check>
-      {f.useSizes && <SizeGrid cells={f.sizes} onChange={(sizes) => set({ sizes })} />}
+      {f.useSizes && <SizesWithSum cells={f.sizes} onChange={(sizes) => set({ sizes })} />}
       <Field label={t.quantity}><input className={cn(INPUT, 'num')} type="number" inputMode="numeric" min={1} readOnly={f.useSizes} value={f.useSizes ? (qty || '') : f.quantity} onChange={(e) => set({ quantity: e.target.value })} /></Field>
       <Field label={t.receivedOn}><input className={INPUT} type="date" required value={f.on} onChange={(e) => set({ on: e.target.value })} /></Field>
       <Field label={t.notes}><textarea className={TEXTAREA} rows={2} maxLength={2000} value={f.notes} onChange={(e) => set({ notes: e.target.value })} /></Field>
@@ -169,19 +168,21 @@ function ReceiptDialog({ d, p, onClose }: { d: Detail; p: PurchaseRecord; onClos
   )
 }
 
-function CancelDialog({ d, p, onClose }: { d: Detail; p: PurchaseRecord; onClose: () => void }) {
+function CancelDialog({ d, p, onClose }: { d: Detail; onClose: () => void } & Live) {
   const { m } = useI18n()
   const t = m.purchasing
   const ed = useEditSession(d.order.version, () => '')
+  const gone = !p || p.status === 'cancelled'
   const w = useCancelPurchase(d.order.number)
   return (
     <FormDialog
       open onOpenChange={(o) => !o && onClose()} title={t.cancelTitle} description={t.cancelBody} submitLabel={t.cancelConfirm} pending={w.isPending}
-      error={isConflict(w.error) ? null : w.error} disabled={ed.blocked || !ed.values.trim()}
-      onSubmit={() => { ed.clear(); w.mutate({ id: p.id, reason: ed.values.trim(), expectedVersion: ed.version }, { onSuccess: onClose, onError: ed.onError }) }}
+      error={isConflict(w.error) ? null : w.error} disabled={ed.blocked || gone || !ed.values.trim()}
+      onSubmit={() => { if (!p) return; ed.clear(); w.mutate({ id: p.id, reason: ed.values.trim(), expectedVersion: ed.version }, { onSuccess: onClose, onError: ed.onError }) }}
     >
       <ConflictNotice show={ed.conflict} />
-      <p className="text-[13px] text-muted-foreground">{p.description}</p>
+      {gone && <p role="alert" className="text-xs text-status-red-fg">{t.gone}</p>}
+      <p className="text-[13px] text-muted-foreground">{p?.description}</p>
       <Field label={t.reason}><textarea className={TEXTAREA} rows={2} maxLength={500} required value={ed.values} onChange={(e) => ed.setValues(e.target.value)} /></Field>
     </FormDialog>
   )
@@ -192,7 +193,8 @@ function PurchaseRow({ p, active, onDialog }: { p: PurchaseRecord; active: boole
   const t = m.purchasing
   const money = (c: number | null) => (c === null ? m.common.dash : fmt.money(c))
   const open = p.status !== 'cancelled'
-  const receiving = p.status === 'ordered' || p.status === 'partially_received'
+  // Stored status 'ordered' shows as received once the receipts cover it, but a late delivery or a cancel is still valid.
+  const receiving = p.status === 'ordered' || p.status === 'partially_received' || p.status === 'received'
   return (
     <li>
       <section data-purchase={p.id} aria-label={p.description} className="flex flex-col gap-2 rounded-[10px] border border-secondary p-3 text-[13px]">
@@ -222,10 +224,10 @@ function PurchaseRow({ p, active, onDialog }: { p: PurchaseRecord; active: boole
         )}
         {active && open && (
           <div className="flex flex-wrap items-center gap-1.5">
-            <button type="button" className={sm} onClick={() => onDialog({ kind: 'edit', p })}>{t.edit}</button>
-            {p.status === 'not_ordered' && <button type="button" className={smPrimary} onClick={() => onDialog({ kind: 'ordered', p })}>{t.markOrdered}</button>}
-            {receiving && <button type="button" className={smPrimary} onClick={() => onDialog({ kind: 'receipt', p })}>{t.record}</button>}
-            {p.status !== 'received' && <button type="button" className={sm} onClick={() => onDialog({ kind: 'cancel', p })}>{t.cancel}</button>}
+            <button type="button" className={sm} onClick={() => onDialog({ kind: 'edit', id: p.id })}>{t.edit}</button>
+            {p.status === 'not_ordered' && <button type="button" className={smPrimary} onClick={() => onDialog({ kind: 'ordered', id: p.id })}>{t.markOrdered}</button>}
+            {receiving && <button type="button" className={smPrimary} onClick={() => onDialog({ kind: 'receipt', id: p.id })}>{t.record}</button>}
+            <button type="button" className={sm} onClick={() => onDialog({ kind: 'cancel', id: p.id })}>{t.cancel}</button>
           </div>
         )}
       </section>
@@ -233,7 +235,7 @@ function PurchaseRow({ p, active, onDialog }: { p: PurchaseRecord; active: boole
   )
 }
 
-function List({ d, purchases, autoAdd, onAutoAdd }: { d: Detail; purchases: PurchaseRecord[]; autoAdd: boolean; onAutoAdd: () => void }) {
+function List({ d, purchases, fetching, autoAdd, onAutoAdd }: { d: Detail; purchases: PurchaseRecord[]; fetching: boolean; autoAdd: boolean; onAutoAdd: () => void }) {
   const { m, fmt } = useI18n()
   const t = m.purchasing
   const [dialog, setDialog] = useState<Dialog | null>(null)
@@ -243,6 +245,7 @@ function List({ d, purchases, autoAdd, onAutoAdd }: { d: Detail; purchases: Purc
   const live = purchases.filter((p) => p.status !== 'cancelled')
   const sum = (k: 'estimatedTotalCents' | 'actualTotalCents') => live.reduce((s, p) => s + (p[k] ?? 0), 0)
   const close = () => setDialog(null)
+  const live1 = (id: number): Live => ({ p: purchases.find((x) => x.id === id), fetching })
   return (
     <div className="flex flex-col pb-3">
       <div className={SEC}>
@@ -260,16 +263,16 @@ function List({ d, purchases, autoAdd, onAutoAdd }: { d: Detail; purchases: Purc
           </>
         )}
       </div>
-      {dialog?.kind === 'add' && <PurchaseDialog d={d} onClose={close} />}
-      {dialog?.kind === 'edit' && <PurchaseDialog d={d} p={dialog.p} onClose={close} />}
-      {dialog?.kind === 'ordered' && <OrderedDialog d={d} p={dialog.p} onClose={close} />}
-      {dialog?.kind === 'receipt' && <ReceiptDialog d={d} p={dialog.p} onClose={close} />}
-      {dialog?.kind === 'cancel' && <CancelDialog d={d} p={dialog.p} onClose={close} />}
+      {dialog?.kind === 'add' && <PurchaseDialog d={d} edit={false} p={undefined} fetching={fetching} onClose={close} />}
+      {dialog?.kind === 'edit' && <PurchaseDialog d={d} edit {...live1(dialog.id)} onClose={close} />}
+      {dialog?.kind === 'ordered' && <OrderedDialog d={d} {...live1(dialog.id)} onClose={close} />}
+      {dialog?.kind === 'receipt' && <ReceiptDialog d={d} {...live1(dialog.id)} onClose={close} />}
+      {dialog?.kind === 'cancel' && <CancelDialog d={d} {...live1(dialog.id)} onClose={close} />}
     </div>
   )
 }
 
 export function PurchasingTab({ d, autoAdd, onAutoAdd }: { d: Detail; autoAdd: boolean; onAutoAdd: () => void }) {
   const query = usePurchases(d.order.number)
-  return <QueryBoundary query={query}>{(r) => <List d={d} purchases={r.purchases} autoAdd={autoAdd} onAutoAdd={onAutoAdd} />}</QueryBoundary>
+  return <QueryBoundary query={query}>{(r) => <List d={d} purchases={r.purchases} fetching={query.isFetching} autoAdd={autoAdd} onAutoAdd={onAutoAdd} />}</QueryBoundary>
 }

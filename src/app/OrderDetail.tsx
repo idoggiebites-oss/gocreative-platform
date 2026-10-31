@@ -138,7 +138,7 @@ function ProductionTab({ d, c, moves }: { d: Detail; c: Controls; moves: ReturnT
   return (
     <div className="flex flex-col gap-3 p-4 text-[13px]">
       <div className="flex flex-col gap-1.5">
-        <Segmented label={m.order.prep.label} value={d.order.prepStatus} options={PREP_STATUSES} labels={m.labels.prepStatus} onChange={(prepStatus) => !prep.isPending && prepStatus !== d.order.prepStatus && prep.mutate({ prepStatus, expectedVersion: d.order.version })} />
+        <Segmented label={m.order.prep.label} value={d.order.prepStatus} options={PREP_STATUSES} labels={m.labels.prepStatus} disabled={d.order.state !== 'active' || prep.isPending} onChange={(prepStatus) => !prep.isPending && prepStatus !== d.order.prepStatus && prep.mutate({ prepStatus, expectedVersion: d.order.version })} />
         <span className={MUTED}>{m.order.prep.hint}</span>
         <MoveError error={prep.error} />
       </div>

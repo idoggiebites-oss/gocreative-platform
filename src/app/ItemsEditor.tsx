@@ -1,12 +1,12 @@
 import { Plus } from 'lucide-react'
 import type { ItemInput, OrderItem } from '@shared/api'
-import { business } from '@shared/business'
 import { METHODS, type ItemKind, type Method } from '@shared/enums'
 import { parseDollarsToCents, formatCentsPlain } from '@shared/money'
 import { useI18n } from '@/i18n'
 import { cn } from '@/lib/utils'
 import { quoteTotals } from '../../worker/domain/quotes'
 import { BTN, BTN_SM, Check, Field, INPUT, LBL } from './form'
+import { SizeGrid } from './SizeGrid'
 import { CARD } from './ui'
 
 /** One editable line. Numbers stay text while typing so a half-typed price is never rewritten. */
@@ -101,7 +101,6 @@ export function ItemsEditor({ rows, onChange, showIssues, framed = true }: { row
       {rows.length === 0 && <p className="border-t border-secondary px-4 py-6 text-center text-[13px] text-muted-foreground">{t.empty}</p>}
       {rows.map((r, idx) => {
         const issues = showIssues ? rowIssues(r) : []
-        const columns = [...business.sizes, ...Object.keys(r.sizes).filter((k) => !(business.sizes as readonly string[]).includes(k))]
         const line = lineCents(r)
         const bad = (i: RowIssue) => (issues.includes(i) ? true : undefined)
         const number = idx + 1
@@ -144,17 +143,7 @@ export function ItemsEditor({ rows, onChange, showIssues, framed = true }: { row
               <div className="flex flex-col gap-1.5">
                 <Check checked={r.useSizes} onChange={(v) => set(r.key, v ? { useSizes: true } : { useSizes: false, quantity: String(rowQuantity(r) || '') })}>{t.useSizes}</Check>
                 {r.useSizes && (
-                  <div className="flex flex-wrap gap-1" aria-invalid={bad('quantity')}>
-                    {columns.map((size) => (
-                      <label key={size} className="flex w-14 flex-col gap-1">
-                        <span className={cn(LBL, 'text-center')} aria-hidden>{size}</span>
-                        <input
-                          className={cn(INPUT, 'num px-1 text-center')} type="number" inputMode="numeric" min={0} aria-label={t.sizeLabel(size, number)}
-                          value={r.sizes[size] ?? ''} onChange={(e) => set(r.key, { sizes: { ...r.sizes, [size]: e.target.value } })}
-                        />
-                      </label>
-                    ))}
-                  </div>
+                  <SizeGrid cells={r.sizes} onChange={(sizes) => set(r.key, { sizes })} label={(size) => t.sizeLabel(size, number)} invalid={bad('quantity')} />
                 )}
               </div>
             )}

@@ -35,15 +35,15 @@ export function Check({ checked, onChange, children }: { checked: boolean; onCha
 }
 
 /** A one-of-N button group (the mockup's `.seg`). */
-export function Segmented<T extends string>({ label, value, options, labels, onChange }: { label: string; value: T; options: readonly T[]; labels: Record<T, string>; onChange: (v: T) => void }) {
+export function Segmented<T extends string>({ label, value, options, labels, onChange, disabled }: { label: string; value: T; options: readonly T[]; labels: Record<T, string>; onChange: (v: T) => void; disabled?: boolean }) {
   return (
     <div className="flex flex-col gap-1">
       <span className={LBL} id={`seg-${label}`}>{label}</span>
       <div role="group" aria-labelledby={`seg-${label}`} className="inline-flex overflow-hidden rounded-[7px] border border-input bg-card">
         {options.map((o) => (
           <button
-            key={o} type="button" aria-pressed={value === o} onClick={() => onChange(o)}
-            className={cn('h-8 cursor-pointer border-r border-input px-3.5 text-[13px] font-medium last:border-r-0', value === o ? 'bg-status-blue text-status-blue-fg' : 'text-[#4A4741] hover:bg-secondary')}
+            key={o} type="button" aria-pressed={value === o} disabled={disabled} onClick={() => onChange(o)}
+            className={cn('h-8 cursor-pointer disabled:cursor-not-allowed disabled:opacity-60 border-r border-input px-3.5 text-[13px] font-medium last:border-r-0', value === o ? 'bg-status-blue text-status-blue-fg' : 'text-[#4A4741] hover:bg-secondary')}
           >
             {labels[o]}
           </button>
@@ -78,9 +78,10 @@ export function MutationError({ error }: { error: Error | null }) {
  * A background refetch never changes the version that gets sent. After a 409 conflict_retry the stale values are
  * replaced with the fresh ones (once the refetch lands) and `conflict` stays true so the notice shows. `blocked` is true
  * only while waiting for that refetch, so no save goes out with stale values and Save works again once they're in.
+ * `ready` is false while other queries the seed reads (the purchases list) are still refetching: waiting ends only when the version has moved AND they are in.
  * ponytail: waiting ends when the version moves; a conflict that leaves it unchanged would need the form closed and reopened.
  */
-export function useEditSession<T>(current: number, seed: () => T) {
+export function useEditSession<T>(current: number, seed: () => T, ready = true) {
   const [s, setS] = useState(() => ({ version: current, values: seed() }))
   // conflict = show the notice; waiting = the refetch hasn't landed yet, so saving is blocked.
   // They are separate so Save works again as soon as the fresh values are in (Codex review of 20692ec).
@@ -89,11 +90,11 @@ export function useEditSession<T>(current: number, seed: () => T) {
   const latest = useRef(seed)
   latest.current = seed
   useEffect(() => {
-    if (waiting && current !== s.version) {
+    if (waiting && ready && current !== s.version) {
       setS({ version: current, values: latest.current() })
       setWaiting(false)
     }
-  }, [waiting, current, s.version])
+  }, [waiting, ready, current, s.version])
   return {
     values: s.values, setValues: (values: T) => setS((x) => ({ ...x, values })), version: s.version, conflict,
     blocked: waiting,

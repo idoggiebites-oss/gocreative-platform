@@ -180,7 +180,7 @@ export function ReadinessCard({ d, po, goTab, addPurchase }: { d: Detail; po: Re
     if (key === 'materials' && state === 'pending') return <>{btn(t.noPurchasing, () => setDialog('nopurchasing'))}{btn(t.addPurchase, addPurchase, true)}</>
     if (key === 'preparation') {
       const setPrep = (prepStatus: PrepStatus) => !prep.isPending && prep.mutate({ prepStatus, expectedVersion: order.version })
-      const pb = (label: string, to: PrepStatus, primary = false) => <button type="button" className={primary ? smPrimary : sm} aria-busy={prep.isPending || undefined} onClick={() => setPrep(to)}>{label}</button>
+      const pb = (label: string, to: PrepStatus, primary = false) => <button type="button" className={primary ? smPrimary : sm} aria-busy={prep.isPending || undefined} disabled={prep.isPending || order.state !== 'active'} onClick={() => setPrep(to)}>{label}</button>
       if (state === 'pending') return <>{order.prepStatus === 'in_progress' ? null : pb(t.startPrep, 'in_progress')}{pb(t.markReady, 'ready', true)}{pb(t.prepNotRequired, 'not_required')}</>
       if (state === 'not_required') return pb(t.prepRequired, 'not_started')
     }

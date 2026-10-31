@@ -331,12 +331,12 @@ export const es: Messages = {
     estCost: 'Costo unitario estimado (USD)', actCost: 'Costo unitario real (USD)', costInvalid: 'Escribe un monto como 12.50.', expectedOn: 'Fecha esperada', notes: 'Notas',
     lockedNote: 'Una vez pedida, solo se pueden cambiar el costo real, la fecha esperada y las notas.',
     totals: (est, act) => `Estimado ${est} · real ${act}`, line: (est, act) => `Estimado ${est} · real ${act}`,
-    received: (r, q) => `${r} de ${q} recibidas`, over: (n) => `${n} más de lo pedido`,
+    received: (r, q) => `${r === 1 ? 'Se recibió' : 'Se recibieron'} ${r} de ${q}`, gone: 'Otra persona canceló o cambió esta compra, así que ya no se puede cambiar de esta forma. Cierra esta ventana para ver el estado actual.', over: (n) => `${n} más de lo pedido`,
     orderedOn: (d) => `Pedida el ${d}`, expected: (d) => `Esperada el ${d}`, noCost: 'sin costo todavía',
     markOrdered: 'Marcar como pedida', orderedTitle: 'Marcar como pedida', orderedBody: 'Confirma que los materiales sí se compraron. La app no hace pedidos.', orderedOnLabel: 'Pedida el', orderedConfirm: 'Marcar como pedida',
     record: 'Registrar entrega', recordTitle: 'Registrar una entrega', recordBody: 'Las recepciones no se pueden editar después. Se permite recibir más de lo pedido.', receivedOn: 'Recibida el', recordConfirm: 'Registrar entrega',
     cancel: 'Cancelar compra', cancelTitle: '¿Cancelar esta compra?', cancelBody: 'Una compra cancelada queda cerrada y ya no cuenta para los materiales.', reason: 'Motivo', cancelConfirm: 'Cancelar compra', keep: 'Conservar',
-    receipts: 'Entregas', receipt: (q, d, who) => `${q} recibidas el ${d}${who ? ` por ${who}` : ''}`,
+    receipts: 'Entregas', receipt: (q, d, who) => `${q === 1 ? 'Se recibió 1 pieza' : `Se recibieron ${q} piezas`} el ${d}${who ? `, registrado por ${who}` : ''}`,
   },
   files: {
     upload: {
