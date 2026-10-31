@@ -170,3 +170,16 @@ M1, M3/M4 and M5 in PHASE2_PLAN.md ("Carried forward from the M0 review").
   `updated_at` token can lose updates within a millisecond (Codex review of M1b).
 - Business dates (overdue, due this week, "today") use America/Chicago.
 - An archived contact can't be put on an order (added at the M1b/M1c merge).
+
+### 2026-10-30 — M1c review fixes (Codex review of cce1dc9)
+- Every guarded order write requires the client's `expectedVersion`. The server
+  never substitutes its own fresh read, so a form opened before a colleague's
+  change gets 409 instead of overwriting it.
+- A PO status change is an order write: it requires and bumps the order version,
+  even when production status doesn't move.
+- Repeat order refuses (409 `contact_archived`) when the source's contact is
+  archived, so staff pick the contact deliberately; it is never dropped silently.
+- A refused create or repeat uses up no order number. The counter upsert carries
+  the same prerequisite as the INSERT (proven on workerd D1).
+- Item replacement updates retained lines in place and inserts new lines last, so
+  ids can't collide.

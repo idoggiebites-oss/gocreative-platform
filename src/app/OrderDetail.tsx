@@ -368,7 +368,7 @@ type Tab = (typeof TABS)[number]
 
 function Order({ d }: { d: Detail }) {
   const { m, fmt } = useI18n()
-  const c: Controls = { po: useChangePo(d.order.number), prod: useChangeProduction(d.order.number) }
+  const c: Controls = { po: useChangePo(d.order.number, d.order.version), prod: useChangeProduction(d.order.number) }
   const moves = useMoves(d)
   const [tab, setTab] = useState<Tab>('items')
   // Products only: charge and discount lines carry a quantity too, but aren't items.

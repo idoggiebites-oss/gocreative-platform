@@ -62,11 +62,12 @@ export function useChangeProduction(number: string) {
   })
 }
 
-export function useChangePo(number: string) {
+// expectedVersion is the order version the page was opened with, so a stale page gets 409 conflict_retry.
+export function useChangePo(number: string, expectedVersion: number) {
   const invalidate = useInvalidate(number)
   return useMutation({
     mutationFn: ({ poId, to }: { poId: number; to: PoStatus }) =>
-      call<PoChangeResponse>(`/orders/${encodeURIComponent(number)}/purchase-orders/${poId}`, { method: 'PATCH', body: JSON.stringify({ to }) }),
+      call<PoChangeResponse>(`/orders/${encodeURIComponent(number)}/purchase-orders/${poId}`, { method: 'PATCH', body: JSON.stringify({ to, expectedVersion }) }),
     onSettled: invalidate,
   })
 }
