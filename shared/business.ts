@@ -5,4 +5,6 @@ export const business = {
   shortName: 'GoCreative',
   timeZone: 'America/Chicago',
   orderNumberPrefix: '',
+  // The columns of every size grid, in display order (youth then adult).
+  sizes: ['YS', 'YM', 'YL', 'S', 'M', 'L', 'XL', '2XL', '3XL'],
 } as const

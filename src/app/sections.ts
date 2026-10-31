@@ -1,4 +1,4 @@
-import { ClipboardList, FileCheck, Image, Layers, LayoutDashboard, SlidersHorizontal, Users, type LucideIcon } from 'lucide-react'
+import { Banknote, ClipboardList, FileCheck, Image, Layers, LayoutDashboard, SlidersHorizontal, Users, type LucideIcon } from 'lucide-react'
 import type { Messages } from '@shared/i18n/en'
 
 export type SectionKey = Exclude<keyof Messages['nav'], 'main' | 'account'>
@@ -10,5 +10,6 @@ export const SECTIONS: { key: SectionKey; to: string; icon: LucideIcon }[] = [
   { key: 'artwork', to: '/app/artwork', icon: Image },
   { key: 'purchaseOrders', to: '/app/purchase-orders', icon: FileCheck },
   { key: 'production', to: '/app/production', icon: Layers },
+  { key: 'payments', to: '/app/payments', icon: Banknote },
   { key: 'settings', to: '/app/settings', icon: SlidersHorizontal },
 ]
