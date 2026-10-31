@@ -54,11 +54,13 @@ export function orderRoutes() {
     })
     .patch('/orders/:number/production', async (c) => {
       const n = number.safeParse(c.req.param('number'))
-      const body = z.object({ to: z.enum(PRODUCTION_STATUSES) }).safeParse(await c.req.json().catch(() => null))
+      const body = z.object({ to: z.enum(PRODUCTION_STATUSES), expectedVersion: z.number().int().min(0) }).safeParse(await c.req.json().catch(() => null))
       if (!n.success) return bad(c, n.error)
       if (!body.success) return bad(c, body.error)
       const loaded = await db.loadForProductionChange(c.env.DB, n.data)
       if (!loaded) return c.json({ error: 'Order not found', code: 'not_found' satisfies ApiErrorCode }, 404)
+      // The page's version, never this read's: a page opened before someone else's change gets 409.
+      if (loaded.version !== body.data.expectedVersion) return c.json({ error: 'Order changed, reload and retry', code: 'conflict_retry' satisfies ApiErrorCode }, 409)
       const r = readiness(loaded.input)
       const check = checkOrderProductionMove(loaded.state, loaded.from, body.data.to, r)
       if (!check.ok) {
@@ -68,9 +70,9 @@ export function orderRoutes() {
         const code: ApiErrorCode = gated ? 'gate_failed' : 'transition_not_allowed'
         return c.json({ error: `Production move refused: ${check.error}`, code, ...(gate.ok ? {} : { reasons: gate.reasons }) }, 409)
       }
-      const changed = await db.applyProductionChange(c.env.DB, { orderId: loaded.id, actorId: c.get('user').id, from: loaded.from, to: body.data.to })
+      const changed = await db.applyProductionChange(c.env.DB, { orderId: loaded.id, actorId: c.get('user').id, from: loaded.from, to: body.data.to, expectedVersion: body.data.expectedVersion })
       if (!changed) return c.json({ error: 'Order changed, reload and retry', code: 'conflict_retry' satisfies ApiErrorCode }, 409)
-      return c.json({ number: n.data, productionStatus: body.data.to, state: loaded.state })
+      return c.json({ number: n.data, productionStatus: body.data.to, state: loaded.state, version: body.data.expectedVersion + 1 })
     })
     .patch('/orders/:number/purchase-orders/:poId', async (c) => {
       const n = number.safeParse(c.req.param('number'))

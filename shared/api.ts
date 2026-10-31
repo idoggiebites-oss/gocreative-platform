@@ -141,8 +141,8 @@ export type OrderDetailResponse = {
   readiness: ReadinessResult
 }
 
-export type ProductionChangeRequest = { to: ProductionStatus }
-export type ProductionChangeResponse = { number: string; productionStatus: ProductionStatus; state: OrderState }
+export type ProductionChangeRequest = { to: ProductionStatus; expectedVersion: number }
+export type ProductionChangeResponse = { number: string; productionStatus: ProductionStatus; state: OrderState; version: number }
 /** expectedVersion is the order's version; every applied PO change bumps it (the new one comes back as version). */
 export type PoChangeRequest = { to: PoStatus; expectedVersion: number }
 export type PoChangeResponse = { poId: number; status: PoStatus; productionStatus: ProductionStatus; version: number }

@@ -183,3 +183,15 @@ M1, M3/M4 and M5 in PHASE2_PLAN.md ("Carried forward from the M0 review").
   the same prerequisite as the INSERT (proven on workerd D1).
 - Item replacement updates retained lines in place and inserts new lines last, so
   ids can't collide.
+
+### 2026-10-30 — Production changes need the page's version; notes and repeat don't (Codex re-review of M1c)
+- **Production PATCH requires `expectedVersion`.** It is checked in the route and
+  inside the UPDATE, and the new version is returned. An old page can no longer
+  advance production after a colleague's change.
+- **Adding a note does not take or bump the version** (declining that Codex
+  finding). Notes are append-only comments and change no order state. Bumping
+  the version would refuse every colleague's open form whenever someone left a
+  comment, so there is no lost update to prevent.
+- **Repeat order does not take the source's version** (declining that finding).
+  The source isn't modified beyond an activity row. The new order has no quote,
+  so its starting status is always `awaiting_quote`, whatever flags it copied.

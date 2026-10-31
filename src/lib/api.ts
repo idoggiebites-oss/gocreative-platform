@@ -53,11 +53,11 @@ function useInvalidate(number: string) {
   ])
 }
 
-export function useChangeProduction(number: string) {
+export function useChangeProduction(number: string, expectedVersion: number) {
   const invalidate = useInvalidate(number)
   return useMutation({
     mutationFn: (to: ProductionStatus) =>
-      call<ProductionChangeResponse>(`/orders/${encodeURIComponent(number)}/production`, { method: 'PATCH', body: JSON.stringify({ to }) }),
+      call<ProductionChangeResponse>(`/orders/${encodeURIComponent(number)}/production`, { method: 'PATCH', body: JSON.stringify({ to, expectedVersion }) }),
     onSettled: invalidate,
   })
 }

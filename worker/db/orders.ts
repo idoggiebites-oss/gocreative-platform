@@ -342,7 +342,7 @@ export async function getOrderDetail(db: D1Database, number: string): Promise<(O
 export async function loadForProductionChange(db: D1Database, number: string) {
   const o = await getOrderByNumber(db, number)
   if (!o) return null
-  return { id: o.id, from: o.production_status, state: o.state, input: await readinessInput(db, o) }
+  return { id: o.id, from: o.production_status, state: o.state, version: o.version, input: await readinessInput(db, o) }
 }
 
 const NOW = `strftime('%Y-%m-%dT%H:%M:%fZ','now')`
@@ -357,13 +357,13 @@ const LOG_IF_CHANGED = `INSERT INTO activity_log (actor_kind, actor_id, entity_t
  * must land on the derived one. Returns false when the order moved or readiness no longer holds
  * (nothing logged, nothing changed).
  */
-export async function applyProductionChange(db: D1Database, p: { orderId: number; actorId: number; from: ProductionStatus; to: ProductionStatus }) {
+export async function applyProductionChange(db: D1Database, p: { orderId: number; actorId: number; from: ProductionStatus; to: ProductionStatus; expectedVersion: number }) {
   const guard = p.to === 'in_production' ? ` AND ${GATE_OK}`
     : (PRE_PRODUCTION_STATUSES as readonly string[]).includes(p.to) ? ` AND ${PRE_PRODUCTION} = ?` : ''
-  const binds: (string | number)[] = [p.to, p.orderId, p.from, ...(guard.endsWith('?') ? [p.to] : [])]
+  const binds: (string | number)[] = [p.to, p.orderId, p.from, p.expectedVersion, ...(guard.endsWith('?') ? [p.to] : [])]
   const [update] = await db.batch([
     db
-      .prepare(`UPDATE orders SET production_status = ?, version = version + 1, updated_at = ${NOW} WHERE id = ? AND production_status = ? AND state = 'active'${guard}`)
+      .prepare(`UPDATE orders SET production_status = ?, version = version + 1, updated_at = ${NOW} WHERE id = ? AND production_status = ? AND version = ? AND state = 'active'${guard}`)
       .bind(...binds),
     db
       .prepare(LOG_IF_CHANGED)

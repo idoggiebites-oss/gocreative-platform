@@ -186,7 +186,8 @@ describe('order detail', () => {
 })
 
 describe('production status change', () => {
-  const patch = (t: ReturnType<typeof setup>, n: string, to: string) => t.call('PATCH', `/orders/${n}/production`, { to })
+  const ver = (t: ReturnType<typeof setup>, n: string) => (t.sqlite.prepare('SELECT version FROM orders WHERE number = ?').get(n) as { version: number } | undefined)?.version ?? 0
+  const patch = (t: ReturnType<typeof setup>, n: string, to: string) => t.call('PATCH', `/orders/${n}/production`, { to, expectedVersion: ver(t, n) })
 
   test('PO under review blocks ready: 409, row unchanged, nothing logged', async () => {
     const t = setup()
@@ -218,7 +219,7 @@ describe('production status change', () => {
     const t = setup()
     const res = await patch(t, '2026-0004', 'production_complete')
     expect(res.status).toBe(200)
-    expect(await t.json(res)).toEqual({ number: '2026-0004', productionStatus: 'production_complete', state: 'active' })
+    expect(await t.json(res)).toMatchObject({ number: '2026-0004', productionStatus: 'production_complete', state: 'active', version: expect.any(Number) })
     // Closed = fulfilled AND paid (M5); production never writes another track.
     expect(t.prod('2026-0004')).toEqual({ production_status: 'production_complete', state: 'active' })
   })
@@ -259,13 +260,34 @@ describe('production status change', () => {
   })
 })
 
+describe('production change from a stale page', () => {
+  test('a version from before someone else changed the order: 409, nothing applied, nothing logged', async () => {
+    const t = setup()
+    const v0 = (t.sqlite.prepare("SELECT version FROM orders WHERE number = '2026-0005'").get() as { version: number }).version
+    t.sqlite.exec("UPDATE orders SET title = 'changed by someone else', version = version + 1 WHERE number = '2026-0005'")
+    const before = t.activityCount()
+    const res = await t.call('PATCH', '/orders/2026-0005/production', { to: 'in_production', expectedVersion: v0 })
+    expect(res.status).toBe(409)
+    expect(t.prod('2026-0005').production_status).toBe('ready')
+    expect(t.activityCount()).toBe(before)
+    // The SQL guard on its own (route check bypassed): the stale version changes nothing.
+    const loaded = (await dbo.loadForProductionChange(t.db, '2026-0005'))!
+    expect(await dbo.applyProductionChange(t.db, { orderId: loaded.id, actorId: 1, from: loaded.from, to: 'in_production', expectedVersion: v0 })).toBe(false)
+    expect(t.activityCount()).toBe(before)
+  })
+  test('expectedVersion is required', async () => {
+    const t = setup()
+    expect((await t.call('PATCH', '/orders/2026-0005/production', { to: 'in_production' })).status).toBe(400)
+  })
+})
+
 describe('stale production gate', () => {
   test('PO revoked between read and write: no change, no activity', async () => {
     const t = setup()
     const loaded = (await dbo.loadForProductionChange(t.db, '2026-0005'))! // ready, PO 6 approved
     t.sqlite.exec(`UPDATE purchase_orders SET status = 'rejected' WHERE id = 6`)
     const before = t.activityCount()
-    expect(await dbo.applyProductionChange(t.db, { orderId: loaded.id, actorId: 1, from: loaded.from, to: 'in_production' })).toBe(false)
+    expect(await dbo.applyProductionChange(t.db, { orderId: loaded.id, actorId: 1, from: loaded.from, to: 'in_production', expectedVersion: loaded.version })).toBe(false)
     expect(t.prod('2026-0005').production_status).toBe('ready')
     expect(t.activityCount()).toBe(before)
   })
@@ -418,9 +440,9 @@ describe('error codes', () => {
     expect(await code(t, await t.call('GET', '/orders/2026-9999'))).toMatchObject({ code: 'not_found', error: 'Order not found' })
     expect(await code(t, await t.call('GET', '/orders/abc'))).toMatchObject({ code: 'invalid_request' })
     expect(await code(t, await t.call('GET', '/orders?view=nope'))).toMatchObject({ code: 'invalid_request' })
-    expect(await code(t, await t.call('PATCH', '/orders/2026-9999/production', { to: 'ready' }))).toMatchObject({ code: 'not_found' })
-    expect(await code(t, await t.call('PATCH', '/orders/2026-0005/production', { to: 'nonsense' }))).toMatchObject({ code: 'invalid_request' })
-    expect(await code(t, await t.call('PATCH', '/orders/2026-0005/production', { to: 'quality_control' }))).toMatchObject({ code: 'transition_not_allowed' })
+    expect(await code(t, await t.call('PATCH', '/orders/2026-9999/production', { to: 'ready', expectedVersion: (t.sqlite.prepare('SELECT version FROM orders WHERE number = ?').get('2026-9999') as { version: number } | undefined)?.version ?? 0 }))).toMatchObject({ code: 'not_found' })
+    expect(await code(t, await t.call('PATCH', '/orders/2026-0005/production', { to: 'nonsense', expectedVersion: (t.sqlite.prepare('SELECT version FROM orders WHERE number = ?').get('2026-0005') as { version: number } | undefined)?.version ?? 0 }))).toMatchObject({ code: 'invalid_request' })
+    expect(await code(t, await t.call('PATCH', '/orders/2026-0005/production', { to: 'quality_control', expectedVersion: (t.sqlite.prepare('SELECT version FROM orders WHERE number = ?').get('2026-0005') as { version: number } | undefined)?.version ?? 0 }))).toMatchObject({ code: 'transition_not_allowed' })
     expect(await code(t, await t.call('PATCH', '/orders/2026-0011/purchase-orders/99999', { to: 'approved', expectedVersion: 0 }))).toMatchObject({ code: 'not_found' })
     // PO 12 is 'received'; received -> approved is not a legal move
     expect(await code(t, await t.call('PATCH', '/orders/2026-0011/purchase-orders/12', { to: 'approved', expectedVersion: 0 }))).toMatchObject({ code: 'po_transition_not_allowed' })
@@ -428,14 +450,14 @@ describe('error codes', () => {
   test('a closed gate is gate_failed with reason codes', async () => {
     const t = setup()
     t.sqlite.exec(`UPDATE purchase_orders SET status = 'under_review' WHERE id = 12`)
-    expect(await code(t, await t.call('PATCH', '/orders/2026-0011/production', { to: 'ready' }))).toMatchObject({ code: 'gate_failed', reasons: ['authorization.po_not_approved'] })
+    expect(await code(t, await t.call('PATCH', '/orders/2026-0011/production', { to: 'ready', expectedVersion: (t.sqlite.prepare('SELECT version FROM orders WHERE number = ?').get('2026-0011') as { version: number } | undefined)?.version ?? 0 }))).toMatchObject({ code: 'gate_failed', reasons: ['authorization.po_not_approved'] })
   })
 })
 
 describe('activity vocabulary', () => {
   test('seed and API write only codes from ACTIVITY_ACTIONS', async () => {
     const t = setup()
-    await t.call('PATCH', '/orders/2026-0005/production', { to: 'in_production' })
+    await t.call('PATCH', '/orders/2026-0005/production', { to: 'in_production', expectedVersion: (t.sqlite.prepare('SELECT version FROM orders WHERE number = ?').get('2026-0005') as { version: number } | undefined)?.version ?? 0 })
     const rows = t.sqlite.prepare('SELECT DISTINCT action FROM activity_log').all() as { action: string }[]
     for (const r of rows) expect(ACTIVITY_ACTIONS as readonly string[]).toContain(r.action)
   })
