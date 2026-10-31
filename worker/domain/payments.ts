@@ -1,4 +1,4 @@
-import type { CheckStatus, FinancialStatus } from '../../shared/enums-next.ts'
+import type { CheckStatus, FinancialStatus, PaymentMethod } from '../../shared/enums-next.ts'
 
 type Failure = { ok: false; error: string }
 export function balance(agreedTotalCents: number | null, payments: readonly { amountCents: number }[]): {
@@ -22,4 +22,14 @@ export function checkCheckTransition(from: CheckStatus, to: CheckStatus): { ok: 
   }
   // Only collection creates a payment; deposit and clearance cannot insert it again.
   return allowed[from].includes(to) ? { ok: true, createsPayment: to === 'collected' } : { ok: false, error: 'invalid_check_transition' }
+}
+
+// A manual payment whose request_id already exists: an identical resubmission is a retry (the route
+// returns the stored payment, 200); any other payload under the same request_id is a 409.
+type PaymentFields = { orderId: number; amountCents: number; method: PaymentMethod; paidOn: string; notes: string | null }
+export function matchRetry<T extends PaymentFields>(existing: T, incoming: PaymentFields): { ok: true; payment: T } | Failure {
+  const notes = (n: string | null) => n?.trim() || null
+  return existing.orderId === incoming.orderId && existing.amountCents === incoming.amountCents && existing.method === incoming.method
+    && existing.paidOn === incoming.paidOn && notes(existing.notes) === notes(incoming.notes)
+    ? { ok: true, payment: existing } : { ok: false, error: 'request_id_conflict' }
 }

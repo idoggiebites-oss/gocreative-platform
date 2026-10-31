@@ -4,9 +4,10 @@
 import { readFileSync } from 'node:fs'
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite'
 
-export function createTestD1() {
+// schema: replaces migration 0001, for design-only DDL proofs (design/sql/*) that redefine its tables.
+export function createTestD1(schema?: string) {
   const sqlite = new DatabaseSync(':memory:')
-  sqlite.exec(readFileSync(new URL('../../migrations/0001_init.sql', import.meta.url), 'utf8'))
+  sqlite.exec(schema ?? readFileSync(new URL('../../migrations/0001_init.sql', import.meta.url), 'utf8'))
 
   const run = (sql: string, params: SQLInputValue[]) => {
     const stmt = sqlite.prepare(sql)

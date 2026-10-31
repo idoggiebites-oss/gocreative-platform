@@ -1,5 +1,6 @@
 import { PRODUCTION_STATUSES_NEXT } from '../../shared/enums-next.ts'
 import { checkProductionMove, checkUnitsCompleted, chooseSlot } from './productionFlow.ts'
+import { readiness } from './readiness.ts'
 const gate = { ready: true, preProductionStatus: 'ready' as const }
 it('checks all production moves with a satisfied gate', () => {
   for (const from of PRODUCTION_STATUSES_NEXT) for (const to of PRODUCTION_STATUSES_NEXT) {
@@ -17,7 +18,20 @@ it('derives awaiting moves and gates starts, including QC rework', () => {
   expect(checkProductionMove('awaiting_quote', 'awaiting_materials', blocked).ok).toBe(false)
   expect(checkProductionMove('ready', 'in_production', blocked).ok).toBe(false)
   expect(checkProductionMove('quality_control', 'in_production', blocked).ok).toBe(false)
-  expect(checkProductionMove('in_production', 'ready', blocked).ok).toBe(true)
+  // Pausing lands on the derived pre-production status, never a fixed 'ready'.
+  expect(checkProductionMove('in_production', 'ready', blocked).ok).toBe(false)
+  expect(checkProductionMove('in_production', 'awaiting_artwork', blocked).ok).toBe(true)
+  expect(checkProductionMove('in_production', 'awaiting_quote', blocked).ok).toBe(false)
+})
+it('pauses a job whose PO was revoked mid-production into awaiting_authorization and refuses the restart', () => {
+  const gate = readiness({ state: 'active', quote: { status: 'accepted', itemsRevision: 1, lineCount: 1 }, itemsRevision: 1,
+    artworkRequired: false, designs: [], poRequired: true, latestPo: { status: 'rejected' }, authorizedAt: null,
+    materialsRequired: false, purchases: [], prepStatus: 'not_required' })
+  expect(gate).toMatchObject({ ready: false, preProductionStatus: 'awaiting_authorization' })
+  expect(checkProductionMove('in_production', 'ready', gate)).toEqual({ ok: false, error: 'readiness_status_mismatch' })
+  expect(checkProductionMove('in_production', 'awaiting_authorization', gate)).toEqual({ ok: true })
+  expect(checkProductionMove('awaiting_authorization', 'in_production', gate).ok).toBe(false)
+  expect(checkProductionMove('awaiting_authorization', 'ready', gate).ok).toBe(false)
 })
 it('chooses slots with owner-only, reasoned overrides and a hard cap', () => {
   expect(chooseSlot({ occupied: [], override: true, role: 'staff' })).toEqual({ ok: true, slot: 1, overrideUsed: false })

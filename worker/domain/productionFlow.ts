@@ -12,7 +12,11 @@ export function checkProductionMove(from: ProductionStatusNext, to: ProductionSt
   if ((from === 'ready' || from === 'quality_control') && to === 'in_production') {
     return gate.ready ? { ok: true } : { ok: false, error: 'not_ready' }
   }
-  if (from === 'in_production' && (to === 'quality_control' || to === 'ready')) return { ok: true }
+  if (from === 'in_production' && to === 'quality_control') return { ok: true }
+  // Pausing returns to whatever readiness now says (e.g. a PO revoked mid-run), not a fixed 'ready'.
+  if (from === 'in_production' && (to.startsWith('awaiting_') || to === 'ready')) {
+    return to === gate.preProductionStatus ? { ok: true } : { ok: false, error: 'readiness_status_mismatch' }
+  }
   if (from === 'quality_control' && to === 'production_complete') return { ok: true }
   return { ok: false, error: 'invalid_production_move' }
 }

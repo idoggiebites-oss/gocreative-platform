@@ -2,10 +2,12 @@ import type { PoStatus } from '../../shared/enums.ts'
 import type { ArtworkApproval, OrderArtworkStatus, OrderStateNext, PrepStatus, ProductionStatusNext, PurchaseStoredStatus, QuoteStatus } from '../../shared/enums-next.ts'
 import { quoteSatisfied } from './quotes.ts'
 
-type Design = { latestApproval: ArtworkApproval }
+// currentVersion is null when a design has no uploaded file yet; that counts as not received.
+export type Design = { currentVersion: { id: number; fileId: number; approval: ArtworkApproval } | null }
 export type ReadinessInput = {
   state: OrderStateNext
-  quote: { status: QuoteStatus; itemsRevision: number } | null
+  // lineCount: lines in the accepted snapshot; acceptance requires a product line (checkQuoteAcceptable).
+  quote: { status: QuoteStatus; itemsRevision: number; lineCount: number } | null
   itemsRevision: number
   artworkRequired: boolean
   designs: Design[]
@@ -24,9 +26,9 @@ export type Readiness = {
 }
 export function orderArtworkStatus(artworkRequired: boolean, designs: readonly Design[]): OrderArtworkStatus {
   if (!artworkRequired) return 'not_required'
-  if (!designs.length) return 'not_received'
-  if (designs.some(d => d.latestApproval === 'changes_requested')) return 'changes_requested'
-  if (designs.some(d => d.latestApproval === 'under_review')) return 'under_review'
+  if (!designs.length || designs.some(d => !d.currentVersion)) return 'not_received'
+  if (designs.some(d => d.currentVersion?.approval === 'changes_requested')) return 'changes_requested'
+  if (designs.some(d => d.currentVersion?.approval === 'under_review')) return 'under_review'
   return 'approved'
 }
 export function readiness(input: ReadinessInput): Readiness {
@@ -34,8 +36,9 @@ export function readiness(input: ReadinessInput): Readiness {
   const add = (key: Key, reason?: string, required = true) => {
     items.push({ key, state: !required ? 'not_required' : reason ? 'pending' : 'complete', ...(required && reason ? { reason } : {}) })
   }
-  add('quote', quoteSatisfied(input.quote, input.itemsRevision) ? undefined : !input.quote ? 'no_quote'
-    : input.quote.status !== 'accepted' ? 'not_accepted' : 'items_changed_since_acceptance')
+  add('quote', !input.quote ? 'no_quote' : input.quote.status !== 'accepted' ? 'not_accepted'
+    : !quoteSatisfied(input.quote, input.itemsRevision) ? 'items_changed_since_acceptance'
+    : !(input.quote.lineCount > 0) ? 'empty_quote' : undefined)
   // Direct authorization cannot substitute for the required PO.
   add('authorization', input.poRequired ? !input.latestPo ? 'po_missing' : input.latestPo.status !== 'approved' ? 'po_not_approved' : undefined
     : input.authorizedAt ? undefined : 'not_authorized')

@@ -1,5 +1,5 @@
 import { QUOTE_STATUSES } from '../../shared/enums-next.ts'
-import { checkQuoteTransition, currentQuote, itemsChangeRequiresReapproval, lineTotalCents, planNewVersion, quoteSatisfied, quoteTotals, sizesTotal, validateItem, CUSTOMER_FACING_ITEM_FIELDS } from './quotes.ts'
+import { checkQuoteAcceptable, checkQuoteTransition, currentQuote, itemsChangeRequiresReapproval, lineTotalCents, planNewVersion, quoteSatisfied, quoteTotals, sizesTotal, validateItem, CUSTOMER_FACING_ITEM_FIELDS } from './quotes.ts'
 import type { Item } from './quotes.ts'
 const item: Item = { id: 1, kind: 'product', quantity: 2, unitPriceCents: 150, sizes: { M: 2 } }
 it('totals product, charge and discount cents', () => {
@@ -53,4 +53,13 @@ it('versions supersede only live quotes and current means highest version', () =
   expect(quoteSatisfied(null, 1)).toBe(false)
   for (const status of QUOTE_STATUSES) expect(quoteSatisfied({ status, itemsRevision: 2 }, 2)).toBe(status === 'accepted')
   expect(quoteSatisfied({ status: 'accepted', itemsRevision: 1 }, 2)).toBe(false)
+})
+it('accepts a quote only with a valid product line, even at zero dollars', () => {
+  expect(checkQuoteAcceptable([])).toEqual({ ok: false, error: 'no_product_line' })
+  expect(checkQuoteAcceptable([{ kind: 'charge', quantity: 1, unitPriceCents: 500 }])).toEqual({ ok: false, error: 'no_product_line' })
+  expect(checkQuoteAcceptable([{ ...item, unitPriceCents: 0 }])).toEqual({ ok: true })
+  expect(checkQuoteAcceptable([item, { kind: 'charge', quantity: 1, unitPriceCents: 50 }])).toEqual({ ok: true })
+  expect(checkQuoteAcceptable([{ ...item, sizes: { M: 1 } }])).toEqual({ ok: false, error: 'sizes_quantity_mismatch' })
+  expect(checkQuoteAcceptable([item, { kind: 'charge', quantity: 0, unitPriceCents: 50 }])).toEqual({ ok: false, error: 'invalid_quantity' })
+  expect(checkQuoteAcceptable([item, { kind: 'discount', quantity: 1, unitPriceCents: 301 }])).toEqual({ ok: false, error: 'discount_exceeds_total' })
 })
