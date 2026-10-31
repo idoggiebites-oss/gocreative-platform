@@ -76,3 +76,9 @@ moving anything.
 Under `idoggiebites-oss`. Nothing secret is committed: `.dev.vars` is ignored,
 the seed data is fictional, and the D1 id is a placeholder until deploy (a D1 id
 is not a credential anyway). Secrets only ever go in `wrangler secret`.
+
+### 2026-10-30 — Phase 1 is live behind Access (Arturo verified the sign-in)
+A reusable Access policy, `GoCreative staff`, lists the two staff emails. It is
+applied to the whole Worker (all traffic, 24-hour sessions). `ACCESS_AUD` and
+`ACCESS_TEAM_DOMAIN` are Worker secrets. The remote DB holds sample orders for
+the family to evaluate; they get wiped before real use (see ROADMAP).

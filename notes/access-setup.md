@@ -1,4 +1,37 @@
-# Putting Cloudflare Access in front of the deployed Worker
+# Cloudflare Access setup
+
+## What is live (verified 2026-10-30)
+
+Phase 1 runs on `gocreative.idoggiebites.workers.dev` with the WHOLE hostname
+behind Access (no storefront until Phase 4). It was set up like this, and it works:
+
+1. Zero Trust → Access controls → **Policies** → Add a policy: name
+   `GoCreative staff`, action Allow, Include → **Emails** → the two staff emails.
+   (The Worker's own Access dialog only offers "Cloudflare account" and "Email
+   domain" presets; "Email domain" on gmail.com would admit every Gmail user, so
+   a reusable policy listing exact emails is required.)
+2. Workers & Pages → gocreative → **Access** tab → Protect this Worker behind
+   Access → Scope **All traffic** → policy `GoCreative staff` → session 24 hours
+   → Apply. This also covers preview URLs.
+3. That page then shows the **AUD tag** and the JWKS URL
+   (`https://<team>.cloudflareaccess.com/cdn-cgi/access/certs`). Set both on the
+   Worker as secrets: `wrangler secret put ACCESS_AUD` and
+   `wrangler secret put ACCESS_TEAM_DOMAIN` (value `<team>.cloudflareaccess.com`).
+   No redeploy needed.
+4. Check: anonymous `curl -I` on `/`, `/app` and `/api/app/me` gives a 302 to
+   the Access login page; signing in with an allowed email reaches the dashboard.
+
+Login is email one-time PIN (the default when no other identity provider is
+configured). The login page header shows the Zero Trust team name, set under
+Zero Trust → Settings.
+
+Adding or removing staff means editing the `GoCreative staff` policy AND the
+`users` table (the Worker takes the role from `users`; Access alone is not enough).
+
+---
+
+## Reference: path-level setup for when the storefront ships (Phase 4)
+
 
 Employees log in through Cloudflare Access (email one-time PIN). Access guards
 `/app/*` (the dashboard) and `/api/app/*` (the employee API). The Worker does not

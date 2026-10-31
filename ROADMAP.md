@@ -16,7 +16,7 @@ so the family has something real to judge early.
 I break each phase into tasks with a per-task model table when it starts, not now.
 
 
-## Phase 1 tasks
+## Phase 1 tasks — complete (2026-10-30)
 
 Models assigned by Claude for token efficiency (Arturo, 2026-10-30: "assign models for efficiency and use codex as well").
 Codex reviews the phase diff read-only before merge.
@@ -31,7 +31,7 @@ Codex reviews the phase diff read-only before merge.
 | 1.6 | App shell: sidebar, ⌘K search, mobile nav, `brand.css`, design tokens, **EN/ES toggle + i18n foundation** | build to the approved mockup | Sonnet agent | done (bbe36c7) |
 | 1.7a | Read API (dashboard, order list, order detail) + PO and production status changes through the domain rules, activity log, API tests | wiring with a single write path | Sonnet agent; Codex reviews | done (713370d, hardened 1959139 + gate parity test 4358ff5) |
 | 1.7b | Dashboard, order list, order detail screens on the 1.7a API, EN/ES | build to the mockup | Sonnet agent; Codex reviews | done (d268283, review fixes 6296911) |
-| 1.8 | Deploy: create D1/R2, Access app, add the 2 users, ship to workers.dev | needs Arturo's emails + login | Claude | in progress: D1 + R2 created, schema + sample data + 2 users on remote, deployed to gocreative.idoggiebites.workers.dev (API fails closed); waiting on Access setup |
+| 1.8 | Deploy: create D1/R2, Access app, add the 2 users, ship to workers.dev | needs Arturo's emails + login | Claude | done 2026-10-30: live at gocreative.idoggiebites.workers.dev behind Access; both staff emails verified |
 
 ## Carried into Phase 2
 
