@@ -9,10 +9,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, expect, test } from 'vitest'
 import { getPlatformProxy } from 'wrangler'
+import { Hono } from 'hono'
 import * as dbo from '../../worker/db/orders'
+import { appRoutes } from '../../worker/routes/app'
+import type { AppEnv } from '../../worker/auth'
 
 const dir = mkdtempSync(join(tmpdir(), 'gocreative-d1-'))
-let proxy: Awaited<ReturnType<typeof getPlatformProxy<{ DB: D1Database }>>>
+let proxy: Awaited<ReturnType<typeof getPlatformProxy<{ DB: D1Database; FILES: R2Bucket }>>>
 let db: D1Database
 
 beforeAll(async () => {
@@ -20,7 +23,7 @@ beforeAll(async () => {
   wrangler('migrations', 'apply', 'gocreative')
   wrangler('execute', 'gocreative', '--file', 'scripts/seed.sql')
   // --persist-to <dir> stores under <dir>/v3, which is the path getPlatformProxy takes.
-  proxy = await getPlatformProxy<{ DB: D1Database }>({ persist: { path: join(dir, 'v3') }, remoteBindings: false })
+  proxy = await getPlatformProxy<{ DB: D1Database; FILES: R2Bucket }>({ persist: { path: join(dir, 'v3') }, remoteBindings: false })
   db = proxy.env.DB
   await db.exec('CREATE TABLE scratch (id INTEGER PRIMARY KEY, n INTEGER NOT NULL CHECK (n >= 0))')
 }, 60_000)
@@ -124,4 +127,30 @@ test('replace items on workerd: retained lines updated in place, a new line befo
   expect(await dbo.replaceItems(db, { orderId: id, version: o.version, actorId: 1, items: [line, { ...kept!, notes: 'kept' }], itemsRevision: { from: 0, to: 1 } })).not.toBeNull()
   const after = await dbo.listItems(db, id)
   expect(after.map((i) => [i.id === kept!.id, i.description, i.notes])).toEqual([[true, 'Setup', 'kept'], [false, 'New', null]])
+})
+
+// M2a: an upload end to end on the real bindings: R2 put, then the D1 batch (files + artwork INSERT … RETURNING,
+// the version bump, the log, the re-derive), then the download streams the object back with its headers.
+test('artwork upload and download through workerd D1 and R2', async () => {
+  const app = new Hono<AppEnv>().route('/api/app', appRoutes())
+  const env = { DB: db, FILES: proxy.env.FILES, DEV_AUTH_EMAIL: 'owner1@example.com' }
+  const o = (await dbo.orderState(db, { number: '2026-0017' }))!
+  const svg = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"></svg>')
+  const res = await app.request(`http://localhost/api/app/orders/2026-0017/artwork?expectedVersion=${o.version}&lineageId=17`,
+    { method: 'POST', body: svg, headers: { 'Content-Type': 'image/svg+xml', 'X-Filename': 'logo%20v2.svg' } }, env)
+  expect(res.status).toBe(201)
+  const { id, productionStatus } = (await res.json()) as { id: number; productionStatus: string }
+  expect(productionStatus).toBe('awaiting_artwork') // the new version reset approval, and the re-derive saw it
+  const row = (await db.prepare('SELECT f.id, f.r2_key, f.filename FROM artwork a JOIN files f ON f.id = a.file_id WHERE a.id = ?').bind(id).first<{ id: number; r2_key: string; filename: string }>())!
+  expect(row.filename).toBe('logo v2.svg')
+  expect(await (await proxy.env.FILES.get(row.r2_key))!.text()).toBe(new TextDecoder().decode(svg))
+  const file = await app.request(`http://localhost/api/app/files/${row.id}`, {}, env)
+  expect(file.headers.get('content-disposition')).toMatch(/^attachment;/)
+  expect(await file.text()).toBe(new TextDecoder().decode(svg))
+  // A stale version on workerd: refused before R2 is touched, nothing written.
+  const files = await count('SELECT COUNT(*) AS n FROM files')
+  const stale = await app.request(`http://localhost/api/app/orders/2026-0017/artwork?expectedVersion=${o.version}`,
+    { method: 'POST', body: svg, headers: { 'Content-Type': 'image/svg+xml' } }, env)
+  expect(stale.status).toBe(409)
+  expect(await count('SELECT COUNT(*) AS n FROM files')).toBe(files)
 })
