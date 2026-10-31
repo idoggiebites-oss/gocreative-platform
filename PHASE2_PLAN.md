@@ -286,11 +286,11 @@ logic it can test, Claude for design, integration and verification).
 - [x] UI: Production page (Ready to start / In production / Completed), dashboard current job +
       upcoming + action required. *(Sonnet)*
 
-### M5 — Pickup and payments (brief Step 5) → acceptance 13–16, 17 (payments part)
+### M5 — Pickup and payments (brief Step 5) → acceptance 13–16, 17 (payments part) — built, Codex-reviewed (\"M5 ready\") and LIVE 2026-10-31 (0006 applied remotely, Worker version 038ad2ed)
 - [x] Migration 0006; pickups (notify, collect, unpaid-release override); payments (multiple,
       derived balance/status); check collections (all five statuses, cleared separate). *(Opus; Codex reviews the money)*
       — server built 2026-10-31 (DECISIONS "M5 pickup, payments and check collection"); Codex review next.
-- [ ] UI: pickup panel (also from the dashboard), payments panel, Payments page with checks
+- [x] UI: pickup panel (also from the dashboard), payments panel, Payments page with checks
       to collect, dashboard Outstanding payments + Ready for pickup. *(Sonnet)*
 
 ### M6 — Polish and validation (brief Step 6)
