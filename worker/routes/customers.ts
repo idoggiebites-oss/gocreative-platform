@@ -4,7 +4,7 @@ import { z } from 'zod'
 import type { AppEnv } from '../auth'
 import type { ApiErrorCode, ContactResponse, CustomerDetailResponse, CustomerResponse, CustomersListResponse, NoteResponse } from '../../shared/api'
 import { CUSTOMER_KINDS, PAYMENT_TERMS } from '../../shared/enums'
-import { customerDefaults } from '../domain/customerDefaults'
+import { customerDefaults, payAfterPickupNeedsOwner } from '../domain/customerDefaults'
 import * as db from '../db/customers'
 
 const id = z.string().regex(/^[1-9]\d{0,14}$/, 'invalid id').transform(Number)
@@ -33,6 +33,7 @@ const listQuery = z.object({
 
 const bad = (c: Context, e: z.ZodError) => c.json({ error: `Invalid request: ${e.issues[0]?.path.join('.') || 'input'} ${e.issues[0]?.message ?? ''}`.trim(), code: 'invalid_request' satisfies ApiErrorCode }, 400)
 const notFound = (c: Context, what: string) => c.json({ error: `${what} not found`, code: 'not_found' satisfies ApiErrorCode }, 404)
+const ownerOnlyTerms = (c: Context) => c.json({ error: 'Only an owner can give this customer pay-after-pickup terms', code: 'payment_terms_owner_only' satisfies ApiErrorCode }, 403)
 const retry = (c: Context) => c.json({ error: 'Changed by someone else, reload and retry', code: 'conflict_retry' satisfies ApiErrorCode }, 409)
 const body = (c: Context) => c.req.json().catch(() => null)
 
@@ -53,6 +54,7 @@ export function customerRoutes() {
       const b = createBody.safeParse(await body(c))
       if (!b.success) return bad(c, b.error)
       const d = b.data
+      if (c.get('user').role !== 'owner' && payAfterPickupNeedsOwner(d.kind, d.defaultPaymentTerms ?? customerDefaults(d.kind).defaultPaymentTerms)) return ownerOnlyTerms(c)
       const newId = await db.createCustomer(c.env.DB, c.get('user').id, {
         name: d.name, kind: d.kind, organization: d.organization ?? null, email: d.email ?? null, phone: d.phone ?? null, internalNotes: d.internalNotes ?? null,
         ...customerDefaults(d.kind), // the kind's defaults, overridden by whatever staff chose
@@ -70,6 +72,9 @@ export function customerRoutes() {
       if (!current) return notFound(c, 'Customer')
       const { expectedVersion, ...changes } = b.data
       if (current.version !== expectedVersion) return retry(c)
+      const touchesTerms = changes.defaultPaymentTerms !== undefined || changes.kind !== undefined
+      if (touchesTerms && c.get('user').role !== 'owner'
+        && payAfterPickupNeedsOwner(changes.kind ?? current.kind, changes.defaultPaymentTerms ?? current.defaultPaymentTerms)) return ownerOnlyTerms(c)
       if (!(await db.updateCustomer(c.env.DB, c.get('user').id, current, changes, expectedVersion))) return retry(c)
       return c.json<CustomerResponse>({ customer: (await db.getCustomer(c.env.DB, i.data))! })
     })

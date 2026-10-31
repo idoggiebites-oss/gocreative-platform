@@ -203,4 +203,22 @@ describe('payment terms can\'t be used to skip the owner\'s release override (Co
     // Staff pickup of the unpaid order is still refused.
     expect((await t.call('POST', '/orders/2026-0020/pickup/collect', { collectedByName: 'X', expectedVersion: v() }, STAFF)).status).toBe(409)
   })
+
+  test('staff can\'t create an order or a customer on pay-after-pickup terms their kind doesn\'t default to; districts still work', async () => {
+    const t = setup()
+    const before = t.all('SELECT id FROM customers').length
+    // A regular (individual) customer: pay-after-pickup is owner-only, on the customer and on a new order.
+    expect(await t.call('POST', '/customers', { name: 'Walk-in', kind: 'individual', defaultPaymentTerms: 'due_after_pickup' }, STAFF)).toMatchObject({ status: 403, body: { code: 'payment_terms_owner_only' } })
+    expect(t.all('SELECT id FROM customers').length).toBe(before)
+    const ind = (await t.call<{ customer: { id: number; version: number } }>('POST', '/customers', { name: 'Walk-in', kind: 'individual' }, STAFF)).body.customer
+    expect(await t.call('PATCH', `/customers/${ind.id}`, { defaultPaymentTerms: 'due_after_pickup', expectedVersion: ind.version }, STAFF)).toMatchObject({ status: 403, body: { code: 'payment_terms_owner_only' } })
+    const order = { customerId: ind.id, source: 'phone', title: 'Tees', paymentTerms: 'due_after_pickup' }
+    expect(await t.call('POST', '/orders', order, STAFF)).toMatchObject({ status: 403, body: { code: 'payment_terms_owner_only' } })
+    expect((await t.call('POST', '/orders', order)).status).toBe(201) // an owner may
+    // A district defaults to pay after pickup, so staff create it and its orders as usual.
+    const d = (await t.call<{ customer: { id: number } }>('POST', '/customers', { name: 'ISD', kind: 'district' }, STAFF))
+    expect(d.status).toBe(201)
+    expect((await t.call('POST', '/orders', { customerId: d.body.customer.id, source: 'email', title: 'Shirts' }, STAFF)).status).toBe(201)
+  })
 })
+

@@ -131,6 +131,10 @@ export function orderWriteRoutes() {
         if (contact.archived) return refuse(c, 'contact_archived', 'Contact is archived', 409)
       }
       const poRequired = b.poRequired ?? customer.default_po_required === 1
+      // Staff can't hand an order pay-after-pickup terms its customer isn't on (Codex Phase 2 security review).
+      if (b.paymentTerms === 'due_after_pickup' && customer.default_payment_terms !== 'due_after_pickup' && c.get('user').role !== 'owner') {
+        return refuse(c, 'payment_terms_owner_only', 'Only an owner can give this order pay-after-pickup terms', 403)
+      }
       const y = year()
       const n = await db.createOrder(c.env.DB, {
         year: y, actorId: c.get('user').id, customerId: b.customerId, contactId: b.contactId ?? null, source: b.source, title: b.title,
