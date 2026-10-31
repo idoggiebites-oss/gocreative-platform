@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type {
-  CustomerDetailResponse, CustomersListResponse, DashboardResponse, OrderDetailResponse, OrdersListResponse, OrderView, PoChangeResponse, ProductionChangeResponse,
+  ArtworkListResponse, UploadResponse, CustomerDetailResponse, CustomersListResponse, DashboardResponse, OrderDetailResponse, OrdersListResponse, OrderView, PoChangeResponse, ProductionChangeResponse,
 } from '@shared/api'
 import type { CustomerKind, PoStatus, ProductionStatus } from '@shared/enums'
 import type { ApiError as ApiErrorBody } from '@shared/api'
@@ -102,3 +102,40 @@ export function useSend<T, V>(fn: (v: V) => Promise<T>) {
   const qc = useQueryClient()
   return useMutation({ mutationFn: fn, onSettled: () => qc.invalidateQueries() })
 }
+
+// ---- uploads ----
+export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+const EXT_MIME: Record<string, string> = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', tif: 'image/tiff', tiff: 'image/tiff', pdf: 'application/pdf', svg: 'image/svg+xml',
+}
+const extOf = (name: string) => name.split('.').pop()?.toLowerCase() ?? ''
+
+/** The browser's type for the file, or one inferred from the extension when it is empty or generic. The server sniffs the bytes anyway. */
+export function fileMime(file: File) {
+  return file.type && file.type !== 'application/octet-stream' ? file.type : (EXT_MIME[extOf(file.name)] ?? file.type)
+}
+
+/** Client-side pre-check; the server re-checks everything. */
+export function checkUpload(file: File, allowSvg: boolean): 'bad_type' | 'too_large' | null {
+  const ext = extOf(file.name)
+  if (!(ext in EXT_MIME) || (!allowSvg && ext === 'svg')) return 'bad_type'
+  return file.size > MAX_UPLOAD_BYTES ? 'too_large' : null
+}
+
+/** POST the raw file (not multipart) to `/api/app${path}`; other fields go in the query string. Throws ApiError like every write. */
+export async function uploadFile<T = UploadResponse>(path: string, file: File, query: Record<string, string | number | undefined>): Promise<T> {
+  const qs = new URLSearchParams(Object.entries(query).flatMap(([k, v]) => (v === undefined || v === '' ? [] : [[k, String(v)]])))
+  const res = await fetch(`/api/app${path}?${qs}`, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': fileMime(file), 'X-Filename': encodeURIComponent(file.name) },
+    body: file,
+  })
+  const body: unknown = await res.json().catch(() => ({}))
+  if (!res.ok) throw new ApiError(res.status, (body && typeof body === 'object' ? body : {}) as ApiErrorBody)
+  return body as T
+}
+
+export const useCustomerArtwork = (id: number) =>
+  useQuery({ queryKey: ['customer', id, 'artwork'], queryFn: () => call<ArtworkListResponse>(`/customers/${id}/artwork`), retry })
+
+export const fileUrl = (id: number, download = false) => `/api/app/files/${id}${download ? '?download=1' : ''}`
