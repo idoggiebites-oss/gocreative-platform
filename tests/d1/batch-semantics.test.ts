@@ -125,3 +125,28 @@ test('replace items on workerd: retained lines updated in place, a new line befo
   const after = await dbo.listItems(db, id)
   expect(after.map((i) => [i.id === kept!.id, i.description, i.notes])).toEqual([[true, 'Setup', 'kept'], [false, 'New', null]])
 })
+
+// M5's batches lean on changes() through INSERT … RETURNING and past AFTER-trigger inserts (the void audit row).
+// node:sqlite agrees; this checks the real workerd D1 too (M5 server report, 5fba130).
+test('M5 writes on real D1: a check collects once, a payment records and voids once, each with one activity row', async () => {
+  const { collectCheck, recordPayment, voidPayment } = await import('../../worker/db/payments')
+  const acts = (action: string) => count(`SELECT COUNT(*) AS n FROM activity_log WHERE entity_id = 6 AND action = ?`, action)
+  const version = async () => (await db.prepare('SELECT version FROM orders WHERE id = 6').first<{ version: number }>())!.version
+  const payments = () => count('SELECT COUNT(*) AS n FROM payments WHERE order_id = 6')
+
+  const p0 = await payments(), v0 = await version()
+  expect(await collectCheck(db, { orderId: 6, actorId: 1, checkId: 2, amountCents: 72000, checkNumber: '881', paidOn: '2026-10-31' })).toBe(true)
+  expect([await payments(), await acts('check_collected'), await version()]).toEqual([p0 + 1, 1, v0 + 1])
+  expect(await collectCheck(db, { orderId: 6, actorId: 1, checkId: 2, amountCents: 72000, checkNumber: '881', paidOn: '2026-10-31' })).toBe(false) // retry
+  expect([await payments(), await acts('check_collected'), await version()]).toEqual([p0 + 1, 1, v0 + 1])
+
+  const id = await recordPayment(db, { orderId: 6, actorId: 1, version: v0 + 1, amountCents: 500, method: 'cash', paidOn: '2026-10-31', notes: null, requestId: 'd1-check-1' })
+  expect(id).toEqual(expect.any(Number))
+  expect([await payments(), await acts('payment_recorded'), await version()]).toEqual([p0 + 2, 1, v0 + 2])
+
+  expect(await voidPayment(db, { orderId: 6, actorId: 1, version: v0 + 2, paymentId: id!, reason: 'entered twice' })).toBe(true)
+  expect(await count(`SELECT COUNT(*) AS n FROM activity_log WHERE entity_id = 6 AND action LIKE '%void%'`)).toBe(1)
+  expect(await version()).toBe(v0 + 3)
+  expect(await voidPayment(db, { orderId: 6, actorId: 1, version: v0 + 3, paymentId: id!, reason: 'again' })).toBe(false)
+  expect(await version()).toBe(v0 + 3)
+})
