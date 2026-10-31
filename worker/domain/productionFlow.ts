@@ -6,12 +6,13 @@ export function checkOrderProductionMove(state: OrderState, from: ProductionStat
   return state === 'active' ? checkProductionMove(from, to, gate) : { ok: false, error: 'order_not_active' }
 }
 /**
- * The awaiting_* states follow their prerequisites (e.g. when a PO changes). Returns the new status, or null
- * when nothing should move: orders at ready or later stay put (the detail's readiness shows why), and
- * inactive orders are never touched.
+ * The pre-production states (awaiting_* and ready) follow their prerequisites: when one is lost (a PO revoked,
+ * items changed after acceptance) a ready order drops back to the awaiting status. Returns the new status, or
+ * null when nothing should move: in_production and later are never moved, and inactive orders are never touched.
+ * The SQL twin is db/orders.ts rederive().
  */
 export function syncAwaitingStatus(current: ProductionStatus, state: OrderState, gate: Pick<Readiness, 'preProductionStatus'>): ProductionStatus | null {
-  if (state !== 'active' || !current.startsWith('awaiting_')) return null
+  if (state !== 'active' || !(current.startsWith('awaiting_') || current === 'ready')) return null
   return gate.preProductionStatus === current ? null : gate.preProductionStatus
 }
 

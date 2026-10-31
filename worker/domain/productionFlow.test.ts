@@ -59,8 +59,10 @@ it('syncs only active awaiting_* orders, to the derived status', () => {
   expect(syncAwaitingStatus('awaiting_authorization', 'active', { preProductionStatus: 'ready' })).toBe('ready')
   expect(syncAwaitingStatus('awaiting_authorization', 'active', { preProductionStatus: 'awaiting_artwork' })).toBe('awaiting_artwork')
   expect(syncAwaitingStatus('awaiting_quote', 'active', { preProductionStatus: 'awaiting_quote' })).toBeNull()
-  // A revoked PO never pulls back an order that is already ready or later; the detail's readiness shows why.
-  for (const current of ['ready', 'in_production', 'quality_control', 'production_complete'] as const) {
+  // A lost prerequisite pulls a ready order back to the awaiting status; a running or finished job never moves.
+  expect(syncAwaitingStatus('ready', 'active', { preProductionStatus: 'awaiting_authorization' })).toBe('awaiting_authorization')
+  expect(syncAwaitingStatus('ready', 'active', { preProductionStatus: 'ready' })).toBeNull()
+  for (const current of ['in_production', 'quality_control', 'production_complete'] as const) {
     expect(syncAwaitingStatus(current, 'active', { preProductionStatus: 'awaiting_authorization' })).toBeNull()
   }
   for (const state of ['cancelled', 'closed'] as const) expect(syncAwaitingStatus('awaiting_authorization', state, { preProductionStatus: 'ready' })).toBeNull()

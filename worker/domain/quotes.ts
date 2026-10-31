@@ -101,3 +101,23 @@ export function currentQuote<T extends { version: number }>(versions: readonly T
 export function quoteSatisfied(current: { status: QuoteStatus; itemsRevision: number } | null, orderItemsRevision: number): boolean {
   return current?.status === 'accepted' && current.itemsRevision === orderItemsRevision
 }
+
+/** A quote snapshot of `items`: each line with its signed total, and the quote totals (discount_exceeds_total if negative). */
+export function snapshot<T extends Item>(items: readonly T[]) {
+  const lines: (T & { lineTotalCents: number })[] = []
+  for (const item of items) {
+    const valid = validateItem(item)
+    if (!valid.ok) return valid
+    const line = lineTotalCents(item)
+    if (!line.ok) return line
+    lines.push({ ...item, lineTotalCents: line.totalCents })
+  }
+  const totals = quoteTotals(items)
+  if (!totals.ok) return totals
+  const { ok, ...rest } = totals
+  return { ok, totals: rest, lines }
+}
+/** Lines copied back from a quote replace the items position by position, so the reapproval rule compares them in place. */
+export function restoreLines<T extends Item>(current: readonly { id?: string | number }[], lines: readonly T[]): T[] {
+  return lines.map((line, i) => ({ ...line, id: current[i]?.id }))
+}

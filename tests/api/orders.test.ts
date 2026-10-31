@@ -7,6 +7,10 @@ import { ACTIVITY_ACTIONS, type DashboardResponse, type OrderDetailResponse, typ
 import { buildDashboard, addDays } from '../../worker/domain/dashboard'
 import * as dbo from '../../worker/db/orders'
 import { createTestD1 } from './d1'
+import { businessToday } from '../../shared/businessDate'
+
+// The dashboard counts in shop time (America/Chicago); SQL's date('now') is UTC, so expectations use this.
+const today = () => businessToday(new Date())
 
 const seed = readFileSync(new URL('../../scripts/seed.sql', import.meta.url), 'utf8')
 
@@ -56,7 +60,7 @@ describe('dashboard', () => {
     )
     expect(d.metrics.posAwaitingApproval.amountCents).toBe(72000 + 186000)
     expect(d.metrics.dueIn7Days.overdue).toBe(
-      n(`SELECT COUNT(*) AS n FROM orders WHERE state = 'active' AND production_status <> 'production_complete' AND due_date < date('now')`),
+      t.one<{ n: number }>(`SELECT COUNT(*) AS n FROM orders WHERE state = 'active' AND production_status <> 'production_complete' AND due_date < ?`, today()).n,
     )
     expect(d.metrics.inProduction.count).toBe(n(`SELECT COUNT(*) AS n FROM orders WHERE state='active' AND production_status IN ('in_production','quality_control')`))
     expect(d.needsAttention.length).toBeLessThanOrEqual(10)
@@ -283,24 +287,23 @@ describe('purchase order status change', () => {
     expect(po).toEqual({ action: 'po_status_changed', before: '{"po_id":12,"po_status":"under_review"}', after: '{"po_id":12,"po_status":"approved"}' })
     expect(sync).toEqual({ action: 'production_status_changed', before: '{"production_status":"awaiting_authorization"}', after: '{"production_status":"ready","reason":"po_sync"}' })
   })
-  test('production moved by someone else: PO change applies, no sync, no false activity', async () => {
+  test('production moved by someone else: the re-derive still lands on what readiness says', async () => {
     const t = setup()
     t.sqlite.exec(`UPDATE purchase_orders SET status = 'under_review' WHERE id = 12`)
     const loaded = (await dbo.loadForPoChange(t.db, '2026-0011', 12))!
     t.sqlite.exec(`UPDATE orders SET production_status = 'awaiting_artwork' WHERE number = '2026-0011'`)
     const before = t.activityCount()
-    const r = await dbo.applyPoChange(t.db, { orderId: loaded.orderId, poId: 12, actorId: 1, from: 'under_review', to: 'approved', productionFrom: loaded.productionStatus, sync: true })
-    expect(r).toEqual({ changed: true, productionStatus: 'awaiting_artwork' })
-    expect(t.one<{ status: string }>('SELECT status FROM purchase_orders WHERE id = 12').status).toBe('approved')
-    expect(t.prod('2026-0011').production_status).toBe('awaiting_artwork')
-    expect(t.activityCount()).toBe(before + 1)
-    expect(t.one<{ action: string; after: string }>('SELECT action, after FROM activity_log ORDER BY id DESC LIMIT 1')).toEqual({ action: 'po_status_changed', after: '{"po_id":12,"po_status":"approved"}' })
+    const r = await dbo.applyPoChange(t.db, { orderId: loaded.orderId, poId: 12, actorId: 1, from: 'under_review', to: 'approved' })
+    expect(r).toEqual({ changed: true, productionStatus: 'ready' })
+    expect(t.activityCount()).toBe(before + 2)
+    expect(t.one<{ before: string; after: string }>('SELECT before, after FROM activity_log ORDER BY id DESC LIMIT 1'))
+      .toEqual({ before: '{"production_status":"awaiting_artwork"}', after: '{"production_status":"ready","reason":"po_sync"}' })
   })
   test('PO moved by someone else: nothing applied, nothing logged', async () => {
     const t = setup()
     t.sqlite.exec(`UPDATE purchase_orders SET status = 'under_review' WHERE id = 12`)
     const before = t.activityCount()
-    const r = await dbo.applyPoChange(t.db, { orderId: 11, poId: 12, actorId: 1, from: 'received', to: 'under_review', productionFrom: 'awaiting_authorization', sync: true })
+    const r = await dbo.applyPoChange(t.db, { orderId: 11, poId: 12, actorId: 1, from: 'received', to: 'under_review' })
     expect(r.changed).toBe(false)
     expect(t.activityCount()).toBe(before)
   })
@@ -309,12 +312,19 @@ describe('purchase order status change', () => {
     expect((await patch(t, '2026-0012', 13, 'approved')).status).toBe(200) // order 12: artwork pending
     expect(t.prod('2026-0012').production_status).toBe('awaiting_artwork')
   })
-  test('revoking approval does not move an order already at ready', async () => {
+  test('revoking approval moves an order at ready back to awaiting_authorization (M1c re-derive)', async () => {
     const t = setup()
-    expect((await patch(t, '2026-0005', 6, 'rejected')).status).toBe(200)
-    expect(t.prod('2026-0005').production_status).toBe('ready')
+    const res = await patch(t, '2026-0005', 6, 'rejected')
+    expect(await t.json(res)).toEqual({ poId: 6, status: 'rejected', productionStatus: 'awaiting_authorization' })
+    expect(t.prod('2026-0005').production_status).toBe('awaiting_authorization')
     const d = await t.json<OrderDetailResponse>(await t.call('GET', '/orders/2026-0005'))
     expect(d.gate).toEqual({ ok: false, reasons: ['authorization.po_not_approved'] })
+    expect(d.activity[0]).toMatchObject({ action: 'production_status_changed', before: { production_status: 'ready' }, after: { production_status: 'awaiting_authorization', reason: 'po_sync' } })
+  })
+  test('revoking a PO never moves a running job', async () => {
+    const t = setup()
+    expect((await patch(t, '2026-0003', 3, 'rejected')).status).toBe(200)
+    expect(t.prod('2026-0003').production_status).toBe('in_production')
   })
   test('invalid transition is 409 and changes nothing', async () => {
     const t = setup()
@@ -358,12 +368,16 @@ describe('dashboard sub-line metrics', () => {
   test('newThisWeek and waitingOver5Days match direct SQL and move with the data', async () => {
     const t = setup()
     const get = async () => (await t.json<DashboardResponse>(await t.call('GET', '/dashboard'))).metrics
-    const n = (sql: string) => t.one<{ n: number }>(sql).n
     const m = await get()
-    expect(m.activeOrdersNewThisWeek).toBe(n(`SELECT COUNT(*) AS n FROM orders WHERE state = 'active' AND date(created_at) >= date('now', '-7 days')`))
+    // Timestamps are UTC; the cut-offs are shop-time business dates.
+    const shop = (ts: string) => businessToday(new Date(ts))
+    const rows = <T>(sql: string) => t.sqlite.prepare(sql).all() as T[]
+    expect(m.activeOrdersNewThisWeek).toBe(rows<{ created_at: string }>(`SELECT created_at FROM orders WHERE state = 'active'`)
+      .filter((r) => shop(r.created_at) >= addDays(today(), -7)).length)
     expect(m.pendingQuotesWaitingOver5Days).toBe(
-      n(`SELECT COUNT(*) AS n FROM orders o WHERE state = 'active' AND (SELECT status FROM quotes q WHERE q.order_id = o.id ORDER BY version DESC LIMIT 1) = 'sent'
-         AND date((SELECT COALESCE(sent_at, created_at) FROM quotes q WHERE q.order_id = o.id ORDER BY version DESC LIMIT 1)) < date('now', '-5 days')`),
+      rows<{ at: string }>(`SELECT (SELECT COALESCE(sent_at, created_at) FROM quotes q WHERE q.order_id = o.id ORDER BY version DESC LIMIT 1) AS at FROM orders o
+         WHERE state = 'active' AND (SELECT status FROM quotes q WHERE q.order_id = o.id ORDER BY version DESC LIMIT 1) = 'sent'`)
+        .filter((r) => shop(r.at) < addDays(today(), -5)).length,
     )
     // The seed backdates so neither is trivially 0 or all.
     expect(m.activeOrdersNewThisWeek).toBeGreaterThan(0)
