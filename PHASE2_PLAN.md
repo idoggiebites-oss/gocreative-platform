@@ -1,6 +1,9 @@
 # Phase 2 Implementation Plan
 
-**Status:** proposal for review, 2026-10-30. Nothing in it is built yet.
+**Status:** approved 2026-10-30 with decisions and corrections (§4). M0 is authorised:
+pure business rules, tests, the concurrency design and the design review. **Not yet
+authorised:** wiping the remote DB, destructive migrations, production deploys (they wait
+for the M0 review, including Codex's review of the rules and concurrency design).
 **Answers:** §19 of [SPEC-phase2.md](SPEC-phase2.md), the authoritative Phase 2 brief.
 **Repo state reviewed:** `main` at the Phase 1 close (live behind Cloudflare Access, 137
 unit + 22 e2e tests).
@@ -61,7 +64,7 @@ The brief's entity list, mapped onto the existing schema ("adapt, don't duplicat
 | Brief entity | Plan |
 |---|---|
 | Customers | **extend**: `default_po_required`, `default_payment_terms` (`due_at_pickup` / `due_after_pickup`). Customer type and PO requirement stay independent, as the brief asks |
-| Orders | **extend**: `po_required` and `payment_terms` copied from the customer at creation and editable per order; `artwork_required`; `materials_required`; `prep_status`; `authorization_method` / `authorization_notes` (next to the existing `authorized_at` / `authorized_by`); `items_revision`; `queue_position`; `units_completed`; `production_override`; `payment_due_on` |
+| Orders | **extend**: `po_required` and `payment_terms` copied from the customer at creation and editable per order; `artwork_required`; `materials_required`; `prep_status`; `authorization_method` / `authorization_notes` (next to the existing `authorized_at` / `authorized_by`); `items_revision`; `queue_position`; `units_completed`; `production_slot` (§4.3); `payment_due_on`; `state` becomes `active / cancelled / closed` (§4.2) |
 | OrderItems | **keep `order_items`** as the working list of what will be made (sizes drive purchasing). Add `kind` (`product` / `charge` / `discount`) and `description` |
 | Quotes + QuoteItems | **replace `estimates`** with `quotes` (version, status incl. `superseded`, `items_revision` snapshot, totals) + `quote_items` (a frozen copy of the lines and prices). Triggers make accepted quotes and their items immutable |
 | Artwork | **keep** `artwork` (lineage = one design, version = one file). Add `approved_at`, `approved_via`, `approval_recorded_by`. The order's artwork status is **derived**, not stored |
@@ -70,9 +73,9 @@ The brief's entity list, mapped onto the existing schema ("adapt, don't duplicat
 | Suppliers | **new**, seeded with JDS (`is_default = 1`) |
 | OrderPurchases | **new** `order_purchases` (supplier, description, qty, sizes JSON, estimated/actual unit cost in cents, ordered/expected dates, status `not_ordered / ordered / cancelled`; received and partially received are **derived** from receipts) + **new** `purchase_receipts` (qty + sizes per delivery), which covers partial shipments |
 | ProductionPreparation | **columns on orders** (`prep_status`, notes go in `notes`); production is per order (Phase 1 decision) |
-| ProductionJobs | **columns on orders** (`queue_position`, `units_completed`, `production_override`) + a **partial unique index**: `ON orders(production_status) WHERE production_status = 'in_production' AND production_override = 0`. The database itself refuses a second active job, whatever two users click at the same moment |
-| PickupRecords | **new** `pickups` (1 per order: ready/notified dates, notification method, picked-up date, collected-by name, employee, notes, release override + reason) |
-| Payments | **new** `payments` (amount cents, method `check / ach / cash / card / other`, date, notes, recorded_by). Balance and status are **derived** from the accepted quote total minus payments. No card or bank numbers anywhere |
+| ProductionJobs | **columns on orders** (`queue_position`, `units_completed`, `production_slot`) with the slot CHECK + unique index of §4.3: the database itself caps running jobs at one, or two with an owner override |
+| PickupRecords | **new** `pickups`, the fulfilment track of §4.2 (1 per order: ready/notified dates, notification method, picked-up date, collected-by name, employee, notes, release override + reason) |
+| Payments | **new** `payments` (`check_collection_id` UNIQUE, `request_id` UNIQUE per §4.4, amount cents, method `check / ach / cash / card / other`, date, notes, recorded_by). Balance and status are **derived** from the accepted quote total minus payments. No card or bank numbers anywhere |
 | CheckCollections | **new** `check_collections` (order, expected/received cents, check number, available/collected/deposited/cleared dates, collected_by, status, notes, optional `payment_id` link) |
 | ActivityLogs | **keep**; every new write logs, in the same batch as the change |
 
@@ -82,59 +85,109 @@ Migrations, one per milestone, each with its own schema test like `shared/schema
   `quotes` + `quote_items` replacing `estimates`; immutability triggers; artwork status rename
   (`none` → `not_received`, `pending` → `under_review`, + `not_required`); time zone in `business.ts` (not SQL)
 - **0003** (M3): `suppliers` (+ JDS), `order_purchases`, `purchase_receipts`, `materials_required`, `prep_status`
-- **0004** (M4): production status set (below), `queue_position`, `units_completed`, `production_override`, one-active-job index
+- **0004** (M4): production status set (§4.2), `queue_position`, `units_completed`, the §4.3 slot DDL
 - **0005** (M5): `pickups`, `payments`, `check_collections`, `payment_terms`, `payment_due_on`
 
-## 4. Conflicts and unclear points, with my proposed resolution
+## 4. Decisions (Arturo, 2026-10-30) and the designs they fix
 
-Each one needs a yes or a correction. **Bold = my recommendation.**
+| # | Decision |
+|---|---|
+| 1 | Shop time zone **America/Chicago**, DST included |
+| 2 | Editable order items + immutable quote-version snapshots |
+| 3 | Only Draft quotes are editable; history is kept |
+| 4 | Both: duplicate a quote within an order, and a repeat order from a previous order |
+| 5 | Awaiting Quote and Awaiting Artwork join the readiness workflow |
+| 6 | Fulfilment and financial closure are tracked separately; picked up = fulfilled, even if unpaid |
+| 7 | "No purchasing needed" is allowed, with employee confirmation |
+| 8 | Every applicable design's current version must be approved |
+| 9 | A collected check is recorded as a received payment; deposited and cleared are tracked separately |
+| 10 | Owner-only overrides require a reason and an audit entry |
+| 11 | One pickup per order |
+| 12 | Progress = units completed, and staff can correct it |
+| 13 | Design review before any UI is built |
+| 14 | Production and Payments pages; purchasing stays in the order workspace |
 
-1. **Where line items live.** The brief lists both OrderItems and QuoteItems. **Order items
-   are the editable working list; each quote version freezes a priced copy.** An order counts
-   as "quote accepted" only when its current quote is accepted *and* its items haven't changed
-   since (`items_revision` matches). Editing items after acceptance flips the checklist back
-   to pending until a new version is accepted, which is the brief's "reapproval".
-2. **Which quote states can be edited.** **Only Draft.** Sent, Accepted and Declined are
-   frozen; changing them means "New version", which marks older Draft/Sent/Accepted versions
-   Superseded. Declined versions stay Declined.
-3. **"Duplicate existing quotes".** **Two actions: duplicate a version within the order (as a
-   new draft), and "Reorder": start a new order from a past order's items.** Schools reorder
-   the same items yearly, and the brief doesn't say which it meant.
-4. **Production status list.** The brief's list has no Awaiting Quote or Awaiting Artwork,
-   yet both are checklist items, and it puts Production Complete after Ready for Pickup.
-   **Stored statuses: `awaiting_quote`, `awaiting_authorization`, `awaiting_artwork`,
-   `awaiting_materials`, `awaiting_preparation` (all derived from the first unmet checklist
-   item, never picked by hand), then `ready`, `in_production`, `quality_control`,
-   `ready_for_pickup`, `picked_up`.** "Production Complete" in the brief = leaving quality
-   control. Pickup is recorded on its own and sets `picked_up`.
-5. **When an order is "done".** **Its `state` becomes `completed` only when it has been
-   picked up AND paid.** A district order collected but unpaid leaves the production lists
-   and stays visible under Outstanding payments.
-6. **Materials not needed** (customer-supplied garments, laser work on stock material).
-   **An order can be marked "No purchasing needed", which satisfies the materials item.**
-   Otherwise materials = every non-cancelled purchase fully received.
-7. **Several designs on one order** (front + sleeve, or a shirt and a bag). **Each design is
-   its own artwork lineage; the artwork item is satisfied when every design's latest version
-   is approved, or artwork is marked Not Required.**
-8. **Checks vs. the balance.** The brief keeps check collection separate from the balance.
-   **The balance only moves when a payment is recorded. Recording a check as collected offers
-   to record the payment too (linked), and "cleared" is a separate flag on the collection.**
-   The dashboard shows "collected, not yet cleared" separately. Alternative: count the money
-   only once cleared. Your call.
-9. **Who can override** (second active job, releasing an unpaid regular order).
-   **The owner role, with a required reason, logged.** Both current users are owners, so for
-   now this is a deliberate confirm step, not a permission wall.
-10. **Pickups.** **One pickup per order.** Partial pickups are deferred unless you say they happen.
-11. **Production progress.** **Units completed out of the order's total quantity, with
-    +/- quick actions.** Progress notes go in the order notes.
-12. **Shop time zone. Still needed from you** (Eastern / Central / Mountain / Pacific).
-13. **The dashboard changes from the approved Phase 1 layout.** **One design round up front
-    (M0) covering the new dashboard, the order workspace, New order, customer pages,
-    Production, and Payments, reviewed by you before any of that UI is built.** The
-    backend milestones don't wait for it.
-14. **New pages.** The brief wants most work in the order workspace. **Additions: a
-    Production page (queue) and a Payments page (outstanding + checks to collect). Purchasing
-    stays inside the order, plus a "materials awaiting arrival" list on Production.** No other new pages.
+### 4.1 What triggers quote reapproval (correction)
+
+Only changes to **customer-approved scope or pricing** bump `orders.items_revision`, and
+so require a new accepted quote. Those are the customer-facing fields of an order item:
+`kind`, `description`, `product`, `garment_color`, `method`, `sizes`, `quantity`, and
+`unit_price_cents`, plus adding or removing a line. Internal fields never bump it: item
+notes, supplier choice, estimated and actual costs, purchases, receipts, prep, assignee,
+and order notes. The list is one exported constant in the domain (`CUSTOMER_FACING_ITEM_FIELDS`),
+and a test fails if an internal edit bumps the revision.
+
+### 4.2 Three independent tracks (correction)
+
+- **Production** (`orders.production_status`): `awaiting_quote`, `awaiting_authorization`,
+  `awaiting_artwork`, `awaiting_materials`, `awaiting_preparation` (derived from the first
+  unmet readiness item, never picked by hand) → `ready` → `in_production` →
+  `quality_control` → `production_complete`. Production ends there; pickup is not a
+  production status.
+- **Fulfilment** (from the `pickups` row): `not_ready` → `ready_for_pickup` (set when
+  production completes) → `customer_notified` → `picked_up`. Picked up = fulfilled (decision 6).
+- **Financial** (derived from `payments` vs the accepted quote total): `unpaid` / `partially_paid` / `paid`.
+- `orders.state` keeps only `active` / `cancelled` / `closed`. **Closed** = fulfilled AND
+  paid, computed and set in the same batch as the write that completes the second
+  condition. No track ever writes another track's status.
+
+### 4.3 One active production job, and the override (correction)
+
+The earlier idea (a unique index that skips overridden rows) allowed unlimited overrides.
+Replacement, a **slot** model:
+
+- `orders.production_slot INTEGER NULL CHECK (production_slot IN (1, 2))`
+- `CHECK ((production_status = 'in_production') = (production_slot IS NOT NULL))`: an order is
+  in production exactly when it holds a slot.
+- `CREATE UNIQUE INDEX one_job_per_slot ON orders (production_slot) WHERE production_slot IS NOT NULL`
+
+So **at most two jobs can ever run, enforced by the database**:
+- Starting a job takes **slot 1**. If slot 1 is taken, the start is refused (409
+  `production_busy`), naming the running job.
+- An **owner** may start a second job only with an explicit override and a reason. It takes
+  **slot 2** and writes a `production_override` activity row (who, why, which job was
+  running) in the same batch.
+- With both slots taken, every start is refused, override or not.
+- Leaving `in_production` (to QC, or back to ready) clears the slot in the same UPDATE. A
+  slot-2 job is never silently moved into slot 1; the next normal start uses the free slot 1.
+- Two simultaneous starts: the unique index makes the second INSERT/UPDATE fail inside its
+  batch, so nothing is logged for it and it returns 409. No application-level lock is needed.
+
+M0 proves this with a test against an in-memory SQLite copy of the DDL. It covers concurrent
+starts, the override cap, the CHECK tying slot to status, slot release, and a staff user
+attempting the override. The DDL then moves verbatim into migration 0004.
+
+### 4.4 Payments can't be duplicated by check collection (correction)
+
+- `payments.check_collection_id INTEGER UNIQUE NULL`: a check collection can produce at
+  most one payment.
+- The collect transition is one batch: `UPDATE check_collections SET status='collected' …
+  WHERE id=? AND status IN ('awaiting_payment','ready_for_collection')`, then the payment
+  INSERT runs only if that UPDATE changed a row. A double click or retry changes nothing
+  the second time.
+- Manually recorded payments carry a client-generated `request_id TEXT UNIQUE`, so a
+  resubmitted form can't record the same payment twice.
+- Deposited and cleared are statuses on the collection only and never touch `payments`.
+
+### 4.5 Dates and time zones (correction)
+
+- **Timestamps** (`created_at`, `authorized_at`, `collected_at` …) are stored as UTC ISO-8601, as today.
+- **Business dates** (`due_date`, `payment_due_on`, expected arrival, pickup date, check
+  available/deposit dates) are stored as `YYYY-MM-DD` in **shop time**.
+- "Today", overdue, "due this week" and days outstanding come from
+  `businessToday(now)`, using `Intl` with `business.timeZone = 'America/Chicago'` (in
+  `shared/business.ts`). Never from the UTC date.
+- Tests pin the edges: 23:30 Chicago on a date that is already tomorrow in UTC, and both DST transitions.
+
+### 4.6 Deleting the live sample data (correction)
+
+Not done until you approve it explicitly. Before asking:
+1. Export the remote DB (`wrangler d1 export --remote`) to a dated file outside the repo.
+2. Record the D1 Time Travel restore point.
+3. Show that every customer, order and user row matches the seed (2 real users, fictional
+   sample customers, no others).
+
+The wipe happens only after your go, and only before migration 0002.
 
 ## 5. Prioritized checklist
 
@@ -144,14 +197,17 @@ sample data so the family can try it. "Who" = the model per task (Sonnet for spe
 build work, Opus where a thin implementation would pass tests and be wrong, Codex for pure
 logic it can test, Claude for design, integration and verification).
 
-### M0 — Foundations (no user-visible change)
-- [ ] Your answers to §4; record them in DECISIONS.md. *(Arturo)*
-- [ ] Wipe the remote sample data, keep users 1–2. *(Claude, after your go)*
+### M0 — Foundations (no user-visible change) — authorised 2026-10-30
+- [x] Decisions recorded (§4, DECISIONS.md). *(Arturo, Claude)*
+- [ ] Backup + evidence for the wipe (§4.6); the wipe itself waits for your explicit go. *(Claude)*
 - [ ] Pure domain rules + tests: readiness checklist (the five items, which one is missing, the
       derived awaiting status), quote transitions/supersede/`items_revision`, line and quote
       totals with discounts and charges, payment balance and status, purchase status from
-      receipts, money parsing, shop-time-zone "today". *(Codex writes; Claude verifies and
-      extends the SQL↔domain parity test to the new gate)*
+      receipts, money parsing, shop-time-zone "today", fulfilment and unpaid-release rules,
+      check-collection transitions, the production slot choice, and the §4.3 DDL test.
+      *(Codex writes; Claude verifies)*
+- [ ] Codex independent review (fresh, read-only) of the M0 rules and the concurrency
+      design; fixes. **Gate before M1.**
 - [ ] Design round: dashboard, order workspace, New order, customer, Production, Payments. *(Claude; your review)*
 
 ### M1 — Customers, orders, quotes, authorization (brief Step 2) → acceptance 1, 2, 3, 4, 6
@@ -178,8 +234,8 @@ logic it can test, Claude for design, integration and verification).
 - [ ] UI: purchasing panel, receipts, prep, **readiness checklist** at the top of the workspace. *(Sonnet)*
 
 ### M4 — Production queue (brief Step 4) → acceptance 9, 11, 12, 17 (production part)
-- [ ] Migration 0004; queue ordering; start / QC / ready for pickup transitions; units
-      completed; one-active-job index + owner override; production history. *(Opus; Codex
+- [ ] Migration 0004; queue ordering; start / QC / production complete transitions; units
+      completed (correctable); the §4.3 slot DDL + owner override; production history. *(Opus; Codex
       reviews concurrency specifically)*
 - [ ] UI: Production page (Ready to start / In production / Completed), dashboard current job +
       upcoming + action required. *(Sonnet)*

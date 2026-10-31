@@ -88,3 +88,30 @@ the family to evaluate; they get wiped before real use (see ROADMAP).
 earlier. It folds artwork uploads, PO documents and the production queue into
 Phase 2. The plan, with 14 points awaiting Arturo's answers, is
 [PHASE2_PLAN.md](PHASE2_PLAN.md). Nothing is built until those are answered.
+
+### 2026-10-30 — Phase 2 plan approved, with corrections (Arturo)
+All 14 decisions are in [PHASE2_PLAN.md](PHASE2_PLAN.md) §4. In short: shop time zone
+America/Chicago; editable order items with frozen quote versions; only Draft
+quotes are editable; both duplicate-quote and repeat-order; Awaiting Quote and
+Awaiting Artwork added; fulfilment and financial closure tracked separately; "No
+purchasing needed" with confirmation; every design's current version approved; a
+collected check counts as a payment, with deposited and cleared tracked
+separately; owner overrides need a reason and an audit row; one pickup per order;
+progress in units, correctable; design review before UI; Production and Payments
+pages added.
+
+His corrections and the designs that answer them (Claude):
+- Only customer-facing item fields trigger quote reapproval (§4.1).
+- Production, fulfilment and financial tracks are independent (§4.2).
+- One-active-job: a slot model capped at two by the database, where slot 2 needs
+  an owner override (§4.3). This replaces the index idea, which allowed unlimited
+  overrides.
+- Check collection can't duplicate payments: a UNIQUE link, a guarded transition,
+  and request ids (§4.4).
+- Business dates are in shop time; timestamps stay UTC (§4.5).
+- No wipe without explicit approval, a backup, and evidence that no real records
+  exist (§4.6).
+
+Authorised now: M0 only (rules, tests, concurrency design, design review). Not
+yet: the wipe, destructive migrations, deploys. Codex reviews the rules and the
+concurrency design before M1.
