@@ -29,7 +29,7 @@ test('a cross-site write is refused before anything is read or written, whatever
     { 'Content-Type': 'text/plain', 'Sec-Fetch-Site': 'same-site' },
   ]) {
     const res = await t.send('/customers', { method: 'POST', headers, body })
-    expect([res.status, (await res.json()).code], JSON.stringify(headers)).toEqual([403, 'cross_site_request'])
+    expect([res.status, ((await res.json()) as { code?: string }).code], JSON.stringify(headers)).toEqual([403, 'cross_site_request'])
   }
   expect(t.customers()).toBe(n)
   // Same-origin writes (and reads from anywhere) still work.
@@ -42,7 +42,7 @@ test('a body over 256 KB is refused before parsing, with or without Content-Leng
   const n = t.customers()
   const big = JSON.stringify({ name: 'Big', kind: 'individual', pad: 'x'.repeat(300 * 1024) })
   const res = await t.send('/customers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: big })
-  expect([res.status, (await res.json()).code]).toEqual([413, 'body_too_large'])
+  expect([res.status, ((await res.json()) as { code?: string }).code]).toEqual([413, 'body_too_large'])
   const stream = new Blob([big]).stream()
   const chunked = await t.send('/customers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: stream, duplex: 'half' } as RequestInit)
   expect(chunked.status).toBe(413)
