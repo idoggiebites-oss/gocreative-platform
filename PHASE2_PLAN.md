@@ -265,13 +265,13 @@ logic it can test, Claude for design, integration and verification).
 - [x] Quotes API: new version from items, duplicate, reorder, transitions, immutability. *(Opus, same task as orders: they share `items_revision`)*
 - [x] UI: customer pages, New order, items + size grid, quote panel, authorization panel, ⌘K results. *(Sonnet)*
 
-### M2 — Artwork and PO documents (brief Step 2, artwork) → acceptance 5, 6
-- [ ] Upload API: type allowlist by magic bytes, 50 MB limit, sha256, write-once R2 keys,
+### M2 — Artwork and PO documents (brief Step 2, artwork) → acceptance 5, 6 — built and Codex-reviewed ("M2 ready") 2026-10-31; migration 0003 + deploy await Arturo's go
+- [x] Upload API: type allowlist by magic bytes, 50 MB limit, sha256, write-once R2 keys,
       authenticated downloads only, SVG served as attachment, previews generated in the
       browser for TIFF/PDF. *(Opus; Codex security review)*
-- [ ] Artwork versions, approval per version (with customer approval method), Not Required,
+- [x] Artwork versions, approval per version (with customer approval method), Not Required,
       new version resets approval; PO document upload. *(Opus, same task)*
-- [ ] UI: artwork tab (designs, versions, previews, approve), PO documents. *(Sonnet)*
+- [x] UI: artwork tab (designs, versions, previews, approve), PO documents. *(Sonnet)*
 
 ### M3 — Purchasing and preparation (brief Step 3) → acceptance 7, 8, 10
 - [ ] Migration 0003; suppliers (JDS default, add new); purchases; receipts (partial);
