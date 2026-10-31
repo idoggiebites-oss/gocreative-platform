@@ -20,8 +20,8 @@ const createBody = z.object({
   name, kind: z.enum(CUSTOMER_KINDS), organization: nullable(text(200)).optional(), email: email.optional(), phone: phone.optional(),
   defaultPoRequired: z.boolean().optional(), defaultPaymentTerms: z.enum(PAYMENT_TERMS).optional(), internalNotes: nullable(text(5000)).optional(),
 })
-const patchBody = createBody.partial().extend({ expectedUpdatedAt: z.string().min(1) })
-  .refine((b) => Object.keys(b).some((k) => k !== 'expectedUpdatedAt'), 'nothing to change')
+const patchBody = createBody.partial().extend({ expectedVersion: z.number().int().min(0) })
+  .refine((b) => Object.keys(b).some((k) => k !== 'expectedVersion'), 'nothing to change')
 const contactBody = z.object({ name, email: email.optional(), phone: phone.optional(), title: nullable(text(100)).optional(), isPrimary: z.boolean().optional() })
 const contactPatch = contactBody.partial().refine((b) => Object.keys(b).length > 0, 'nothing to change')
 const listQuery = z.object({
@@ -67,9 +67,9 @@ export function customerRoutes() {
       if (!b.success) return bad(c, b.error)
       const current = await db.getCustomer(c.env.DB, i.data)
       if (!current) return notFound(c, 'Customer')
-      const { expectedUpdatedAt, ...changes } = b.data
-      if (current.updatedAt !== expectedUpdatedAt) return retry(c)
-      if (!(await db.updateCustomer(c.env.DB, c.get('user').id, current, changes, expectedUpdatedAt))) return retry(c)
+      const { expectedVersion, ...changes } = b.data
+      if (current.version !== expectedVersion) return retry(c)
+      if (!(await db.updateCustomer(c.env.DB, c.get('user').id, current, changes, expectedVersion))) return retry(c)
       return c.json<CustomerResponse>({ customer: (await db.getCustomer(c.env.DB, i.data))! })
     })
     .post('/customers/:id/contacts', async (c) => {
@@ -92,7 +92,11 @@ export function customerRoutes() {
       const contact = await db.getContact(c.env.DB, i.data, k.data)
       if (!contact) return notFound(c, 'Contact')
       if (b.data.isPrimary && contact.archived) return c.json({ error: 'Archived contacts cannot be primary', code: 'contact_archived' satisfies ApiErrorCode }, 409)
-      if (!(await db.updateContact(c.env.DB, c.get('user').id, i.data, contact, b.data))) return retry(c)
+      if (!(await db.updateContact(c.env.DB, c.get('user').id, i.data, contact, b.data))) {
+        // Lost race: if the contact got archived meanwhile and we were promoting it, say so; otherwise it is a plain retry.
+        if (b.data.isPrimary && (await db.getContact(c.env.DB, i.data, k.data))?.archived) return c.json({ error: 'Archived contacts cannot be primary', code: 'contact_archived' satisfies ApiErrorCode }, 409)
+        return retry(c)
+      }
       return c.json<ContactResponse>({ contact: (await db.getContact(c.env.DB, i.data, k.data))! })
     })
     .post('/customers/:id/contacts/:contactId/:action{archive|unarchive}', async (c) => {

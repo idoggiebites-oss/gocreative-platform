@@ -8,13 +8,13 @@ const changed = (r: { meta: { changes?: number } } | undefined) => (r?.meta.chan
 
 type CustomerRow = {
   id: number; name: string; kind: CustomerKind; organization: string | null; email: string | null; phone: string | null
-  default_po_required: 0 | 1; default_payment_terms: PaymentTerms; internal_notes: string | null; created_at: string; updated_at: string
+  default_po_required: 0 | 1; default_payment_terms: PaymentTerms; internal_notes: string | null; created_at: string; updated_at: string; version: number
 }
-const CUSTOMER_COLS = 'id, name, kind, organization, email, phone, default_po_required, default_payment_terms, internal_notes, created_at, updated_at'
+const CUSTOMER_COLS = 'id, name, kind, organization, email, phone, default_po_required, default_payment_terms, internal_notes, created_at, updated_at, version'
 const toCustomer = (r: CustomerRow): CustomerRecord => ({
   id: r.id, name: r.name, kind: r.kind, organization: r.organization, email: r.email, phone: r.phone,
   defaultPoRequired: r.default_po_required === 1, defaultPaymentTerms: r.default_payment_terms,
-  internalNotes: r.internal_notes, createdAt: r.created_at, updatedAt: r.updated_at,
+  internalNotes: r.internal_notes, createdAt: r.created_at, updatedAt: r.updated_at, version: r.version,
 })
 
 type ContactRow = { id: number; name: string; email: string | null; phone: string | null; title: string | null; is_primary: 0 | 1; archived_at: string | null }
@@ -121,19 +121,19 @@ const PATCH_COLUMNS = {
 export type CustomerChanges = Partial<Record<keyof typeof PATCH_COLUMNS, string | boolean | null>>
 
 /**
- * Edits the customer, guarded by the updated_at the caller saw. Returns false if it changed meanwhile (nothing is logged).
+ * Edits the customer, guarded by the version the caller saw. Returns false if it changed meanwhile (nothing is logged).
  * Changing defaults (or kind) only affects orders created afterwards; existing orders keep their own po_required and
  * payment_terms, so nothing here touches the orders table.
  */
-export async function updateCustomer(db: D1Database, actorId: number, current: CustomerRecord, changes: CustomerChanges, expectedUpdatedAt: string) {
+export async function updateCustomer(db: D1Database, actorId: number, current: CustomerRecord, changes: CustomerChanges, expectedVersion: number) {
   const keys = (Object.keys(changes) as (keyof typeof PATCH_COLUMNS)[]).filter((k) => k in PATCH_COLUMNS)
   const bind = (v: string | boolean | null | undefined) => (typeof v === 'boolean' ? (v ? 1 : 0) : (v ?? null))
   const before: Record<string, unknown> = {}
   const after: Record<string, unknown> = {}
   for (const k of keys) { before[k] = current[k]; after[k] = changes[k] ?? null }
   const [update] = await db.batch([
-    db.prepare(`UPDATE customers SET ${keys.map((k) => `${PATCH_COLUMNS[k]} = ?`).concat(`updated_at = ${NOW}`).join(', ')} WHERE id = ? AND updated_at = ?`)
-      .bind(...keys.map((k) => bind(changes[k])), current.id, expectedUpdatedAt),
+    db.prepare(`UPDATE customers SET ${keys.map((k) => `${PATCH_COLUMNS[k]} = ?`).concat(`updated_at = ${NOW}`, 'version = version + 1').join(', ')} WHERE id = ? AND version = ?`)
+      .bind(...keys.map((k) => bind(changes[k])), current.id, expectedVersion),
     db.prepare(LOG_IF_CHANGED).bind(actorId, current.id, 'customer_updated', JSON.stringify(before), JSON.stringify(after)),
   ])
   return changed(update)
@@ -162,11 +162,12 @@ export async function updateContact(db: D1Database, actorId: number, customerId:
   const after: Record<string, unknown> = { contact_id: current.id }
   for (const k of [...fields, ...(changes.isPrimary !== undefined ? (['isPrimary'] as const) : [])]) { before[k] = current[k]; after[k] = changes[k] ?? null }
   const stmts = []
+  // Promoting requires the target to still be active: the demote and the target UPDATE both check it, so a lost race changes nothing.
   if (changes.isPrimary) {
     stmts.push(db.prepare('UPDATE customer_contacts SET is_primary = 0 WHERE customer_id = ? AND id <> ? AND EXISTS (SELECT 1 FROM customer_contacts WHERE id = ? AND archived_at IS NULL)').bind(customerId, current.id, current.id))
   }
   stmts.push(
-    db.prepare(`UPDATE customer_contacts SET ${sets.join(', ')} WHERE id = ? AND customer_id = ?`).bind(...vals, current.id, customerId),
+    db.prepare(`UPDATE customer_contacts SET ${sets.join(', ')} WHERE id = ? AND customer_id = ?${changes.isPrimary ? ' AND archived_at IS NULL' : ''}`).bind(...vals, current.id, customerId),
     db.prepare(LOG_IF_CHANGED).bind(actorId, customerId, 'contact_updated', JSON.stringify(before), JSON.stringify(after)),
   )
   const out = await db.batch(stmts)

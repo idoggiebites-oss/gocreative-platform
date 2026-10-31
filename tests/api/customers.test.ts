@@ -5,6 +5,7 @@ import { appRoutes } from '../../worker/routes/app'
 import type { AppEnv } from '../../worker/auth'
 import type { CustomerDetailResponse, CustomersListResponse, CustomerResponse, ContactResponse, NoteResponse } from '../../shared/api'
 import { createTestD1 } from './d1'
+import { getContact, updateContact, updateCustomer } from '../../worker/db/customers'
 
 const seed = readFileSync(new URL('../../scripts/seed.sql', import.meta.url), 'utf8')
 
@@ -23,7 +24,7 @@ function setup() {
   const activityCount = () => one<{ n: number }>('SELECT COUNT(*) AS n FROM activity_log').n
   const boom = () => sqlite.exec(`CREATE TEMP TRIGGER boom BEFORE INSERT ON activity_log BEGIN SELECT RAISE(ABORT, 'boom'); END`)
   const detail = async (id: number) => json<CustomerDetailResponse>(await call('GET', `/customers/${id}`))
-  return { sqlite, call, json, one, activityCount, boom, detail }
+  return { db, sqlite, call, json, one, activityCount, boom, detail }
 }
 
 describe('customers auth', () => {
@@ -111,21 +112,20 @@ describe('customer create / patch', () => {
   test('patch conflict guard', async () => {
     const t = setup()
     const before = (await t.detail(1)).customer
-    const ok = await t.call('PATCH', '/customers/1', { name: 'Riverbend USD', expectedUpdatedAt: before.updatedAt })
+    const ok = await t.call('PATCH', '/customers/1', { name: 'Riverbend USD', expectedVersion: before.version })
     expect(ok.status).toBe(200)
     const orderTerms = t.one<{ s: string }>(`SELECT group_concat(payment_terms || po_required) AS s FROM orders WHERE customer_id = 1`).s
-    await new Promise((r) => setTimeout(r, 5))
-    const stale = await t.call('PATCH', '/customers/1', { name: 'Late', expectedUpdatedAt: before.updatedAt })
+    const stale = await t.call('PATCH', '/customers/1', { name: 'Late', expectedVersion: before.version })
     expect(stale.status).toBe(409)
     expect(await stale.json()).toMatchObject({ code: 'conflict_retry' })
     const now = (await t.detail(1)).customer
     expect(now.name).toBe('Riverbend USD')
-    expect(now.updatedAt).not.toBe(before.updatedAt)
+    expect(now.version).toBe(before.version + 1)
     // defaults change never rewrites existing orders
-    await t.call('PATCH', '/customers/1', { defaultPoRequired: false, defaultPaymentTerms: 'due_at_pickup', expectedUpdatedAt: now.updatedAt })
+    await t.call('PATCH', '/customers/1', { defaultPoRequired: false, defaultPaymentTerms: 'due_at_pickup', expectedVersion: now.version })
     expect(t.one<{ s: string }>(`SELECT group_concat(payment_terms || po_required) AS s FROM orders WHERE customer_id = 1`).s).toBe(orderTerms)
-    expect((await t.call('PATCH', '/customers/1', { expectedUpdatedAt: now.updatedAt })).status).toBe(400)
-    expect((await t.call('PATCH', '/customers/999', { name: 'x', expectedUpdatedAt: 'x' })).status).toBe(404)
+    expect((await t.call('PATCH', '/customers/1', { expectedVersion: now.version })).status).toBe(400)
+    expect((await t.call('PATCH', '/customers/999', { name: 'x', expectedVersion: 0 })).status).toBe(404)
   })
 })
 
@@ -167,9 +167,9 @@ describe('contacts', () => {
 })
 
 describe('writes are logged atomically', () => {
-  const writes: [string, string, (u: string) => unknown][] = [
+  const writes: [string, string, (u: number) => unknown][] = [
     ['POST', '/customers', () => ({ name: 'N', kind: 'individual' })],
-    ['PATCH', '/customers/1', (u) => ({ name: 'Renamed', expectedUpdatedAt: u })],
+    ['PATCH', '/customers/1', (u) => ({ name: 'Renamed', expectedVersion: u })],
     ['POST', '/customers/1/contacts', () => ({ name: 'C', isPrimary: true })],
     ['PATCH', '/customers/1/contacts/2', () => ({ title: 'Boss', isPrimary: true })],
     ['POST', '/customers/1/contacts/2/archive', () => undefined],
@@ -179,7 +179,7 @@ describe('writes are logged atomically', () => {
   test('each write leaves exactly one activity row, in the same transaction as the change', async () => {
     const t = setup()
     for (const [method, path, body] of writes) {
-      const u = (await t.detail(1)).customer.updatedAt
+      const u = (await t.detail(1)).customer.version
       const before = t.activityCount()
       const res = await t.call(method, path, body(u) ?? {})
       expect(res.status, `${method} ${path}`).toBeLessThan(300)
@@ -197,7 +197,7 @@ describe('writes are logged atomically', () => {
     ])
     t.sqlite.exec(`UPDATE customer_contacts SET archived_at = '2026-01-01T00:00:00.000Z', is_primary = 0 WHERE id = 1`) // so unarchive has something to do
     const s = snap()
-    const u = (await t.detail(1)).customer.updatedAt
+    const u = (await t.detail(1)).customer.version
     for (const [method, path, body] of [...writes.filter((w) => !w[1].endsWith('/unarchive') && !w[1].endsWith('/2/archive')), ['POST', '/customers/1/contacts/1/unarchive', () => undefined] as (typeof writes)[number], ['POST', '/customers/1/contacts/2/archive', () => undefined] as (typeof writes)[number]]) {
       const res = await t.call(method, path, body(u) ?? {})
       expect(res.status, `${method} ${path}`).toBe(500)
@@ -211,5 +211,38 @@ describe('writes are logged atomically', () => {
     const n = await t.json<NoteResponse>(await t.call('POST', '/customers/1/notes', { body: ' hi ' }))
     expect(n.note).toMatchObject({ body: 'hi', authorName: 'Owner One' })
     expect(t.one<{ entity_type: string }>('SELECT entity_type FROM notes WHERE id = ?', n.note.id).entity_type).toBe('customer')
+  })
+})
+
+describe('review fixes (Codex, 7d3b560)', () => {
+  test('promoting a contact archived after the route read changes nothing and logs nothing', async () => {
+    const t = setup()
+    const stale = (await getContact(t.db, 1, 2))! // read while active
+    t.sqlite.exec(`UPDATE customer_contacts SET archived_at = '2026-01-01T00:00:00.000Z' WHERE id = 2`) // archived between read and batch
+    const before = t.activityCount()
+    expect(await updateContact(t.db, 1, 1, stale, { isPrimary: true })).toBe(false)
+    expect(t.one<{ is_primary: number }>('SELECT is_primary FROM customer_contacts WHERE id = 2').is_primary).toBe(0)
+    expect(t.one<{ id: number }>('SELECT id FROM customer_contacts WHERE customer_id = 1 AND is_primary = 1').id).toBe(1)
+    expect(t.activityCount()).toBe(before)
+  })
+  test('stale version is rejected by the SQL guard: intervening value kept, nothing extra logged', async () => {
+    const t = setup()
+    const stale = (await t.detail(1)).customer
+    expect(await updateCustomer(t.db, 1, stale, { name: 'First' }, stale.version)).toBe(true) // the intervening update
+    const before = t.activityCount()
+    expect(await updateCustomer(t.db, 1, stale, { name: 'Second' }, stale.version)).toBe(false) // same stale version
+    expect(t.one<{ name: string; version: number }>('SELECT name, version FROM customers WHERE id = 1')).toEqual({ name: 'First', version: stale.version + 1 })
+    expect(t.activityCount()).toBe(before)
+  })
+  test("detail activity is exactly this customer's rows", async () => {
+    const t = setup()
+    await t.call('POST', '/customers/1/notes', { body: 'a' })
+    await t.call('POST', '/customers/2/notes', { body: 'b' })
+    await t.call('POST', '/customers/2/notes', { body: 'c' })
+    const ids = (c: number) => (t.sqlite.prepare(`SELECT id FROM activity_log WHERE entity_type = 'customer' AND entity_id = ? ORDER BY id DESC`).all(c) as { id: number }[]).map((r) => r.id)
+    expect(ids(1).length).toBeGreaterThan(0)
+    expect(ids(2).length).toBeGreaterThan(0)
+    expect((await t.detail(1)).activity.map((a) => a.id)).toEqual(ids(1))
+    expect((await t.detail(2)).activity.map((a) => a.id)).toEqual(ids(2))
   })
 })

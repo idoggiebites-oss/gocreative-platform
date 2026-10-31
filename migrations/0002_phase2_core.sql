@@ -15,6 +15,9 @@ PRAGMA defer_foreign_keys = ON;
 ALTER TABLE customers ADD COLUMN default_po_required INTEGER NOT NULL DEFAULT 0 CHECK (default_po_required IN (0,1));
 ALTER TABLE customers ADD COLUMN default_payment_terms TEXT NOT NULL DEFAULT 'due_at_pickup' CHECK (default_payment_terms IN ('due_at_pickup','due_after_pickup'));
 
+-- Integer version for the lost-update guard: every write to the customer row bumps it.
+ALTER TABLE customers ADD COLUMN version INTEGER NOT NULL DEFAULT 0;
+
 -- Contacts are never deleted (orders reference them); archiving hides them instead.
 ALTER TABLE customer_contacts ADD COLUMN archived_at TEXT;
 

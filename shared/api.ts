@@ -196,8 +196,9 @@ export type CustomerRecord = {
   defaultPaymentTerms: PaymentTerms
   internalNotes: string | null
   createdAt: string
-  /** Send back as expectedUpdatedAt when patching. */
   updatedAt: string
+  /** Send back as expectedVersion when patching. */
+  version: number
 }
 export type CustomerNote = { id: number; body: string; authorName: string | null; createdAt: string }
 export type CustomerDetailResponse = {
@@ -217,7 +218,7 @@ export type CustomerCreateRequest = {
   defaultPaymentTerms?: PaymentTerms
   internalNotes?: string | null
 }
-export type CustomerPatchRequest = Partial<CustomerCreateRequest> & { expectedUpdatedAt: string }
+export type CustomerPatchRequest = Partial<CustomerCreateRequest> & { expectedVersion: number }
 export type CustomerResponse = { customer: CustomerRecord }
 export type ContactRequest = { name: string; email?: string | null; phone?: string | null; title?: string | null; isPrimary?: boolean }
 export type ContactResponse = { contact: CustomerContact }
