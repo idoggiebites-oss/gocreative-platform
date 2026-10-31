@@ -79,13 +79,17 @@ The brief's entity list, mapped onto the existing schema ("adapt, don't duplicat
 | CheckCollections | **new** `check_collections` (order, expected/received cents, check number, available/collected/deposited/cleared dates, collected_by, status, notes, optional `payment_id` link) |
 | ActivityLogs | **keep**; every new write logs, in the same batch as the change |
 
+**Adjusted 2026-10-30:** with the remote DB empty after the wipe, 0002 switches the *whole*
+vocabulary at once (production statuses, order states, artwork, quotes), so no milestone needs
+code that translates between old and new names. The feature tables still arrive per milestone.
+
 Migrations, one per milestone, each with its own schema test like `shared/schema.test.ts`:
 
 - **0002** (M1): customer defaults; order columns for quotes and authorization; `order_items.kind`;
   `quotes` + `quote_items` replacing `estimates`; immutability triggers; artwork status rename
   (`none` → `not_received`, `pending` → `under_review`, + `not_required`); time zone in `business.ts` (not SQL)
 - **0003** (M3): `suppliers` (+ JDS), `order_purchases`, `purchase_receipts`, `materials_required`, `prep_status`
-- **0004** (M4): production status set (§4.2), `queue_position`, `units_completed`, the §4.3 slot DDL
+- **0004** (M4): `queue_position`, `units_completed`, the §4.3 slot DDL. (The production status set moved into 0002, see below.)
 - **0005** (M5): `pickups`, `payments`, `check_collections`, `payment_terms`, `payment_due_on`
 
 ## 4. Decisions (Arturo, 2026-10-30) and the designs they fix
