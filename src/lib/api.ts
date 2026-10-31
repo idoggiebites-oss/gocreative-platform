@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type {
-  DashboardResponse, OrderDetailResponse, OrdersListResponse, OrderView, PoChangeResponse, ProductionChangeResponse,
+  CustomerDetailResponse, CustomersListResponse, DashboardResponse, OrderDetailResponse, OrdersListResponse, OrderView, PoChangeResponse, ProductionChangeResponse,
 } from '@shared/api'
-import type { PoStatus, ProductionStatus } from '@shared/enums'
+import type { CustomerKind, PoStatus, ProductionStatus } from '@shared/enums'
 import type { ApiError as ApiErrorBody } from '@shared/api'
 
 /** A non-2xx answer from /api/app. `body.error` is the server's message; 409 means a business rule refused it. */
@@ -70,4 +70,33 @@ export function useChangePo(number: string, expectedVersion: number) {
       call<PoChangeResponse>(`/orders/${encodeURIComponent(number)}/purchase-orders/${poId}`, { method: 'PATCH', body: JSON.stringify({ to, expectedVersion }) }),
     onSettled: invalidate,
   })
+}
+
+export const useCustomers = (q: string, kind: CustomerKind | '', enabled = true) =>
+  useQuery({
+    queryKey: ['customers', q, kind],
+    queryFn: () => call<CustomersListResponse>(`/customers?${new URLSearchParams({ ...(q ? { q } : {}), ...(kind ? { kind } : {}), limit: '50' })}`),
+    placeholderData: (prev) => prev,
+    enabled,
+    retry,
+  })
+
+export const useCustomer = (id: number | null) =>
+  useQuery({ queryKey: ['customer', id], queryFn: () => call<CustomerDetailResponse>(`/customers/${id}`), enabled: id !== null, retry })
+
+/** Owner-only on the server: a 403 simply means no assignee list. */
+export const useUsers = () =>
+  useQuery({ queryKey: ['users'], queryFn: () => call<{ users: { id: number; name: string }[] }>('/users'), retry: false, staleTime: 60_000 })
+
+/** A write: `send('POST', '/orders', body)`. Returns the parsed answer, or throws ApiError. */
+export const send = <T = unknown>(method: 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, body?: unknown) =>
+  call<T>(path, { method, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
+
+/**
+ * Every write refetches whatever is on screen afterwards (success or a 409), so a conflict shows the
+ * server's current state next to the translated notice. No optimistic updates.
+ */
+export function useSend<T, V>(fn: (v: V) => Promise<T>) {
+  const qc = useQueryClient()
+  return useMutation({ mutationFn: fn, onSettled: () => qc.invalidateQueries() })
 }

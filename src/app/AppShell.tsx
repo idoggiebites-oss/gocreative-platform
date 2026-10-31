@@ -68,10 +68,10 @@ export default function AppShell() {
           <button type="button" aria-label={m.shell.notifications} className={`${btn} relative w-8 shrink-0 max-sm:ml-auto`}>
             <Bell className="size-4" strokeWidth={1.75} aria-hidden />
           </button>
-          <button type="button" className={`${btn} px-3 border-primary bg-primary text-primary-foreground hover:bg-(--brand-hover)`}>
+          <Link to="/app/orders/new" className={`${btn} px-3 border-primary bg-primary text-primary-foreground no-underline hover:bg-(--brand-hover) hover:text-primary-foreground`}>
             <Plus className="size-[15px]" strokeWidth={2} aria-hidden />
             {m.shell.newOrder}
-          </button>
+          </Link>
         </header>
 
         <main className="flex min-w-0 flex-1 flex-col"><Outlet /></main>

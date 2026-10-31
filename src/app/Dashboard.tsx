@@ -1,8 +1,11 @@
 import { Route, Routes } from 'react-router'
-import { FileCheck, Image, Layers, Users } from 'lucide-react'
+import { Banknote, FileCheck, Image, Layers } from 'lucide-react'
 import { useI18n } from '@/i18n'
 import AppShell from './AppShell'
 import ComingSoon from './ComingSoon'
+import CustomerDetail from './CustomerDetail'
+import CustomerList from './CustomerList'
+import NewOrder from './NewOrder'
 import OrderDetail from './OrderDetail'
 import OrderList from './OrderList'
 import Overview from './Overview'
@@ -16,11 +19,14 @@ export default function Dashboard() {
       <Route element={<AppShell />}>
         <Route index element={<Overview />} />
         <Route path="orders" element={<OrderList />} />
+        <Route path="orders/new" element={<NewOrder />} />
         <Route path="orders/:number" element={<OrderDetail />} />
-        <Route path="customers" element={<ComingSoon icon={Users} title={m.nav.customers} line={m.empty.customers} phase={2} />} />
+        <Route path="customers" element={<CustomerList />} />
+        <Route path="customers/:id" element={<CustomerDetail />} />
         <Route path="artwork" element={<ComingSoon icon={Image} title={m.nav.artwork} line={m.empty.artwork} phase={3} />} />
         <Route path="purchase-orders" element={<ComingSoon icon={FileCheck} title={m.nav.purchaseOrders} line={m.empty.purchaseOrders} phase={3} />} />
         <Route path="production" element={<ComingSoon icon={Layers} title={m.nav.production} line={m.empty.production} phase={5} />} />
+        <Route path="payments" element={<ComingSoon icon={Banknote} title={m.nav.payments} line={m.empty.payments} phase={5} />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>
     </Routes>

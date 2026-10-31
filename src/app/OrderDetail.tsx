@@ -2,46 +2,24 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router'
 import { Lock, SearchX } from 'lucide-react'
 import type { UseMutationResult } from '@tanstack/react-query'
-import type { GateReasonCode, OrderDetailResponse, OrderItem } from '@shared/api'
+import type { GateReasonCode, OrderDetailResponse } from '@shared/api'
 import { PRODUCTION_STATUSES, type PoStatus, type ProductionStatus } from '@shared/enums'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useI18n } from '@/i18n'
-import { ApiError, useChangePo, useChangeProduction, useOrder } from '@/lib/api'
+import { useChangePo, useChangeProduction, useOrder, useUsers } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { checkOrderProductionMove } from '../../worker/domain/productionFlow'
 import { allowedPoTransitions } from '../../worker/domain/purchaseOrder'
+import { BTN, BTN_PRIMARY, MutationError as MoveError } from './form'
+import { ItemsQuoteTab, NoteComposer, OrderActions, ReadinessCard, DetailsEditor } from './OrderPanels'
 import QueryBoundary from './QueryBoundary'
-import { CARD, Chip, ChipTrigger, QUOTE_TONE, ARTWORK_TONE, MUTED, PAGE, PO_TONE, PRODUCTION_TONE, TD, TH, type Tone } from './ui'
+import { CARD, Chip, ChipTrigger, MUTED, PAGE, PO_TONE, PRODUCTION_TONE, ARTWORK_TONE, TD, TH, type Tone } from './ui'
 
 type Detail = OrderDetailResponse
-// A product line reads "Product · Color"; a charge or discount line shows its description (or its kind).
-const lineTitle = (i: OrderItem, kindLabel: string) =>
-  i.product ? (i.garmentColor ? `${i.product} · ${i.garmentColor}` : i.product) : (i.description ?? kindLabel)
 type PoMutation = UseMutationResult<unknown, Error, { poId: number; to: PoStatus }>
 type ProdMutation = UseMutationResult<unknown, Error, ProductionStatus>
 type Controls = { po: PoMutation; prod: ProdMutation }
-
-const BTN = 'inline-flex h-8 items-center justify-center gap-1.5 rounded-[7px] border border-input bg-card px-3 text-[13px] font-medium hover:bg-secondary disabled:opacity-60'
-const BTN_PRIMARY = 'border-primary bg-primary text-primary-foreground hover:bg-(--brand-hover) hover:text-primary-foreground'
-
-/** The server's refusal, shown next to the control that caused it (never swallowed). */
-function MoveError({ error }: { error: Error | null }) {
-  const { m } = useI18n()
-  if (!error) return null
-  const refused = error instanceof ApiError && error.status === 409
-  // Only translated text is shown: the server's English `error` is for logs. Unknown codes fall back to the generic line.
-  const codes: Record<string, string | undefined> = m.api.errors
-  const reasons: Record<string, string | undefined> = m.order.gate.reasons
-  const detail = error instanceof ApiError
-    ? [error.body.code ? codes[error.body.code] : undefined, ...(error.body.reasons ?? []).map((r) => reasons[r] ?? m.api.unknownReason)].filter(Boolean).join(' ')
-    : ''
-  return (
-    <span role="alert" className="text-xs text-status-red-fg">
-      {refused ? m.api.changeRefused : m.api.changeFailed}{detail && <> <span className="opacity-80">{detail}</span></>}
-    </span>
-  )
-}
 
 /** A status chip that is a dropdown of the moves the domain rules allow; a plain chip when there are none. */
 function StatusMenu<T extends string>(p: {
@@ -97,30 +75,13 @@ function PoMenu({ po, status, mut }: { po: Detail['purchaseOrders'][number]; sta
 
 function StatusStrip({ d, c, moves }: { d: Detail; c: Controls; moves: ReturnType<typeof useMoves> }) {
   const { m, fmt } = useI18n()
-  const { order, quote: est } = d
-  const po = d.purchaseOrders[0]
+  const { order, quote } = d
   const t = m.order.track
+  const open = d.readiness.items.filter((i) => i.state === 'pending').length
   const cell = 'flex min-w-0 flex-col gap-1.5 border-r border-secondary px-3.5 py-3 last:border-r-0'
   const label = 'text-[11.5px] font-medium uppercase tracking-[.04em] text-muted-foreground'
   return (
-    <section aria-label={m.order.status} className={`${CARD} grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))]`}>
-      <div className={cell}>
-        <span className={label}>{t.quote}</span>
-        {est ? <span><Chip tone={QUOTE_TONE[est.status]}>{m.labels.quoteStatus[est.status]}</Chip></span> : <span className="text-[13px] text-muted-foreground">{m.order.noQuote}</span>}
-        {est && <span className={MUTED}>{m.order.quoteSub(est.version, fmt.date(est.sentAt ?? est.createdAt))}</span>}
-      </div>
-      <div className={cell}>
-        <span className={label}>{t.artwork}</span>
-        <span><Chip tone={ARTWORK_TONE[order.artworkStatus]}>{m.labels.artworkStatus[order.artworkStatus]}</Chip></span>
-        <span className={MUTED}>{m.order.artworkSub}</span>
-      </div>
-      <div className={cell}>
-        <span className={label}>{t.po}</span>
-        {po ? <span><PoMenu po={po} status={po.status} mut={c.po} /></span>
-          : <span className="text-[13px] text-muted-foreground">{order.poRequired ? m.order.noPo : m.order.poNotRequired}</span>}
-        {po && <span className={`${MUTED} num`}>{m.order.poSub(po.poNumber, fmt.relative(po.updatedAt))}</span>}
-        <MoveError error={c.po.error} />
-      </div>
+    <section aria-label={m.order.status} className={`${CARD} grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))]`}>
       <div className={cell}>
         <span className={label}>{t.production}</span>
         <span>
@@ -129,12 +90,18 @@ function StatusStrip({ d, c, moves }: { d: Detail; c: Controls; moves: ReturnTyp
             name={t.production} pending={c.prod.isPending} onPick={(to) => c.prod.mutate(to)}
           />
         </span>
-        <span className={MUTED}>{d.gate.ok ? m.order.gateClear : m.order.gateClosed}</span>
+        <span className={MUTED}>{open === 0 ? m.order.gateClear : m.order.readiness.openItems(open, d.readiness.items.length)}</span>
         <MoveError error={c.prod.error} />
       </div>
       <div className={cell}>
-        <span className={label}>{t.invoice}</span>
-        <span className="text-[13px] text-muted-foreground">{order.invoiceRef || order.paymentRef ? m.order.ref(order.invoiceRef, order.paymentRef) : m.order.notInvoiced}</span>
+        <span className={label}>{t.fulfilment}</span>
+        <span><Chip tone="gray">{m.order.notStarted}</Chip></span>
+        <span className={MUTED}>{m.order.fulfilmentSub}</span>
+      </div>
+      <div className={cell}>
+        <span className={label}>{t.payment}</span>
+        <span><Chip tone="gray">{m.order.notInvoiced}</Chip></span>
+        <span className={MUTED}>{m.order.paymentSub(quote?.status === 'accepted' ? fmt.money(quote.totalCents) : m.common.dash, m.labels.paymentTerms[order.paymentTerms])}</span>
       </div>
     </section>
   )
@@ -157,87 +124,6 @@ function GateBanner({ d, c, openPo }: { d: Detail; c: Controls; openPo: () => vo
           {c.po.isPending ? m.order.changing : m.order.gate.recordApproval}
         </button>
       )}
-    </div>
-  )
-}
-
-function ItemsTab({ d }: { d: Detail }) {
-  const { m, fmt } = useI18n()
-  const t = m.order.items
-  if (d.items.length === 0) return <p className="px-4 py-8 text-center text-[13px] text-muted-foreground">{t.empty}</p>
-  const signed = (i: Detail['items'][number]) => (i.kind === 'discount' ? -1 : 1) * i.quantity * i.unitPriceCents
-  const total = d.items.reduce((s, i) => s + signed(i), 0)
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full border-collapse text-[13px]">
-        <thead><tr>
-          <th className={TH}>{t.product}</th><th className={TH}>{t.sizes}</th>
-          <th className={cn(TH, 'text-right')}>{t.qty}</th><th className={cn(TH, 'text-right')}>{t.unit}</th><th className={cn(TH, 'text-right')}>{t.total}</th>
-        </tr></thead>
-        <tbody>
-          {d.items.map((i) => (
-            <tr key={i.id} className="align-top">
-              <td className="border-b border-secondary p-3">
-                <div className="flex min-w-[190px] flex-col gap-[3px]">
-                  <span className="font-medium">{lineTitle(i, m.labels.itemKind[i.kind])}</span>
-                  <span className={MUTED}>{i.method ? m.labels.method[i.method] : m.labels.itemKind[i.kind]}{i.notes ? ` · ${i.notes}` : ''}</span>
-                </div>
-              </td>
-              <td className="border-b border-secondary p-3">
-                {i.sizes && (
-                  <div className="grid grid-cols-[repeat(8,minmax(34px,auto))] gap-0.5 text-xs">
-                    {Object.entries(i.sizes).map(([size, n]) => (
-                      <span key={size} className="num flex flex-col items-center rounded-[5px] bg-background px-1 py-[3px]">
-                        <b className="text-[10.5px] font-medium text-muted-foreground">{size}</b>{n}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </td>
-              <td className="num border-b border-secondary p-3 text-right">{i.quantity}</td>
-              <td className="num border-b border-secondary p-3 text-right">{fmt.money(i.unitPriceCents)}</td>
-              <td className="num border-b border-secondary p-3 text-right font-medium">{fmt.money(signed(i))}</td>
-            </tr>
-          ))}
-          <tr>
-            <td colSpan={4} className="p-3 text-right text-muted-foreground">{t.itemsTotal}</td>
-            <td className="num p-3 text-right font-semibold">{fmt.money(total)}</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
-function QuoteTab({ d }: { d: Detail }) {
-  const { m, fmt } = useI18n()
-  const q = d.quote
-  const t = m.order.quote
-  if (!q) return <p className="px-4 py-8 text-center text-[13px] text-muted-foreground">{t.empty}</p>
-  const totals: [string, number][] = [[t.subtotal, q.subtotalCents], ...(q.chargesCents ? [[t.charges, q.chargesCents] as [string, number]] : []), ...(q.discountsCents ? [[t.discounts, -q.discountsCents] as [string, number]] : [])]
-  return (
-    <div className="flex flex-col gap-3 p-4 text-[13px]">
-      <div className="flex items-center gap-2"><span className="font-medium">{t.version(q.version)}</span><Chip tone={QUOTE_TONE[q.status]}>{m.labels.quoteStatus[q.status]}</Chip></div>
-      {q.status === 'accepted' && q.itemsRevision !== d.order.itemsRevision && <p role="status" className="text-xs text-status-amber-fg">{t.stale}</p>}
-      {q.items.length > 0 && (
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse"><thead><tr>
-            <th className={TH}>{t.line}</th><th className={cn(TH, 'text-right')}>{t.qty}</th><th className={cn(TH, 'text-right')}>{t.unit}</th><th className={cn(TH, 'text-right')}>{t.amount}</th>
-          </tr></thead>
-            <tbody>{q.items.map((l) => (
-              <tr key={l.id}>
-                <td className={TD}>{lineTitle(l, m.labels.itemKind[l.kind])}</td>
-                <td className={cn(TD, 'num text-right')}>{l.quantity}</td>
-                <td className={cn(TD, 'num text-right')}>{fmt.money(l.unitPriceCents)}</td>
-                <td className={cn(TD, 'num text-right')}>{fmt.money(l.lineTotalCents)}</td>
-              </tr>
-            ))}</tbody>
-          </table>
-        </div>
-      )}
-      {totals.map(([label, cents]) => <div key={label} className="flex justify-between"><span className="text-muted-foreground">{label}</span><span className="num">{fmt.money(cents)}</span></div>)}
-      <div className="flex justify-between border-t border-border pt-2"><span className="text-muted-foreground">{t.total}</span><span className="num font-semibold">{fmt.money(q.totalCents)}</span></div>
-      <p className={MUTED}>{t.uploadNote}</p>
     </div>
   )
 }
@@ -301,7 +187,8 @@ function ActivityTab({ d }: { d: Detail }) {
           a.action === 'created' ? m.order.activity.created
           : a.action === 'production_status_changed' ? m.order.activity.production(prod(field(a.before, 'production_status')), prod(field(a.after, 'production_status')))
           : a.action === 'po_status_changed' ? m.order.activity.po(po(field(a.before, 'po_status')), po(field(a.after, 'po_status')))
-          : m.activity.other('')
+          : a.action in m.activity ? (m.activity as Record<string, (n: string) => string>)[a.action]!(d.order.number)
+          : m.activity.other(d.order.number)
         return (
           <li key={a.id} className="flex flex-col gap-0.5">
             <span>{text}</span>
@@ -315,6 +202,9 @@ function ActivityTab({ d }: { d: Detail }) {
 
 function Side({ d }: { d: Detail }) {
   const { m, fmt } = useI18n()
+  const [editing, setEditing] = useState(false)
+  const users = useUsers()
+  const assignee = d.order.assigneeId === null ? null : (users.data?.users.find((u) => u.id === d.order.assigneeId)?.name ?? String(d.order.assigneeId))
   const { order, customer, contact } = d
   const card = `${CARD} flex flex-col gap-2.5 px-4 py-3.5`
   const h = 'text-[13px] font-semibold'
@@ -328,6 +218,7 @@ function Side({ d }: { d: Detail }) {
       ? <span>{order.authorizationMethod ? `${m.labels.authorizationMethod[order.authorizationMethod]} · ` : ''}<span className="num">{fmt.date(order.authorizedAt)}</span></span>
       : muted] as [string, ReactNode]]),
     [m.order.detail.paymentTerms, m.labels.paymentTerms[order.paymentTerms]],
+    [m.order.detail.assignee, assignee ?? muted],
     [m.order.detail.invoiceRef, order.invoiceRef ?? muted],
     [m.order.detail.paymentRef, order.paymentRef ?? muted],
     [m.order.detail.state, m.labels.orderState[order.state]],
@@ -336,7 +227,7 @@ function Side({ d }: { d: Detail }) {
     <div className="flex min-w-0 flex-[1_1_300px] flex-col gap-4">
       <section className={card} aria-labelledby="cust">
         <h2 id="cust" className={h}>{m.order.customer}</h2>
-        <div className="flex flex-col gap-0.5 text-[13px]"><span className="font-medium">{customer.name}</span><span className={MUTED}>{m.labels.customerKind[customer.kind]}</span></div>
+        <div className="flex flex-col gap-0.5 text-[13px]"><Link to={`/app/customers/${customer.id}`} className="font-medium text-primary no-underline hover:text-(--brand-hover)">{customer.name}</Link><span className={MUTED}>{m.labels.customerKind[customer.kind]}</span></div>
         {(contact || customer.email || customer.phone) && (
           <div className="flex flex-col gap-0.5 border-t border-secondary pt-2 text-[13px]">
             {contact && <span className="font-medium">{contact.title ? `${contact.name} · ${contact.title}` : contact.name}</span>}
@@ -346,24 +237,29 @@ function Side({ d }: { d: Detail }) {
         )}
       </section>
       <section className={card} aria-labelledby="det">
-        <h2 id="det" className={h}>{m.order.details}</h2>
-        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-[13px]">
-          {rows.map(([k, v]) => <div key={k} className="contents"><dt className="text-muted-foreground">{k}</dt><dd className="text-right">{v}</dd></div>)}
-        </dl>
+        <div className="flex items-center justify-between">
+          <h2 id="det" className={h}>{m.order.details}</h2>
+          {!editing && <button type="button" className={`${BTN} h-7 px-2.5 text-[12.5px]`} disabled={order.state !== 'active'} onClick={() => setEditing(true)}>{m.order.edit.button}</button>}
+        </div>
+        {editing ? <DetailsEditor d={d} onDone={() => setEditing(false)} /> : (
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-[13px]">
+            {rows.map(([k, v]) => <div key={k} className="contents"><dt className="text-muted-foreground">{k}</dt><dd className="text-right">{v}</dd></div>)}
+          </dl>
+        )}
       </section>
       <section className={card} aria-labelledby="notes">
         <div className="flex items-center justify-between"><h2 id="notes" className={h}>{m.order.notes}</h2><span className={MUTED}>{m.order.staffOnly}</span></div>
+        <NoteComposer d={d} />
         {d.notes.length === 0 && <p className="text-[13px] text-muted-foreground">{m.order.notesEmpty}</p>}
         {d.notes.map((n) => (
-          <div key={n.id} className="flex flex-col gap-0.5 text-[13px]"><span>{n.body}</span><span className={MUTED}>{n.authorName ?? m.common.dash} · {fmt.date(n.createdAt)}</span></div>
+          <div key={n.id} className="flex flex-col gap-0.5 text-[13px]"><span className="whitespace-pre-wrap">{n.body}</span><span className={MUTED}>{n.authorName ?? m.common.dash} · {fmt.date(n.createdAt)}</span></div>
         ))}
-        <p className={MUTED}>{m.order.notesLater}</p>
       </section>
     </div>
   )
 }
 
-const TABS = ['items', 'artwork', 'quote', 'po', 'production', 'activity'] as const
+const TABS = ['items', 'artwork', 'po', 'production', 'activity'] as const
 type Tab = (typeof TABS)[number]
 
 function Order({ d }: { d: Detail }) {
@@ -386,34 +282,38 @@ function Order({ d }: { d: Detail }) {
             <Chip tone="gray">{m.labels.orderSource[d.order.source]}</Chip>
           </div>
           <span className="text-[13px] text-muted-foreground">
-            {d.customer.name} · {m.common.items(qty)}
+            <Link to={`/app/customers/${d.customer.id}`} className="text-primary no-underline hover:text-(--brand-hover)">{d.customer.name}</Link> · {m.common.items(qty)}
             {d.order.dueDate && <> · {m.order.due} <b className="num font-medium text-foreground">{fmt.weekdayDate(d.order.dueDate)}</b></>}
+            {d.order.state !== 'active' && <> · <b className="font-medium text-status-red-fg">{m.labels.orderState[d.order.state]}</b></>}
           </span>
         </div>
-        {d.quote && (
+        <div className="flex flex-col items-end gap-2">
+          <OrderActions d={d} />
+          {d.quote && (
           <div className="flex flex-col items-end gap-0.5">
             {/* The agreed total is the accepted quote's; any other quote's total is labelled with its status. */}
             <span className={MUTED}>{d.quote.status === 'accepted' ? m.order.agreedTotal : m.order.quoteTotal(m.labels.quoteStatus[d.quote.status])}</span>
             <span className="num text-xl font-semibold tracking-[-0.015em]">{fmt.money(d.quote.totalCents)}</span>
           </div>
-        )}
+          )}
+        </div>
       </div>
       <StatusStrip d={d} c={c} moves={moves} />
       <GateBanner d={d} c={c} openPo={() => setTab('po')} />
+      <ReadinessCard d={d} goTab={setTab} po={d.purchaseOrders[0] ? <><PoMenu po={d.purchaseOrders[0]} status={d.purchaseOrders[0].status} mut={c.po} /><MoveError error={c.po.error} /></> : null} />
       <div className="flex flex-wrap items-start gap-4">
         <section className={`${CARD} min-w-0 flex-[999_1_600px]`}>
           <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
             <TabsList aria-label={m.order.tabsLabel}>
               {TABS.map((k) => <TabsTrigger key={k} value={k}>{m.order.tabs[k]}</TabsTrigger>)}
             </TabsList>
-            <TabsContent value="items"><ItemsTab d={d} /></TabsContent>
+            <TabsContent value="items"><ItemsQuoteTab d={d} /></TabsContent>
             <TabsContent value="artwork">
               <div className="flex flex-col gap-3 p-4 text-[13px]">
                 <div className="flex items-center gap-2"><span className="text-muted-foreground">{m.order.artwork.status}</span><Chip tone={ARTWORK_TONE[d.order.artworkStatus]}>{m.labels.artworkStatus[d.order.artworkStatus]}</Chip></div>
                 <p className={MUTED}>{m.order.artwork.body}</p>
               </div>
             </TabsContent>
-            <TabsContent value="quote"><QuoteTab d={d} /></TabsContent>
             <TabsContent value="po"><PoTab d={d} c={c} /></TabsContent>
             <TabsContent value="production"><ProductionTab d={d} c={c} moves={moves} /></TabsContent>
             <TabsContent value="activity"><ActivityTab d={d} /></TabsContent>
