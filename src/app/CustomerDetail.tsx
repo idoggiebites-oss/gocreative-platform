@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { Plus, SearchX } from 'lucide-react'
-import type { ContactRequest, ContactResponse, CustomerContact, CustomerDetailResponse, CustomerPatchRequest, CustomerResponse, NoteResponse } from '@shared/api'
+import type { ContactPatchRequest, ContactRequest, ContactResponse, CustomerContact, CustomerDetailResponse, CustomerPatchRequest, CustomerResponse, NoteResponse } from '@shared/api'
 import { CUSTOMER_KINDS, PAYMENT_TERMS, type CustomerKind, type PaymentTerms } from '@shared/enums'
 import { useI18n } from '@/i18n'
-import { ApiError, send, useCustomer, useSend } from '@/lib/api'
+import { isConflict, send, useCustomer, useSend } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { KIND_TONE, isEmail } from './CustomerList'
 import { BTN, BTN_PRIMARY, BTN_SM, Check, Field, FormDialog, H2, INPUT, LINK, MutationError, SEC, TEXTAREA } from './form'
@@ -12,11 +12,12 @@ import QueryBoundary from './QueryBoundary'
 import { CARD, Chip, MUTED, PAGE, PRODUCTION_TONE, QUOTE_TONE, TD, TH } from './ui'
 
 type Detail = CustomerDetailResponse
-const isConflict = (e: unknown) => e instanceof ApiError && e.status === 409 && e.body.code === 'conflict_retry'
 
 function EditCustomerDialog({ d, onClose, onConflict }: { d: Detail; onClose: () => void; onConflict: () => void }) {
   const { m } = useI18n()
   const c = d.customer
+  // Field values and version are both captured when the dialog opens; a refetch behind it changes neither.
+  const [version] = useState(c.version)
   const [f, setF] = useState({ name: c.name, kind: c.kind, organization: c.organization ?? '', email: c.email ?? '', phone: c.phone ?? '', po: c.defaultPoRequired, terms: c.defaultPaymentTerms })
   const [tried, setTried] = useState(false)
   const save = useSend<CustomerResponse, CustomerPatchRequest>((b) => send('PATCH', `/customers/${c.id}`, b))
@@ -27,9 +28,8 @@ function EditCustomerDialog({ d, onClose, onConflict }: { d: Detail; onClose: ()
       onSubmit={() => {
         setTried(true)
         if (!f.name.trim() || !isEmail(f.email.trim())) return
-        // The version comes from the detail this dialog was opened from.
         save.mutate(
-          { expectedVersion: c.version, name: f.name.trim(), kind: f.kind, organization: f.organization.trim() || null, email: f.email.trim() || null, phone: f.phone.trim() || null, defaultPoRequired: f.po, defaultPaymentTerms: f.terms },
+          { expectedVersion: version, name: f.name.trim(), kind: f.kind, organization: f.organization.trim() || null, email: f.email.trim() || null, phone: f.phone.trim() || null, defaultPoRequired: f.po, defaultPaymentTerms: f.terms },
           { onSuccess: onClose, onError: (e) => { if (isConflict(e)) { onClose(); onConflict() } } },
         )
       }}
@@ -58,22 +58,23 @@ function EditCustomerDialog({ d, onClose, onConflict }: { d: Detail; onClose: ()
   )
 }
 
-function ContactDialog({ customerId, contact, onClose }: { customerId: number; contact: CustomerContact | null; onClose: () => void }) {
+// `contact` is the row as it was when Edit was clicked, so its version is the one the form's values were read at.
+function ContactDialog({ customerId, contact, onClose, onConflict }: { customerId: number; contact: CustomerContact | null; onClose: () => void; onConflict: () => void }) {
   const { m } = useI18n()
   const [f, setF] = useState({ name: contact?.name ?? '', title: contact?.title ?? '', email: contact?.email ?? '', phone: contact?.phone ?? '', primary: false })
   const [tried, setTried] = useState(false)
-  const save = useSend<ContactResponse, ContactRequest>((b) =>
+  const save = useSend<ContactResponse, ContactRequest | ContactPatchRequest>((b) =>
     contact ? send('PATCH', `/customers/${customerId}/contacts/${contact.id}`, b) : send('POST', `/customers/${customerId}/contacts`, b))
   const t = m.customers
   return (
     <FormDialog
-      open onOpenChange={(o) => !o && onClose()} title={contact ? t.editContact : t.addContact} submitLabel={m.common.save} pending={save.isPending} error={save.error}
+      open onOpenChange={(o) => !o && onClose()} title={contact ? t.editContact : t.addContact} submitLabel={m.common.save} pending={save.isPending} error={isConflict(save.error) ? null : save.error}
       onSubmit={() => {
         setTried(true)
         if (!f.name.trim() || !isEmail(f.email.trim())) return
         save.mutate(
-          { name: f.name.trim(), title: f.title.trim() || null, email: f.email.trim() || null, phone: f.phone.trim() || null, ...(contact ? {} : { isPrimary: f.primary }) },
-          { onSuccess: onClose },
+          { name: f.name.trim(), title: f.title.trim() || null, email: f.email.trim() || null, phone: f.phone.trim() || null, ...(contact ? { expectedVersion: contact.version } : { isPrimary: f.primary }) },
+          { onSuccess: onClose, onError: (e) => { if (isConflict(e)) { onClose(); onConflict() } } },
         )
       }}
     >
@@ -93,14 +94,16 @@ function Contacts({ d }: { d: Detail }) {
   const { m } = useI18n()
   const t = m.customers
   const [editing, setEditing] = useState<CustomerContact | 'new' | null>(null)
-  const act = useSend<ContactResponse, { id: number; what: 'primary' | 'archive' | 'unarchive' }>(({ id, what }) =>
-    what === 'primary' ? send('PATCH', `/customers/${d.customer.id}/contacts/${id}`, { isPrimary: true }) : send('POST', `/customers/${d.customer.id}/contacts/${id}/${what}`))
+  const [conflict, setConflict] = useState(false)
+  // Each click sends the version of the row it was rendered from.
+  const act = useSend<ContactResponse, { id: number; version: number; what: 'primary' | 'archive' | 'unarchive' }>(({ id, version, what }) =>
+    what === 'primary' ? send('PATCH', `/customers/${d.customer.id}/contacts/${id}`, { isPrimary: true, expectedVersion: version }) : send('POST', `/customers/${d.customer.id}/contacts/${id}/${what}`, { expectedVersion: version }))
   const sm = cn(BTN, BTN_SM)
   return (
     <section className={CARD} aria-labelledby="ct">
       <div className={SEC}>
         <h2 id="ct" className={H2}>{t.contacts}</h2>
-        <button type="button" className={sm} onClick={() => setEditing('new')}><Plus className="size-[15px]" strokeWidth={2} aria-hidden />{t.addContact}</button>
+        <button type="button" className={sm} onClick={() => { setConflict(false); setEditing('new') }}><Plus className="size-[15px]" strokeWidth={2} aria-hidden />{t.addContact}</button>
       </div>
       {d.contacts.length === 0 ? <p className="px-4 pb-4 text-[13px] text-muted-foreground">{t.noContacts}</p> : (
         <div className="overflow-x-auto">
@@ -116,9 +119,9 @@ function Contacts({ d }: { d: Detail }) {
                   <td className={TD}>{c.archived ? <Chip tone="gray">{t.archived}</Chip> : c.isPrimary ? <Chip tone="blue">{t.primary}</Chip> : null}</td>
                   <td className={`${TD} text-right`}>
                     <span className="inline-flex gap-1.5">
-                      {!c.archived && <button type="button" className={sm} aria-label={t.editNamed(c.name)} onClick={() => setEditing(c)}>{m.common.edit}</button>}
-                      {!c.archived && !c.isPrimary && <button type="button" className={sm} aria-label={t.makePrimaryNamed(c.name)} disabled={act.isPending} onClick={() => act.mutate({ id: c.id, what: 'primary' })}>{t.makePrimary}</button>}
-                      <button type="button" className={sm} aria-label={(c.archived ? t.unarchiveNamed : t.archiveNamed)(c.name)} disabled={act.isPending} onClick={() => act.mutate({ id: c.id, what: c.archived ? 'unarchive' : 'archive' })}>{c.archived ? t.unarchive : t.archive}</button>
+                      {!c.archived && <button type="button" className={sm} aria-label={t.editNamed(c.name)} onClick={() => { setConflict(false); setEditing(c) }}>{m.common.edit}</button>}
+                      {!c.archived && !c.isPrimary && <button type="button" className={sm} aria-label={t.makePrimaryNamed(c.name)} disabled={act.isPending} onClick={() => { setConflict(false); act.mutate({ id: c.id, version: c.version, what: 'primary' }) }}>{t.makePrimary}</button>}
+                      <button type="button" className={sm} aria-label={(c.archived ? t.unarchiveNamed : t.archiveNamed)(c.name)} disabled={act.isPending} onClick={() => { setConflict(false); act.mutate({ id: c.id, version: c.version, what: c.archived ? 'unarchive' : 'archive' }) }}>{c.archived ? t.unarchive : t.archive}</button>
                     </span>
                   </td>
                 </tr>
@@ -127,8 +130,11 @@ function Contacts({ d }: { d: Detail }) {
           </table>
         </div>
       )}
-      <div className="px-4 pb-3"><MutationError error={act.error} /></div>
-      {editing && <ContactDialog customerId={d.customer.id} contact={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />}
+      <div className="px-4 pb-3 empty:hidden">
+        {conflict && <p role="status" className="rounded-[7px] bg-status-amber px-2.5 py-2 text-[12.5px] text-status-amber-fg">{t.contactConflict}</p>}
+        <MutationError error={act.error} />
+      </div>
+      {editing && <ContactDialog customerId={d.customer.id} contact={editing === 'new' ? null : editing} onClose={() => setEditing(null)} onConflict={() => setConflict(true)} />}
     </section>
   )
 }

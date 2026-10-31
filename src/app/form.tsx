@@ -1,7 +1,7 @@
-import type { FormEvent, ReactNode } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useI18n } from '@/i18n'
-import { ApiError } from '@/lib/api'
+import { ApiError, isConflict } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
 // The mockups' form controls: 34px fields, 32px buttons, 28px small buttons.
@@ -73,19 +73,67 @@ export function MutationError({ error }: { error: Error | null }) {
   )
 }
 
-/** A modal form: Enter submits, Esc cancels. */
+/**
+ * An edit form's session: the field values AND the version they were read at are captured together when editing starts.
+ * A background refetch never changes the version that gets sent. After a 409 conflict_retry the stale values are
+ * replaced with the fresh ones (once the refetch lands), `conflict` stays true so the notice shows, and
+ * `blocked` is true until then so no save can go out with stale values.
+ * ponytail: blocked waits for the version to move; a conflict that leaves it unchanged would need the form closed and reopened.
+ */
+export function useEditSession<T>(current: number, seed: () => T) {
+  const [s, setS] = useState(() => ({ version: current, values: seed() }))
+  const [conflict, setConflict] = useState(false)
+  const latest = useRef(seed)
+  latest.current = seed
+  useEffect(() => {
+    if (conflict && current !== s.version) setS({ version: current, values: latest.current() })
+  }, [conflict, current, s.version])
+  return {
+    values: s.values, setValues: (values: T) => setS((x) => ({ ...x, values })), version: s.version, conflict,
+    blocked: conflict && current === s.version,
+    onError: (e: unknown) => { if (isConflict(e)) setConflict(true) },
+    clear: () => setConflict(false),
+  }
+}
+
+/** The translated notice shown after a conflict: the stale edits were discarded. */
+export function ConflictNotice({ show }: { show: boolean }) {
+  const { m } = useI18n()
+  if (!show) return null
+  return <p role="status" className="rounded-[7px] bg-status-amber px-2.5 py-2 text-[12.5px] text-status-amber-fg">{m.api.conflictReloaded}</p>
+}
+
+const FALLBACK_FOCUS = 'main'
+
+/** A modal form: Enter submits, Esc cancels. Focus goes back to whatever opened it (or the page's main area if that element is gone). */
+
 export function FormDialog({ open, onOpenChange, title, description, submitLabel, pending, error, onSubmit, children, disabled }: {
   open: boolean; onOpenChange: (o: boolean) => void; title: string; description?: string; submitLabel: string; pending: boolean; error: Error | null
   onSubmit: () => void; children: ReactNode; disabled?: boolean
 }) {
   const { m } = useI18n()
+  const opener = useRef<Element | null>(null)
+  if (opener.current === null && typeof document !== 'undefined') opener.current = document.activeElement
   const submit = (e: FormEvent) => {
     e.preventDefault()
     if (!pending) onSubmit()
   }
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent
+        className="sm:max-w-md"
+        onCloseAutoFocus={(e) => {
+          e.preventDefault()
+          const restore = () => {
+            const back = opener.current instanceof HTMLElement && opener.current.isConnected && opener.current !== document.body ? opener.current : document.querySelector<HTMLElement>(FALLBACK_FOCUS)
+            if (back && !back.matches('button, a, input, select, textarea, [tabindex]')) back.tabIndex = -1
+            back?.focus()
+          }
+          restore()
+          // A save re-renders the page just after the dialog closes and can remove the opener (Record -> Revoke): if focus fell to the body, fall back.
+          setTimeout(() => { if (!document.activeElement || document.activeElement === document.body) restore() }, 150)
+        }}
+      >
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription className={description ? undefined : 'sr-only'}>{description ?? title}</DialogDescription>

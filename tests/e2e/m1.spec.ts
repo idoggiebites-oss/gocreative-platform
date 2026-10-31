@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { makeOrder } from './helpers.ts'
 import { reseed } from './prepare.ts'
 
 // M1d: customers, new orders, items, quotes and authorization, end to end on the seeded e2e database.
@@ -129,6 +130,9 @@ test('desktop: the new screens are translated to Spanish', async ({ page }, info
   await expect(page.getByRole('heading', { name: 'Nuevo pedido', level: 1 })).toBeVisible()
   await expect(page.getByText('Fecha de entrega solicitada')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Guardar y crear cotización v1' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Guardar pedido' })).toBeDisabled() // no customer chosen yet
+  await page.getByRole('combobox', { name: 'Cliente' }).fill('Cedar')
+  await page.getByRole('option', { name: /Cedar Hollow ISD/ }).click()
   await page.getByRole('button', { name: 'Guardar pedido' }).click()
   await expect(page.getByText('Escribe un título para el pedido.')).toBeVisible()
 
@@ -179,4 +183,47 @@ test('phone: new order and customer pages fit at 390px', async ({ page }, info) 
   await page.getByRole('link', { name: 'Cedar Hollow ISD' }).click()
   await expect(page.getByRole('heading', { name: 'Contacts' })).toBeVisible()
   await fits(page, '/app/customers/:id')
+})
+
+test('phone: the order workspace tabs, quote actions and authorization dialog are reachable at 390px', async ({ page }, info) => {
+  test.skip(info.project.name !== 'phone')
+  const { number, version } = await makeOrder(page, 'Phone workspace')
+  expect((await page.request.post(`/api/app/orders/${number}/quotes`, { data: { expectedVersion: version } })).ok()).toBe(true)
+  await page.goto(`/app/orders/${number}`)
+  await expect(page.getByRole('heading', { name: 'Phone workspace', level: 1 })).toBeVisible()
+  const width = (await page.evaluate('window.innerWidth')) as number
+  // Visible AND inside the viewport once scrolled to: a control cut off by the screen edge is unreachable.
+  const reachable = async (loc: ReturnType<Page['locator']>, what: string) => {
+    await loc.scrollIntoViewIfNeeded()
+    await expect(loc, what).toBeVisible()
+    const box = (await loc.boundingBox())!
+    expect(box.x, `${what} left edge`).toBeGreaterThanOrEqual(0)
+    expect(box.x + box.width, `${what} right edge`).toBeLessThanOrEqual(width)
+  }
+
+  for (const tab of ['Items & quote', 'Artwork', 'Purchase order', 'Production', 'Activity']) {
+    const t = page.getByRole('tab', { name: tab })
+    await t.scrollIntoViewIfNeeded()
+    await t.click()
+    await expect(t).toHaveAttribute('aria-selected', 'true')
+    await reachable(t, `tab ${tab}`)
+    await reachable(page.getByRole('tabpanel'), `panel ${tab}`)
+    await fits(page, `order tab ${tab}`)
+  }
+
+  await page.getByRole('tab', { name: 'Items & quote' }).click()
+  for (const name of ['Duplicate', 'New version', 'Refresh draft', 'Mark sent', 'Accept', 'Decline']) await reachable(page.getByRole('button', { name, exact: true }), `quote action ${name}`)
+
+  const record = page.locator('[data-panel="authorization"]').getByRole('button', { name: 'Record authorization' })
+  await reachable(record, 'Record authorization')
+  await record.focus()
+  await page.keyboard.press('Enter')
+  const dialog = page.getByRole('dialog')
+  await expect(dialog).toBeVisible()
+  for (const name of ['Cancel', 'Record']) await reachable(dialog.getByRole('button', { name, exact: true }), `dialog ${name}`)
+  await reachable(dialog.getByLabel('How they authorized'), 'dialog method')
+  await fits(page, 'authorization dialog')
+  await page.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
+  await expect(record).toBeFocused()
 })

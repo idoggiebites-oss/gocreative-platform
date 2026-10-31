@@ -236,6 +236,8 @@ export type CustomerContact = {
   isPrimary: boolean
   archived: boolean
   archivedAt: string | null
+  /** Concurrency guard: PATCH / archive / unarchive must send the version they saw. */
+  version: number
 }
 export type CustomerRecord = {
   id: number
@@ -273,5 +275,7 @@ export type CustomerCreateRequest = {
 export type CustomerPatchRequest = Partial<CustomerCreateRequest> & { expectedVersion: number }
 export type CustomerResponse = { customer: CustomerRecord }
 export type ContactRequest = { name: string; email?: string | null; phone?: string | null; title?: string | null; isPrimary?: boolean }
+/** PATCH contact sends `ContactRequest & { expectedVersion }`; archive / unarchive send `{ expectedVersion }`. */
+export type ContactPatchRequest = Partial<Omit<ContactRequest, 'isPrimary'>> & { isPrimary?: boolean; expectedVersion: number }
 export type ContactResponse = { contact: CustomerContact }
 export type NoteResponse = { note: CustomerNote }

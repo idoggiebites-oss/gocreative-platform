@@ -20,6 +20,8 @@ ALTER TABLE customers ADD COLUMN version INTEGER NOT NULL DEFAULT 0;
 
 -- Contacts are never deleted (orders reference them); archiving hides them instead.
 ALTER TABLE customer_contacts ADD COLUMN archived_at TEXT;
+-- Optimistic-concurrency guard for contact edits, archive and unarchive.
+ALTER TABLE customer_contacts ADD COLUMN version INTEGER NOT NULL DEFAULT 0;
 
 -- ---- set aside everything that references orders ----
 CREATE TABLE _m2_orders AS SELECT * FROM orders;

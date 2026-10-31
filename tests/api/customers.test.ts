@@ -5,7 +5,7 @@ import { appRoutes } from '../../worker/routes/app'
 import type { AppEnv } from '../../worker/auth'
 import type { CustomerDetailResponse, CustomersListResponse, CustomerResponse, ContactResponse, NoteResponse } from '../../shared/api'
 import { createTestD1 } from './d1'
-import { getContact, updateContact, updateCustomer } from '../../worker/db/customers'
+import { getContact, setContactArchived, updateContact, updateCustomer } from '../../worker/db/customers'
 
 const seed = readFileSync(new URL('../../scripts/seed.sql', import.meta.url), 'utf8')
 
@@ -24,7 +24,8 @@ function setup() {
   const activityCount = () => one<{ n: number }>('SELECT COUNT(*) AS n FROM activity_log').n
   const boom = () => sqlite.exec(`CREATE TEMP TRIGGER boom BEFORE INSERT ON activity_log BEGIN SELECT RAISE(ABORT, 'boom'); END`)
   const detail = async (id: number) => json<CustomerDetailResponse>(await call('GET', `/customers/${id}`))
-  return { db, sqlite, call, json, one, activityCount, boom, detail }
+  const cv = (id: number) => one<{ version: number }>('SELECT version FROM customer_contacts WHERE id = ?', id).version
+  return { db, sqlite, call, json, one, activityCount, boom, detail, cv }
 }
 
 describe('customers auth', () => {
@@ -61,7 +62,7 @@ describe('customers list', () => {
   })
   test('archived contacts stay searchable; archived contact is hidden from nothing in history', async () => {
     const t = setup()
-    await t.call('POST', '/customers/1/contacts/1/archive')
+    await t.call('POST', '/customers/1/contacts/1/archive', { expectedVersion: t.cv(1) })
     const d = await t.detail(1)
     expect(d.contacts.at(-1)).toMatchObject({ id: 1, archived: true, isPrimary: false })
     expect(d.contacts[0]?.archived).toBe(false)
@@ -134,7 +135,7 @@ describe('contacts', () => {
   test('at most one primary per customer', async () => {
     const t = setup()
     expect(primaries(t, 1)).toBe(1)
-    const r = await t.call('PATCH', '/customers/1/contacts/2', { isPrimary: true })
+    const r = await t.call('PATCH', '/customers/1/contacts/2', { isPrimary: true, expectedVersion: t.cv(2) })
     expect(r.status).toBe(200)
     expect(primaries(t, 1)).toBe(1)
     expect(t.one<{ id: number }>('SELECT id FROM customer_contacts WHERE customer_id = 1 AND is_primary = 1').id).toBe(2)
@@ -145,35 +146,35 @@ describe('contacts', () => {
   })
   test('archive keeps history, unarchive restores, double archive is 409, archived cannot be primary', async () => {
     const t = setup()
-    const a = await t.call('POST', '/customers/1/contacts/1/archive')
+    const a = await t.call('POST', '/customers/1/contacts/1/archive', { expectedVersion: t.cv(1) })
     expect(a.status).toBe(200)
     expect((await t.json<ContactResponse>(a)).contact).toMatchObject({ archived: true, isPrimary: false })
     expect(t.one<{ n: number }>('SELECT COUNT(*) AS n FROM customer_contacts WHERE id = 1').n).toBe(1)
-    expect((await t.call('POST', '/customers/1/contacts/1/archive')).status).toBe(409)
-    expect((await t.call('PATCH', '/customers/1/contacts/1', { isPrimary: true })).status).toBe(409)
-    const u = await t.call('POST', '/customers/1/contacts/1/unarchive')
+    expect((await t.call('POST', '/customers/1/contacts/1/archive', { expectedVersion: t.cv(1) })).status).toBe(409)
+    expect((await t.call('PATCH', '/customers/1/contacts/1', { isPrimary: true, expectedVersion: t.cv(1) })).status).toBe(409)
+    const u = await t.call('POST', '/customers/1/contacts/1/unarchive', { expectedVersion: t.cv(1) })
     expect((await t.json<ContactResponse>(u)).contact.archived).toBe(false)
-    expect((await t.call('POST', '/customers/1/contacts/1/unarchive')).status).toBe(409)
+    expect((await t.call('POST', '/customers/1/contacts/1/unarchive', { expectedVersion: t.cv(1) })).status).toBe(409)
   })
   test('a contact of another customer is 404 on every contact route', async () => {
     const t = setup()
     const before = t.activityCount()
-    expect((await t.call('PATCH', '/customers/1/contacts/3', { name: 'Hijack' })).status).toBe(404)
-    expect((await t.call('POST', '/customers/1/contacts/3/archive')).status).toBe(404)
-    expect((await t.call('POST', '/customers/1/contacts/3/unarchive')).status).toBe(404)
+    expect((await t.call('PATCH', '/customers/1/contacts/3', { name: 'Hijack', expectedVersion: 0 })).status).toBe(404)
+    expect((await t.call('POST', '/customers/1/contacts/3/archive', { expectedVersion: 0 })).status).toBe(404)
+    expect((await t.call('POST', '/customers/1/contacts/3/unarchive', { expectedVersion: 0 })).status).toBe(404)
     expect(t.one<{ name: string }>('SELECT name FROM customer_contacts WHERE id = 3').name).toBe('Rosa Delgado')
     expect(t.activityCount()).toBe(before)
   })
 })
 
 describe('writes are logged atomically', () => {
-  const writes: [string, string, (u: number) => unknown][] = [
+  const writes: [string, string, (u: number, t: ReturnType<typeof setup>) => unknown][] = [
     ['POST', '/customers', () => ({ name: 'N', kind: 'individual' })],
     ['PATCH', '/customers/1', (u) => ({ name: 'Renamed', expectedVersion: u })],
     ['POST', '/customers/1/contacts', () => ({ name: 'C', isPrimary: true })],
-    ['PATCH', '/customers/1/contacts/2', () => ({ title: 'Boss', isPrimary: true })],
-    ['POST', '/customers/1/contacts/2/archive', () => undefined],
-    ['POST', '/customers/1/contacts/2/unarchive', () => undefined],
+    ['PATCH', '/customers/1/contacts/2', (_u, t) => ({ title: 'Boss', isPrimary: true, expectedVersion: t.cv(2) })],
+    ['POST', '/customers/1/contacts/2/archive', (_u, t) => ({ expectedVersion: t.cv(2) })],
+    ['POST', '/customers/1/contacts/2/unarchive', (_u, t) => ({ expectedVersion: t.cv(2) })],
     ['POST', '/customers/1/notes', () => ({ body: 'hello' })],
   ]
   test('each write leaves exactly one activity row, in the same transaction as the change', async () => {
@@ -181,7 +182,7 @@ describe('writes are logged atomically', () => {
     for (const [method, path, body] of writes) {
       const u = (await t.detail(1)).customer.version
       const before = t.activityCount()
-      const res = await t.call(method, path, body(u) ?? {})
+      const res = await t.call(method, path, body(u, t) ?? {})
       expect(res.status, `${method} ${path}`).toBeLessThan(300)
       expect(t.activityCount() - before, `${method} ${path}`).toBe(1)
       const row = t.one<{ actor_id: number; actor_kind: string; entity_type: string }>('SELECT actor_id, actor_kind, entity_type FROM activity_log ORDER BY id DESC LIMIT 1')
@@ -198,8 +199,8 @@ describe('writes are logged atomically', () => {
     t.sqlite.exec(`UPDATE customer_contacts SET archived_at = '2026-01-01T00:00:00.000Z', is_primary = 0 WHERE id = 1`) // so unarchive has something to do
     const s = snap()
     const u = (await t.detail(1)).customer.version
-    for (const [method, path, body] of [...writes.filter((w) => !w[1].endsWith('/unarchive') && !w[1].endsWith('/2/archive')), ['POST', '/customers/1/contacts/1/unarchive', () => undefined] as (typeof writes)[number], ['POST', '/customers/1/contacts/2/archive', () => undefined] as (typeof writes)[number]]) {
-      const res = await t.call(method, path, body(u) ?? {})
+    for (const [method, path, body] of [...writes.filter((w) => !w[1].endsWith('/unarchive') && !w[1].endsWith('/2/archive')), ['POST', '/customers/1/contacts/1/unarchive', (_u, t) => ({ expectedVersion: t.cv(1) })] as (typeof writes)[number], ['POST', '/customers/1/contacts/2/archive', (_u, t) => ({ expectedVersion: t.cv(2) })] as (typeof writes)[number]]) {
+      const res = await t.call(method, path, body(u, t) ?? {})
       expect(res.status, `${method} ${path}`).toBe(500)
     }
     expect(snap()).toBe(s)
@@ -220,7 +221,7 @@ describe('review fixes (Codex, 7d3b560)', () => {
     const stale = (await getContact(t.db, 1, 2))! // read while active
     t.sqlite.exec(`UPDATE customer_contacts SET archived_at = '2026-01-01T00:00:00.000Z' WHERE id = 2`) // archived between read and batch
     const before = t.activityCount()
-    expect(await updateContact(t.db, 1, 1, stale, { isPrimary: true })).toBe(false)
+    expect(await updateContact(t.db, 1, 1, stale, { isPrimary: true }, stale.version)).toBe(false)
     expect(t.one<{ is_primary: number }>('SELECT is_primary FROM customer_contacts WHERE id = 2').is_primary).toBe(0)
     expect(t.one<{ id: number }>('SELECT id FROM customer_contacts WHERE customer_id = 1 AND is_primary = 1').id).toBe(1)
     expect(t.activityCount()).toBe(before)
@@ -233,6 +234,35 @@ describe('review fixes (Codex, 7d3b560)', () => {
     expect(await updateCustomer(t.db, 1, stale, { name: 'Second' }, stale.version)).toBe(false) // same stale version
     expect(t.one<{ name: string; version: number }>('SELECT name, version FROM customers WHERE id = 1')).toEqual({ name: 'First', version: stale.version + 1 })
     expect(t.activityCount()).toBe(before)
+  })
+  test('stale contact version: edit, promote, archive and unarchive change nothing and log nothing', async () => {
+    const t = setup()
+    const stale = (await getContact(t.db, 1, 2))!
+    expect(stale.version).toBe(0)
+    expect(await updateContact(t.db, 1, 1, stale, { title: 'First' }, stale.version)).toBe(true) // the intervening edit
+    expect(t.cv(2)).toBe(1)
+    const before = t.activityCount()
+    expect(await updateContact(t.db, 1, 1, stale, { title: 'Second' }, stale.version)).toBe(false)
+    expect(await updateContact(t.db, 1, 1, stale, { isPrimary: true }, stale.version)).toBe(false)
+    expect(await setContactArchived(t.db, 1, 1, 2, true, stale.version)).toBe(false)
+    expect(t.one<{ title: string; is_primary: number; archived_at: string | null }>('SELECT title, is_primary, archived_at FROM customer_contacts WHERE id = 2')).toEqual({ title: 'First', is_primary: 0, archived_at: null })
+    expect(t.one<{ id: number }>('SELECT id FROM customer_contacts WHERE customer_id = 1 AND is_primary = 1').id).toBe(1) // stale promote did not demote
+    expect(t.cv(2)).toBe(1)
+    expect(t.activityCount()).toBe(before)
+  })
+  test('contact routes: stale or missing expectedVersion is 409 conflict_retry / 400', async () => {
+    const t = setup()
+    expect((await t.call('PATCH', '/customers/1/contacts/2', { title: 'x' })).status).toBe(400)
+    expect((await t.call('POST', '/customers/1/contacts/2/archive', {})).status).toBe(400)
+    await t.call('PATCH', '/customers/1/contacts/2', { title: 'First', expectedVersion: 0 })
+    const before = t.activityCount()
+    for (const [m, p, b] of [['PATCH', '/customers/1/contacts/2', { title: 'Second' }], ['POST', '/customers/1/contacts/2/archive', {}], ['POST', '/customers/1/contacts/2/unarchive', {}]] as const) {
+      const r = await t.call(m, p, { ...b, expectedVersion: 0 })
+      expect(r.status, p).toBe(409)
+      expect((await t.json<{ code: string }>(r)).code).toBe('conflict_retry')
+    }
+    expect(t.activityCount()).toBe(before)
+    expect((await t.detail(1)).contacts.find((c) => c.id === 2)).toMatchObject({ title: 'First', version: 1 })
   })
   test("detail activity is exactly this customer's rows", async () => {
     const t = setup()

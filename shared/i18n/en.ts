@@ -76,6 +76,7 @@ export const en = {
     failed: { title: 'Could not load this page', body: 'Something went wrong on the server. Try again in a moment.' },
     changeRefused: 'That change was not applied.',
     changeFailed: 'The change could not be saved. Try again.',
+    conflictReloaded: 'Someone else changed this while you were editing. Your unsaved edits were discarded and the latest saved values are shown; check them and try again.',
     // Shown for the API's `code`; the server's English `error` text is never displayed.
     errors: {
       transition_not_allowed: 'That production move is not allowed from the current status.',
@@ -246,7 +247,8 @@ export const en = {
       subtotal: 'Subtotal', charges: 'Charges', discounts: 'Discounts', total: 'Total',
       stale: 'The order items changed after this quote was accepted.', uploadNote: 'Creating and editing quotes arrives in M1.',
       versions: 'Quote versions', duplicate: 'Duplicate', newVersion: 'New version', refresh: 'Refresh draft', markSent: 'Mark sent', accept: 'Accept', decline: 'Decline',
-      locked: 'Locked', sent: (date: string) => `sent ${date}`, decided: (status: string, date: string) => `${status.toLowerCase()} ${date}`,
+      locked: 'Locked', sent: (date: string) => `sent ${date}`, decided: { accepted: (date: string) => `accepted ${date}`, declined: (date: string) => `declined ${date}` },
+      acceptBlocked: { no_product_line: 'Add a product line before accepting.', invalid: 'Fix the quote lines before accepting.' },
       staleDraft: 'The items changed after this quote was made. Refresh the draft or create a new version before accepting.',
       reapprovalNote: 'Editing customer-facing items after acceptance requires a new version. Internal notes and production details can still be edited.',
     },
@@ -290,7 +292,12 @@ export const en = {
       done: { quote: 'The quote is accepted.', authorization: 'Authorized.', artwork: 'Artwork is approved.', materials: 'Materials are in.', preparation: 'Preparation is ready.' },
       quoteDone: (v: number, date: string) => `v${v} accepted ${date}`,
       poDone: 'The purchase order is approved.',
-      authDone: (method: string, date: string) => `Authorized${method ? ` by ${method.toLowerCase()}` : ''}${date ? ` on ${date}` : ''}`,
+      // One whole sentence per method: never splice a label into a sentence (that breaks in other languages).
+      authDone: {
+        phone: (date: string) => `Authorized by phone on ${date}`, email: (date: string) => `Authorized by email on ${date}`,
+        in_person: (date: string) => `Authorized in person on ${date}`, signed_form: (date: string) => `Authorized with a signed form on ${date}`,
+        other: (date: string) => `Authorized (other means) on ${date}`, unknown: (date: string) => `Authorized on ${date}`,
+      } satisfies Record<AuthorizationMethod | 'unknown', (date: string) => string>,
       createQuote: 'Create quote', acceptQuote: 'Accept quote', newVersion: 'New quote version', recordAuthorization: 'Record authorization',
       artworkNotRequired: 'Mark artwork not required', artworkRequired: 'Require artwork', uploadArtwork: 'Upload artwork',
       noPurchasing: 'Confirm no purchasing needed', recordPurchase: 'Record purchase', startPrep: 'Start preparation',
@@ -312,6 +319,7 @@ export const en = {
     noContacts: 'No contacts yet.',
     orderHistory: 'Order history', noOrders: 'No orders yet.', orderTitle: 'Title', total: 'Total', date: 'Date',
     defaults: 'Defaults', balance: 'Outstanding balance', balanceLater: 'Balances arrive with payments in M5.', addNote: 'Add a note',
+    contactConflict: 'Someone else changed this contact. The page was reloaded; check the details and try again.',
     conflict: 'Someone else changed this customer. The page was reloaded; check the details and try again.',
     notFound: 'Customer not found', back: 'Back to customers',
   },

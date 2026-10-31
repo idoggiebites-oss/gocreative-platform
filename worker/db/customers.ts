@@ -17,11 +17,11 @@ const toCustomer = (r: CustomerRow): CustomerRecord => ({
   internalNotes: r.internal_notes, createdAt: r.created_at, updatedAt: r.updated_at, version: r.version,
 })
 
-type ContactRow = { id: number; name: string; email: string | null; phone: string | null; title: string | null; is_primary: 0 | 1; archived_at: string | null }
-const CONTACT_COLS = 'id, name, email, phone, title, is_primary, archived_at'
+type ContactRow = { id: number; name: string; email: string | null; phone: string | null; title: string | null; is_primary: 0 | 1; archived_at: string | null; version: number }
+const CONTACT_COLS = 'id, name, email, phone, title, is_primary, archived_at, version'
 const toContact = (r: ContactRow): CustomerContact => ({
   id: r.id, name: r.name, email: r.email, phone: r.phone, title: r.title,
-  isPrimary: r.is_primary === 1, archived: r.archived_at !== null, archivedAt: r.archived_at,
+  isPrimary: r.is_primary === 1, archived: r.archived_at !== null, archivedAt: r.archived_at, version: r.version,
 })
 
 export async function listCustomers(db: D1Database, p: { q?: string; kind?: CustomerKind; limit: number }): Promise<CustomerListRow[]> {
@@ -152,10 +152,10 @@ export async function addContact(db: D1Database, actorId: number, customerId: nu
   return out[isPrimary ? 1 : 0]!.meta.last_row_id
 }
 
-/** Field edits; isPrimary true demotes every other contact in the same batch, false only clears this one. */
-export async function updateContact(db: D1Database, actorId: number, customerId: number, current: CustomerContact, changes: Partial<ContactInput & { isPrimary: boolean }>) {
+/** Field edits, guarded by the contact version the caller saw (false = stale, nothing changed or logged); isPrimary true demotes every other contact in the same batch, false only clears this one. */
+export async function updateContact(db: D1Database, actorId: number, customerId: number, current: CustomerContact, changes: Partial<ContactInput & { isPrimary: boolean }>, expectedVersion: number) {
   const fields = (['name', 'email', 'phone', 'title'] as const).filter((k) => k in changes)
-  const sets: string[] = fields.map((k) => `${k} = ?`)
+  const sets: string[] = [...fields.map((k) => `${k} = ?`), 'version = version + 1']
   const vals: (string | number | null)[] = fields.map((k) => changes[k] ?? null)
   if (changes.isPrimary !== undefined) { sets.push('is_primary = ?'); vals.push(changes.isPrimary ? 1 : 0) }
   const before: Record<string, unknown> = { contact_id: current.id }
@@ -164,21 +164,21 @@ export async function updateContact(db: D1Database, actorId: number, customerId:
   const stmts = []
   // Promoting requires the target to still be active: the demote and the target UPDATE both check it, so a lost race changes nothing.
   if (changes.isPrimary) {
-    stmts.push(db.prepare('UPDATE customer_contacts SET is_primary = 0 WHERE customer_id = ? AND id <> ? AND EXISTS (SELECT 1 FROM customer_contacts WHERE id = ? AND archived_at IS NULL)').bind(customerId, current.id, current.id))
+    stmts.push(db.prepare('UPDATE customer_contacts SET is_primary = 0 WHERE customer_id = ? AND id <> ? AND EXISTS (SELECT 1 FROM customer_contacts WHERE id = ? AND archived_at IS NULL AND version = ?)').bind(customerId, current.id, current.id, expectedVersion))
   }
   stmts.push(
-    db.prepare(`UPDATE customer_contacts SET ${sets.join(', ')} WHERE id = ? AND customer_id = ?${changes.isPrimary ? ' AND archived_at IS NULL' : ''}`).bind(...vals, current.id, customerId),
+    db.prepare(`UPDATE customer_contacts SET ${sets.join(', ')} WHERE id = ? AND customer_id = ? AND version = ?${changes.isPrimary ? ' AND archived_at IS NULL' : ''}`).bind(...vals, current.id, customerId, expectedVersion),
     db.prepare(LOG_IF_CHANGED).bind(actorId, customerId, 'contact_updated', JSON.stringify(before), JSON.stringify(after)),
   )
   const out = await db.batch(stmts)
   return changed(out[changes.isPrimary ? 1 : 0])
 }
 
-/** Archiving also drops the primary flag, so an archived contact never holds it. Returns false if the contact was already in that state. */
-export async function setContactArchived(db: D1Database, actorId: number, customerId: number, contactId: number, archive: boolean) {
+/** Archiving also drops the primary flag, so an archived contact never holds it. Returns false if the contact changed since expectedVersion (or is already in that state). */
+export async function setContactArchived(db: D1Database, actorId: number, customerId: number, contactId: number, archive: boolean, expectedVersion: number) {
   const [update] = await db.batch([
-    db.prepare(`UPDATE customer_contacts SET archived_at = ${archive ? NOW : 'NULL'}${archive ? ', is_primary = 0' : ''}
-      WHERE id = ? AND customer_id = ? AND archived_at IS ${archive ? '' : 'NOT '}NULL`).bind(contactId, customerId),
+    db.prepare(`UPDATE customer_contacts SET archived_at = ${archive ? NOW : 'NULL'}${archive ? ', is_primary = 0' : ''}, version = version + 1
+      WHERE id = ? AND customer_id = ? AND version = ? AND archived_at IS ${archive ? '' : 'NOT '}NULL`).bind(contactId, customerId, expectedVersion),
     db.prepare(LOG_IF_CHANGED).bind(actorId, customerId, archive ? 'contact_archived' : 'contact_unarchived', null, JSON.stringify({ contact_id: contactId })),
   ])
   return changed(update)

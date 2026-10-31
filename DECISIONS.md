@@ -195,3 +195,16 @@ M1, M3/M4 and M5 in PHASE2_PLAN.md ("Carried forward from the M0 review").
 - **Repeat order does not take the source's version** (declining that finding).
   The source isn't modified beyond an activity row. The new order has no quote,
   so its starting status is always `awaiting_quote`, whatever flags it copied.
+
+### 2026-10-31 — Forms keep the version they started from; contacts get a version (Codex review of the M1 screens; Claude)
+- **An edit form captures its field values and the version together when editing starts**
+  (`useEditSession`) and sends that version. A background refetch can't change it. After a
+  409 `conflict_retry` the stale values are replaced by the fresh ones, the translated notice shows,
+  and Save stays disabled until they have been reloaded. Dialogs capture the version at open.
+- **`customer_contacts.version`** (added inside 0002, which isn't applied remotely yet). PATCH, archive
+  and unarchive require `expectedVersion`; the guard is in the UPDATE, including the primary-promotion
+  demote. A stale version is 409 `conflict_retry` with nothing logged. Demoting the old primary does not
+  bump that contact's version (its fields didn't change).
+- **New order:** editing the customer text un-chooses the customer; Save is disabled until one is picked.
+- **Quote rules in one place:** `quoteActionsOpen` and `acceptBlockCode` live in `worker/domain/quotes.ts`.
+- **Copy:** authorization and quote-decision sentences are whole strings per method/status, typed so a missing key fails tsc.

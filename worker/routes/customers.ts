@@ -23,7 +23,8 @@ const createBody = z.object({
 const patchBody = createBody.partial().extend({ expectedVersion: z.number().int().min(0) })
   .refine((b) => Object.keys(b).some((k) => k !== 'expectedVersion'), 'nothing to change')
 const contactBody = z.object({ name, email: email.optional(), phone: phone.optional(), title: nullable(text(100)).optional(), isPrimary: z.boolean().optional() })
-const contactPatch = contactBody.partial().refine((b) => Object.keys(b).length > 0, 'nothing to change')
+const expected = z.object({ expectedVersion: z.number().int().min(0) })
+const contactPatch = contactBody.partial().extend(expected.shape).refine((b) => Object.keys(b).some((k) => k !== 'expectedVersion'), 'nothing to change')
 const listQuery = z.object({
   q: z.string().trim().max(100).optional(),
   kind: z.enum(CUSTOMER_KINDS).optional(),
@@ -91,8 +92,10 @@ export function customerRoutes() {
       if (!b.success) return bad(c, b.error)
       const contact = await db.getContact(c.env.DB, i.data, k.data)
       if (!contact) return notFound(c, 'Contact')
+      const { expectedVersion, ...changes } = b.data
+      if (contact.version !== expectedVersion) return retry(c)
       if (b.data.isPrimary && contact.archived) return c.json({ error: 'Archived contacts cannot be primary', code: 'contact_archived' satisfies ApiErrorCode }, 409)
-      if (!(await db.updateContact(c.env.DB, c.get('user').id, i.data, contact, b.data))) {
+      if (!(await db.updateContact(c.env.DB, c.get('user').id, i.data, contact, changes, expectedVersion))) {
         // Lost race: if the contact got archived meanwhile and we were promoting it, say so; otherwise it is a plain retry.
         if (b.data.isPrimary && (await db.getContact(c.env.DB, i.data, k.data))?.archived) return c.json({ error: 'Archived contacts cannot be primary', code: 'contact_archived' satisfies ApiErrorCode }, 409)
         return retry(c)
@@ -103,12 +106,15 @@ export function customerRoutes() {
       const i = id.safeParse(c.req.param('id'))
       const k = id.safeParse(c.req.param('contactId'))
       if (!i.success) return bad(c, i.error)
+      const b = expected.safeParse(await body(c))
       if (!k.success) return bad(c, k.error)
-      if (!(await db.getContact(c.env.DB, i.data, k.data))) return notFound(c, 'Contact')
+      if (!b.success) return bad(c, b.error)
+      const contact = await db.getContact(c.env.DB, i.data, k.data)
+      if (!contact) return notFound(c, 'Contact')
       const archive = c.req.param('action') === 'archive'
-      if (!(await db.setContactArchived(c.env.DB, c.get('user').id, i.data, k.data, archive))) {
-        return c.json({ error: `Contact is already ${archive ? 'archived' : 'active'}`, code: 'transition_not_allowed' satisfies ApiErrorCode }, 409)
-      }
+      if (contact.version !== b.data.expectedVersion) return retry(c)
+      if (contact.archived === archive) return c.json({ error: `Contact is already ${archive ? 'archived' : 'active'}`, code: 'transition_not_allowed' satisfies ApiErrorCode }, 409)
+      if (!(await db.setContactArchived(c.env.DB, c.get('user').id, i.data, k.data, archive, b.data.expectedVersion))) return retry(c)
       return c.json<ContactResponse>({ contact: (await db.getContact(c.env.DB, i.data, k.data))! })
     })
     .post('/customers/:id/notes', async (c) => {

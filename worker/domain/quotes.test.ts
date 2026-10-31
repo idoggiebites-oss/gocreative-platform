@@ -1,5 +1,5 @@
 import { QUOTE_STATUSES } from '../../shared/enums.ts'
-import { checkQuoteAcceptable, checkQuoteTransition, currentQuote, itemsChangeRequiresReapproval, lineTotalCents, planNewVersion, quoteSatisfied, quoteTotals, restoreLines, sizesTotal, snapshot, validateItem, CUSTOMER_FACING_ITEM_FIELDS } from './quotes.ts'
+import { acceptBlockCode, quoteActionsOpen, checkQuoteAcceptable, checkQuoteTransition, currentQuote, itemsChangeRequiresReapproval, lineTotalCents, planNewVersion, quoteSatisfied, quoteTotals, restoreLines, sizesTotal, snapshot, validateItem, CUSTOMER_FACING_ITEM_FIELDS } from './quotes.ts'
 import type { Item } from './quotes.ts'
 const item: Item = { id: 1, kind: 'product', quantity: 2, unitPriceCents: 150, sizes: { M: 2 } }
 it('totals product, charge and discount cents', () => {
@@ -77,4 +77,17 @@ it('accepts a quote only with a valid product line, even at zero dollars', () =>
   expect(checkQuoteAcceptable([{ ...item, sizes: { M: 1 } }])).toEqual({ ok: false, error: 'sizes_quantity_mismatch' })
   expect(checkQuoteAcceptable([item, { kind: 'charge', quantity: 0, unitPriceCents: 50 }])).toEqual({ ok: false, error: 'invalid_quantity' })
   expect(checkQuoteAcceptable([item, { kind: 'discount', quantity: 1, unitPriceCents: 301 }])).toEqual({ ok: false, error: 'discount_exceeds_total' })
+})
+
+it('acceptBlockCode names why a quote cannot be accepted, null when it can', () => {
+  expect(acceptBlockCode([])).toBe('no_product_line')
+  expect(acceptBlockCode([{ kind: 'charge', quantity: 1, unitPriceCents: 50 }])).toBe('no_product_line')
+  expect(acceptBlockCode([{ kind: 'product', quantity: 0, unitPriceCents: 50 }])).toBe('invalid')
+  expect(acceptBlockCode([item])).toBeNull()
+})
+it('quote actions are closed once production has started or the order is not active', () => {
+  expect(quoteActionsOpen({ state: 'active', productionStatus: 'awaiting_quote' })).toBe(true)
+  expect(quoteActionsOpen({ state: 'active', productionStatus: 'ready' })).toBe(true)
+  for (const productionStatus of ['in_production', 'quality_control', 'production_complete']) expect(quoteActionsOpen({ state: 'active', productionStatus }), productionStatus).toBe(false)
+  expect(quoteActionsOpen({ state: 'cancelled', productionStatus: 'awaiting_quote' })).toBe(false)
 })

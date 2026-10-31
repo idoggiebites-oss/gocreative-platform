@@ -68,6 +68,17 @@ export function checkQuoteAcceptable(lines: readonly Item[]): { ok: true } | Fai
   return totals.ok ? { ok: true } : totals
 }
 
+/** Why a quote cannot be accepted yet, as a code the UI translates: no_product_line, or invalid for any other line problem. */
+export function acceptBlockCode(lines: readonly Item[]): 'no_product_line' | 'invalid' | null {
+  const r = checkQuoteAcceptable(lines)
+  return r.ok ? null : r.error === 'no_product_line' ? 'no_product_line' : 'invalid'
+}
+
+/** Quote actions (create, duplicate, new version, refresh and the checklist's quote buttons) exist only while the order is active and production has not started. */
+export function quoteActionsOpen(order: { state: string; productionStatus: string }): boolean {
+  return order.state === 'active' && !['in_production', 'quality_control', 'production_complete'].includes(order.productionStatus)
+}
+
 export const CUSTOMER_FACING_ITEM_FIELDS = ['kind', 'description', 'product', 'garmentColor', 'method', 'sizes', 'quantity', 'unitPriceCents'] as const
 function normalizedSizes(sizes: Item['sizes']): string {
   return JSON.stringify(Object.entries(sizes ?? {}).filter(([, n]) => n !== 0).sort(([a], [b]) => a.localeCompare(b)))

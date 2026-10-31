@@ -13,7 +13,7 @@ import { CARD, Chip, PAGE } from './ui'
 type Chosen = Pick<CustomerListRow, 'id' | 'name' | 'kind' | 'defaultPoRequired' | 'defaultPaymentTerms'>
 
 /** Search-as-you-type customer picker (an ARIA combobox over /customers). */
-function CustomerCombobox({ value, onPick }: { value: Chosen | null; onPick: (c: Chosen) => void }) {
+function CustomerCombobox({ value, onPick, onClear }: { value: Chosen | null; onPick: (c: Chosen) => void; onClear: () => void }) {
   const { m } = useI18n()
   const id = useId()
   const [text, setText] = useState(value?.name ?? '')
@@ -34,13 +34,14 @@ function CustomerCombobox({ value, onPick }: { value: Chosen | null; onPick: (c:
     return () => document.removeEventListener('mousedown', close)
   }, [])
   const choose = (c: CustomerListRow) => { onPick(c); setText(c.name); setOpen(false) }
+  const type = (v: string) => { setText(v); setOpen(true); setActive(0); if (value && v !== value.name) onClear() }
   return (
     <div ref={box} className="relative">
       <input
         className={cn(INPUT, 'w-full')} role="combobox" aria-expanded={open} aria-controls={`${id}-list`} aria-autocomplete="list" aria-label={m.newOrder.customer}
         aria-activedescendant={open && rows[active] ? `${id}-${rows[active].id}` : undefined} autoComplete="off" placeholder={m.newOrder.customerPlaceholder}
         value={text}
-        onChange={(e) => { setText(e.target.value); setOpen(true); setActive(0) }}
+        onChange={(e) => type(e.target.value)}
         onFocus={() => setOpen(true)}
         onKeyDown={(e) => {
           if (e.key === 'ArrowDown') { e.preventDefault(); setOpen(true); setActive((a) => Math.min(a + 1, rows.length - 1)) }
@@ -88,13 +89,15 @@ export default function NewOrder() {
   const [quoteError, setQuoteError] = useState<Error | null>(null)
 
   const detail = useCustomer(customer?.id ?? preset)
-  const contacts = (detail.data?.contacts ?? []).filter((c) => !c.archived)
+  const contacts = customer ? (detail.data?.contacts ?? []).filter((c) => !c.archived) : []
   const pick = (c: Chosen, primary?: number) => {
     setCustomer(c)
     setPo(c.defaultPoRequired)
     setTerms(c.defaultPaymentTerms)
     setContactId(primary ? String(primary) : '')
   }
+  // Typing something other than the chosen customer's name un-chooses them: no stale defaults or contacts ride along.
+  const clear = () => { presetDone.current = true; contactTouched.current = false; setCustomer(null); setContactId(''); setPo(false); setTerms('due_at_pickup') }
   // ?customer=ID from a customer's page: fill the same fields once its detail arrives.
   const presetDone = useRef(false)
   useEffect(() => {
@@ -151,7 +154,7 @@ export default function NewOrder() {
         <section className={`${CARD} flex flex-col gap-3.5 px-4 py-3.5`} aria-labelledby="s1">
           <h2 id="s1" className="text-sm font-semibold">{t.customerSection}</h2>
           <div className="flex flex-wrap items-end gap-3">
-            <div className="flex min-w-0 flex-[2_1_320px] flex-col gap-1"><span className={LBL}>{t.customer}</span><CustomerCombobox value={customer} onPick={(c) => { contactTouched.current = false; pick(c) }} /></div>
+            <div className="flex min-w-0 flex-[2_1_320px] flex-col gap-1"><span className={LBL}>{t.customer}</span><CustomerCombobox value={customer} onPick={(c) => { contactTouched.current = false; pick(c) }} onClear={clear} /></div>
             <button type="button" className={cn(LINK, 'inline-flex h-[34px] cursor-pointer items-center border-0 bg-transparent p-0 text-[13px]')} onClick={() => setAdding(true)}>{t.newCustomer}</button>
             <Field label={t.contact} className="flex-[1_1_240px]">
               <select className={INPUT} value={contactId} disabled={!customer} onChange={(e) => { contactTouched.current = true; setContactId(e.target.value) }}>
@@ -200,8 +203,8 @@ export default function NewOrder() {
           <MutationError error={quoteError ?? create.error} />
           {created && <Link to={`/app/orders/${created}`} className={LINK}>{t.openCreated(created)}</Link>}
           <Link to="/app/orders" className={BTN}>{m.common.cancel}</Link>
-          <button type="submit" className={BTN} disabled={create.isPending || !!created}>{create.isPending ? m.common.saving : t.save}</button>
-          <button type="button" className={cn(BTN, BTN_PRIMARY)} disabled={create.isPending || !!created} onClick={() => submit(true)}>{t.saveAndQuote}</button>
+          <button type="submit" className={BTN} disabled={create.isPending || !!created || !customer}>{create.isPending ? m.common.saving : t.save}</button>
+          <button type="button" className={cn(BTN, BTN_PRIMARY)} disabled={create.isPending || !!created || !customer} onClick={() => submit(true)}>{t.saveAndQuote}</button>
         </div>
       </form>
       {adding && <NewCustomerDialog open onOpenChange={setAdding} onCreated={(c) => { contactTouched.current = false; pick(c) }} />}

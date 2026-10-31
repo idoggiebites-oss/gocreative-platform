@@ -4,29 +4,39 @@ import { Lock, Info } from 'lucide-react'
 import type { OrderDetailResponse, OrderItem, OrderWriteResponse } from '@shared/api'
 import { AUTHORIZATION_METHODS, ORDER_SOURCES, PAYMENT_TERMS, type AuthorizationMethod, type OrderSource, type PaymentTerms, type QuoteStatus } from '@shared/enums'
 import { useI18n } from '@/i18n'
-import { send, useCustomer, useSend, useUsers } from '@/lib/api'
+import { isConflict, send, useCustomer, useSend, useUsers } from '@/lib/api'
 import { cn } from '@/lib/utils'
-import { BTN, BTN_PRIMARY, BTN_SM, Check, Field, FormDialog, H2, INPUT, MutationError, SEC, TEXTAREA } from './form'
-import { ItemsEditor, rowsFromItems, rowsInvalid, toInputs, type Row } from './ItemsEditor'
+import { acceptBlockCode, quoteActionsOpen } from '../../worker/domain/quotes'
+import { BTN, BTN_PRIMARY, BTN_SM, Check, ConflictNotice, Field, FormDialog, H2, INPUT, MutationError, SEC, TEXTAREA, useEditSession } from './form'
+import { ItemsEditor, rowsFromItems, rowsInvalid, toInputs } from './ItemsEditor'
 import { CARD, Chip, MUTED, QUOTE_TONE, TD, TH, type Tone } from './ui'
 
 type Detail = OrderDetailResponse
 const STARTED = ['in_production', 'quality_control', 'production_complete']
+/** Why a quote's lines cannot be accepted yet (translated), or null. Same pure rule the server enforces. */
+export const acceptBlockReason = (items: readonly OrderItem[], t: { no_product_line: string; invalid: string }) => {
+  const code = acceptBlockCode(items)
+  return code && t[code]
+}
+
 const sm = cn(BTN, BTN_SM)
 const smPrimary = cn(BTN, BTN_SM, BTN_PRIMARY)
 
 /**
- * One write against this order. The version sent is the one on the detail the screen was rendered from:
- * a stale screen gets a 409 conflict_retry, which the error line shows (translated) while the refetch brings the new state.
+ * One write against this order. The version sent is `version` (default: the one on the detail the screen was rendered from).
+ * Anything with editable fields passes the version captured when editing started, so a background refetch cannot change it:
+ * a stale form gets a 409 conflict_retry, which is shown (translated) while the refetch brings the new state.
  */
-export function useOrderWrite(d: Detail) {
-  const version = d.order.version
+export function useOrderWrite(d: Detail, version = d.order.version) {
   const base = `/orders/${encodeURIComponent(d.order.number)}`
   return useSend<OrderWriteResponse, { method: 'POST' | 'PUT' | 'PATCH' | 'DELETE'; sub?: string; body?: object }>(
     // Notes and repeat deliberately take no version (they never conflict with an edit).
     ({ method, sub = '', body }) => send(method, `${base}${sub}`, sub === '/notes' || sub === '/repeat' ? body : { ...body, expectedVersion: version }),
   )
 }
+
+/** For dialogs: the version is fixed when the dialog opens. */
+const useDialogWrite = (d: Detail) => useOrderWrite(d, useState(d.order.version)[0])
 
 // A product line reads "Product · Color"; a charge or discount line shows its description (or its kind).
 export const lineTitle = (i: OrderItem, kindLabel: string) =>
@@ -38,7 +48,7 @@ function AuthorizeDialog({ d, onClose }: { d: Detail; onClose: () => void }) {
   const { m } = useI18n()
   const [method, setMethod] = useState<AuthorizationMethod>('phone')
   const [notes, setNotes] = useState('')
-  const w = useOrderWrite(d)
+  const w = useDialogWrite(d)
   return (
     <FormDialog
       open onOpenChange={(o) => !o && onClose()} title={m.order.auth.recordTitle} description={m.order.auth.recordBody} submitLabel={m.order.auth.record}
@@ -61,7 +71,7 @@ function ReasonDialog({ d, onClose, title, body, label, submit, method, sub }: {
 }) {
   const { m } = useI18n()
   const [reason, setReason] = useState('')
-  const w = useOrderWrite(d)
+  const w = useDialogWrite(d)
   return (
     <FormDialog
       open onOpenChange={(o) => !o && onClose()} title={title} description={body} submitLabel={submit} pending={w.isPending} error={w.error} disabled={!reason.trim()}
@@ -74,7 +84,7 @@ function ReasonDialog({ d, onClose, title, body, label, submit, method, sub }: {
 
 function NoPurchasingDialog({ d, onClose }: { d: Detail; onClose: () => void }) {
   const { m } = useI18n()
-  const w = useOrderWrite(d)
+  const w = useDialogWrite(d)
   return (
     <FormDialog
       open onOpenChange={(o) => !o && onClose()} title={m.order.readiness.noPurchasingTitle} description={m.order.readiness.noPurchasingBody} submitLabel={m.order.readiness.noPurchasingConfirm}
@@ -152,10 +162,13 @@ export function ReadinessCard({ d, po, goTab }: { d: Detail; po: ReactNode; goTa
       <button type="button" className={primary ? smPrimary : sm} aria-busy={busy} disabled={disabled} onClick={() => !w.isPending && onClick()}>{label}</button>
     )
     if (key === 'quote' && state === 'pending') {
+      if (!quoteActionsOpen(order)) return null
       const newVersion = btn(t.newVersion, () => run('POST', '/quotes'))
       if (reason === 'no_quote') return btn(t.createQuote, () => run('POST', '/quotes'), true)
       if (reason === 'not_accepted' && quote && (quote.status === 'draft' || quote.status === 'sent')) {
-        return stale ? newVersion : btn(t.acceptQuote, () => run('PATCH', `/quotes/${quote.version}`, { to: 'accepted' }), true)
+        if (stale) return newVersion
+        const block = acceptBlockReason(quote.items, m.order.quote.acceptBlocked)
+        return <>{btn(t.acceptQuote, () => run('PATCH', `/quotes/${quote.version}`, { to: 'accepted' }), true, !!block)}{block && <span className={MUTED}>{block}</span>}</>
       }
       return newVersion
     }
@@ -177,8 +190,7 @@ export function ReadinessCard({ d, po, goTab }: { d: Detail; po: ReactNode; goTa
     if (state === 'not_required') return t.notRequiredWhy[key as keyof typeof t.notRequiredWhy]
     if (key === 'quote' && quote) return t.quoteDone(quote.version, fmt.date(quote.decidedAt ?? quote.createdAt))
     if (key === 'authorization') {
-      return order.poRequired ? t.poDone
-        : t.authDone(order.authorizationMethod ? m.labels.authorizationMethod[order.authorizationMethod] : '', order.authorizedAt ? fmt.date(order.authorizedAt) : '')
+      return order.poRequired ? t.poDone : t.authDone[order.authorizationMethod ?? 'unknown'](order.authorizedAt ? fmt.date(order.authorizedAt) : m.common.dash)
     }
     return t.done[key as keyof typeof t.done]
   }
@@ -257,42 +269,50 @@ function ItemsTable({ d }: { d: Detail }) {
   )
 }
 
+function ItemsEdit({ d, onDone }: { d: Detail; onDone: () => void }) {
+  const { m } = useI18n()
+  const t = m.order.items
+  const [tried, setTried] = useState(false)
+  const ed = useEditSession(d.order.version, () => rowsFromItems(d.items))
+  const rows = ed.values
+  const w = useOrderWrite(d, ed.version)
+  const invalid = rowsInvalid(rows)
+  return (
+    <div className="flex flex-col gap-3 p-4">
+      <ConflictNotice show={ed.conflict} />
+      <ItemsEditor rows={rows} onChange={ed.setValues} showIssues={tried} framed={false} />
+      <p className={MUTED}>{t.reapprovalNote}</p>
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <MutationError error={isConflict(w.error) ? null : w.error} />
+        <button type="button" className={BTN} onClick={onDone}>{m.common.cancel}</button>
+        <button
+          type="button" className={cn(BTN, BTN_PRIMARY)} disabled={w.isPending || ed.blocked}
+          onClick={() => {
+            setTried(true)
+            if (invalid) return
+            ed.clear()
+            w.mutate({ method: 'PUT', sub: '/items', body: { items: toInputs(rows) } }, { onSuccess: onDone, onError: ed.onError })
+          }}
+        >{w.isPending ? m.common.saving : t.saveItems}</button>
+      </div>
+    </div>
+  )
+}
+
 function ItemsSection({ d }: { d: Detail }) {
   const { m } = useI18n()
   const t = m.order.items
-  const [rows, setRows] = useState<Row[] | null>(null)
-  const [tried, setTried] = useState(false)
-  const w = useOrderWrite(d)
+  const [editing, setEditing] = useState(false)
   const started = STARTED.includes(d.order.productionStatus)
   const blocked = d.order.state !== 'active' ? m.api.errors.order_not_active : started ? m.api.errors.production_started : null
-  if (rows) {
-    const invalid = rowsInvalid(rows)
-    return (
-      <div className="flex flex-col gap-3 p-4">
-        <ItemsEditor rows={rows} onChange={setRows} showIssues={tried} framed={false} />
-        <p className={MUTED}>{t.reapprovalNote}</p>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <MutationError error={w.error} />
-          <button type="button" className={BTN} onClick={() => { setRows(null); setTried(false) }}>{m.common.cancel}</button>
-          <button
-            type="button" className={cn(BTN, BTN_PRIMARY)} disabled={w.isPending}
-            onClick={() => {
-              setTried(true)
-              if (invalid) return
-              w.mutate({ method: 'PUT', sub: '/items', body: { items: toInputs(rows) } }, { onSuccess: () => { setRows(null); setTried(false) } })
-            }}
-          >{w.isPending ? m.common.saving : t.saveItems}</button>
-        </div>
-      </div>
-    )
-  }
+  if (editing) return <ItemsEdit d={d} onDone={() => setEditing(false)} />
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-3">
         <h2 className={H2}>{m.order.tabs.items}</h2>
         <span className="flex flex-wrap items-center gap-2">
           {blocked && <span className={MUTED}>{t.editBlocked(blocked)}</span>}
-          <button type="button" className={sm} disabled={!!blocked} onClick={() => { w.reset(); setRows(rowsFromItems(d.items)) }}>{t.edit}</button>
+          <button type="button" className={sm} disabled={!!blocked} onClick={() => setEditing(true)}>{t.edit}</button>
         </span>
       </div>
       <ItemsTable d={d} />
@@ -309,14 +329,14 @@ function QuotePanel({ d }: { d: Detail }) {
   const w = useOrderWrite(d)
   const { order } = d
   const active = order.state === 'active'
-  const started = STARTED.includes(order.productionStatus)
-  const canMake = active && !started
+  const canMake = quoteActionsOpen(order)
   const stale = !!q && q.itemsRevision !== order.itemsRevision
   const run = (sub: string, method: 'POST' | 'PATCH' = 'POST', body?: object) => !w.isPending && w.mutate({ method, sub, body })
   const status = (to: 'sent' | 'accepted' | 'declined') => run(`/quotes/${q!.version}`, 'PATCH', { to })
   const totals: [string, number][] = q ? [[t.subtotal, q.subtotalCents], ...(q.chargesCents ? [[t.charges, q.chargesCents] as [string, number]] : []), ...(q.discountsCents ? [[t.discounts, -q.discountsCents] as [string, number]] : [])] : []
   const s: QuoteStatus | null = q?.status ?? null
   const open = s === 'draft' || s === 'sent'
+  const acceptBlock = q && open ? acceptBlockReason(q.items, t.acceptBlocked) : null
   return (
     <div className="flex flex-col gap-2 border-t border-border px-4 py-3.5 text-[13px]">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -334,13 +354,13 @@ function QuotePanel({ d }: { d: Detail }) {
           <span className={cn(MUTED, 'flex-[1_1_200px]')}>
             <span className="num">{fmt.money(q.totalCents)}</span>
             {q.sentAt && <> · {t.sent(fmt.date(dateOf(q.sentAt)!))}</>}
-            {q.decidedAt && <> · {t.decided(m.labels.quoteStatus[q.status], fmt.date(q.decidedAt))}</>}
+            {(q.status === 'accepted' || q.status === 'declined') && q.decidedAt && <> · {t.decided[q.status](fmt.date(q.decidedAt))}</>}
           </span>
           {q.status === 'accepted' && <span className={cn(MUTED, 'inline-flex items-center gap-1')}><Lock className="size-3.5" strokeWidth={1.9} aria-hidden />{t.locked}</span>}
           <span className="flex flex-wrap gap-1.5">
             {q.status === 'draft' && <button type="button" className={sm} disabled={!canMake} onClick={() => run(`/quotes/${q.version}/refresh`)}>{t.refresh}</button>}
             {q.status === 'draft' && <button type="button" className={sm} disabled={!active} onClick={() => status('sent')}>{t.markSent}</button>}
-            {open && <button type="button" className={smPrimary} disabled={!active || stale} title={stale ? t.staleDraft : undefined} onClick={() => status('accepted')}>{t.accept}</button>}
+            {open && <button type="button" className={smPrimary} disabled={!active || stale || !!acceptBlock} title={stale ? t.staleDraft : (acceptBlock ?? undefined)} onClick={() => status('accepted')}>{t.accept}</button>}
             {open && <button type="button" className={sm} disabled={!active} onClick={() => status('declined')}>{t.decline}</button>}
           </span>
         </div>
@@ -350,6 +370,7 @@ function QuotePanel({ d }: { d: Detail }) {
           <Info className="mt-px size-4 shrink-0" strokeWidth={1.9} aria-hidden />{q.status === 'accepted' ? t.stale : t.staleDraft}
         </p>
       )}
+      {acceptBlock && !stale && <p className={MUTED}>{acceptBlock}</p>}
       <MutationError error={w.error} />
       {q && q.items.length > 0 && (
         <div className="overflow-x-auto">
@@ -421,29 +442,33 @@ export function ItemsQuoteTab({ d }: { d: Detail }) {
 export function DetailsEditor({ d, onDone }: { d: Detail; onDone: () => void }) {
   const { m } = useI18n()
   const o = d.order
-  const [f, setF] = useState({
+  const ed = useEditSession(o.version, () => ({
     title: o.title, due: o.dueDate ?? '', contact: d.contact ? String(d.contact.id) : '', source: o.source, po: o.poRequired, terms: o.paymentTerms,
     assignee: o.assigneeId ? String(o.assigneeId) : '',
-  })
+  }))
+  const f = ed.values
+  const setF = ed.setValues
   const customer = useCustomer(d.customer.id)
   const users = useUsers()
-  const w = useOrderWrite(d)
+  const w = useOrderWrite(d, ed.version)
   const contacts = (customer.data?.contacts ?? []).filter((c) => !c.archived || c.id === d.contact?.id)
   const t = m.order.edit
   return (
     <form
       className="flex flex-col gap-3" onSubmit={(e) => {
         e.preventDefault()
-        if (!f.title.trim() || w.isPending) return
+        if (!f.title.trim() || w.isPending || ed.blocked) return
+        ed.clear()
         w.mutate({
           method: 'PATCH',
           body: {
             title: f.title.trim(), dueDate: f.due || null, contactId: f.contact ? Number(f.contact) : null, source: f.source, poRequired: f.po, paymentTerms: f.terms,
             ...(users.data ? { assigneeId: f.assignee ? Number(f.assignee) : null } : {}),
           },
-        }, { onSuccess: onDone })
+        }, { onSuccess: onDone, onError: ed.onError })
       }}
     >
+      <ConflictNotice show={ed.conflict} />
       <Field label={m.newOrder.orderTitle}><input className={INPUT} value={f.title} aria-invalid={!f.title.trim() || undefined} onChange={(e) => setF({ ...f, title: e.target.value })} /></Field>
       <Field label={m.newOrder.dueDate}><input className={INPUT} type="date" value={f.due} onChange={(e) => setF({ ...f, due: e.target.value })} /></Field>
       <Field label={m.newOrder.contact}>
@@ -471,9 +496,9 @@ export function DetailsEditor({ d, onDone }: { d: Detail; onDone: () => void }) 
           </select>
         </Field>
       )}
-      <MutationError error={w.error} />
+      <MutationError error={isConflict(w.error) ? null : w.error} />
       <div className="flex gap-2">
-        <button type="submit" className={cn(BTN, BTN_PRIMARY)} disabled={w.isPending}>{w.isPending ? m.common.saving : m.common.save}</button>
+        <button type="submit" className={cn(BTN, BTN_PRIMARY)} disabled={w.isPending || ed.blocked}>{w.isPending ? m.common.saving : m.common.save}</button>
         <button type="button" className={BTN} onClick={onDone}>{m.common.cancel}</button>
       </div>
     </form>

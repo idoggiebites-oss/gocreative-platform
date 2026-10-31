@@ -26,6 +26,8 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T
 }
 
+export const isConflict = (e: unknown) => e instanceof ApiError && e.status === 409 && e.body.code === 'conflict_retry'
+
 // Network failures retry twice; an answer from the server (even a 500) is final.
 const retry = (n: number, e: Error) => !(e instanceof ApiError) && n < 2
 
