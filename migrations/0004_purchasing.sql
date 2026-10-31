@@ -1,4 +1,6 @@
--- M3: suppliers, order purchases and partial receipts. Additive only: the live D1 holds real rows, so nothing is
+-- M3: suppliers, order purchases and partial receipts. Quantities are capped at 1,000,000 (the route's limit), so
+-- SQL sums stay inside JavaScript's safe integers and the SQL gate can't pass where readiness() refuses.
+-- Additive only: the live D1 holds real rows, so nothing is
 -- rebuilt. orders.materials_required and orders.prep_status already exist (0002).
 -- Business dates (ordered_on, expected_on, received_on) are YYYY-MM-DD in shop time (PHASE2_PLAN §4.5);
 -- `date(x) IS x` refuses an impossible date such as 2026-02-30, which date() would roll over.
@@ -20,7 +22,7 @@ CREATE TABLE order_purchases (
   order_id INTEGER NOT NULL REFERENCES orders (id),
   supplier_id INTEGER NOT NULL REFERENCES suppliers (id),
   description TEXT NOT NULL CHECK (length(trim(description)) BETWEEN 1 AND 200 AND length(description) <= 200),
-  quantity INTEGER NOT NULL CHECK (typeof(quantity) = 'integer' AND quantity >= 1),
+  quantity INTEGER NOT NULL CHECK (typeof(quantity) = 'integer' AND quantity BETWEEN 1 AND 1000000),
   sizes TEXT CHECK (sizes IS NULL OR json_valid(sizes)),
   estimated_unit_cost_cents INTEGER CHECK (estimated_unit_cost_cents IS NULL OR (typeof(estimated_unit_cost_cents) = 'integer' AND estimated_unit_cost_cents >= 0)),
   actual_unit_cost_cents INTEGER CHECK (actual_unit_cost_cents IS NULL OR (typeof(actual_unit_cost_cents) = 'integer' AND actual_unit_cost_cents >= 0)),
@@ -42,10 +44,13 @@ CREATE TRIGGER order_purchases_status_move BEFORE UPDATE OF status ON order_purc
 WHEN NEW.status IS NOT OLD.status
   AND NOT ((OLD.status = 'not_ordered' AND NEW.status IN ('ordered','cancelled')) OR (OLD.status = 'ordered' AND NEW.status = 'cancelled'))
 BEGIN SELECT RAISE(ABORT, 'purchase_transition_not_allowed'); END;
--- A purchase never moves to another order.
-CREATE TRIGGER order_purchases_order_fixed BEFORE UPDATE OF order_id ON order_purchases
-WHEN NEW.order_id IS NOT OLD.order_id
+-- A purchase never moves to another order or changes id, and is never deleted (a mistake is cancelled):
+-- otherwise DELETE + INSERT with the same id would undo a cancellation (Codex review of 6c6b7b5).
+CREATE TRIGGER order_purchases_order_fixed BEFORE UPDATE OF id, order_id ON order_purchases
+WHEN NEW.order_id IS NOT OLD.order_id OR NEW.id IS NOT OLD.id
 BEGIN SELECT RAISE(ABORT, 'purchase_order_fixed'); END;
+CREATE TRIGGER order_purchases_no_delete BEFORE DELETE ON order_purchases
+BEGIN SELECT RAISE(ABORT, 'order_purchases are never deleted'); END;
 -- REPLACE deletes then inserts without firing the UPDATE triggers; refuse it so the status rules can't be bypassed.
 CREATE TRIGGER order_purchases_no_replace BEFORE INSERT ON order_purchases
 WHEN EXISTS (SELECT 1 FROM order_purchases WHERE id = NEW.id)
@@ -56,7 +61,7 @@ BEGIN SELECT RAISE(ABORT, 'purchase_order_fixed'); END;
 CREATE TABLE purchase_receipts (
   id INTEGER PRIMARY KEY,
   purchase_id INTEGER NOT NULL REFERENCES order_purchases (id),
-  quantity INTEGER NOT NULL CHECK (typeof(quantity) = 'integer' AND quantity >= 1),
+  quantity INTEGER NOT NULL CHECK (typeof(quantity) = 'integer' AND quantity BETWEEN 1 AND 1000000),
   sizes TEXT CHECK (sizes IS NULL OR json_valid(sizes)),
   received_on TEXT NOT NULL CHECK (date(received_on) IS received_on),
   notes TEXT,

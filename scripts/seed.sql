@@ -8,6 +8,7 @@ DROP TRIGGER IF EXISTS activity_log_no_delete;
 DROP TRIGGER IF EXISTS quote_items_delete_draft_only;
 DROP TRIGGER IF EXISTS quotes_delete_draft_only;
 DROP TRIGGER IF EXISTS purchase_receipts_no_delete;
+DROP TRIGGER IF EXISTS order_purchases_no_delete;
 DELETE FROM activity_log;
 DELETE FROM purchase_receipts;
 DELETE FROM order_purchases;
@@ -23,6 +24,8 @@ WHEN OLD.status <> 'draft'
 BEGIN SELECT RAISE(ABORT, 'quote_not_draft'); END;
 CREATE TRIGGER purchase_receipts_no_delete BEFORE DELETE ON purchase_receipts
 BEGIN SELECT RAISE(ABORT, 'purchase_receipts are write-once'); END;
+CREATE TRIGGER order_purchases_no_delete BEFORE DELETE ON order_purchases
+BEGIN SELECT RAISE(ABORT, 'order_purchases are never deleted'); END;
 DELETE FROM notes;
 DELETE FROM artwork;
 DELETE FROM po_documents;

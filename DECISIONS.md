@@ -319,3 +319,7 @@ Business-rule choices made while building the M3 API. Each can be overturned.
 - **`START_PRODUCTION_SQL` now re-asserts the full gate** (`GATE_OK`). This closes the M0
   carried-forward item for the start statement; the QC → in-production restart path is
   still M4's.
+
+## 2026-10-31 — Purchases are never deleted; quantities capped (Codex review of 6c6b7b5)
+- `order_purchases` refuses DELETE and id changes, so DELETE + INSERT can't undo a cancellation. A mistaken purchase is cancelled.
+- Purchase and receipt quantities are capped at 1,000,000 in the schema (the route's limit), keeping SQL sums within JS safe integers so the SQL gate and readiness() can't disagree.

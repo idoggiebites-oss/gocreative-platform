@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest'
 import type { OrderDetailResponse, OrderWriteResponse, PurchasesResponse, SupplierResponse, SuppliersResponse, UploadResponse } from '../../shared/api'
 import { ACTIVITY_ACTIONS } from '../../shared/api'
 import { businessToday } from '../../shared/businessDate'
-import { recordReceipt } from '../../worker/db/purchasing'
+import { cancelPurchase, createPurchase, markPurchaseOrdered, recordReceipt, setPrepStatus, updatePurchase } from '../../worker/db/purchasing'
 import { setupUploads } from './r2'
 
 // Seed order 16 (2026-0016): authorized, quote accepted, artwork approved, prep not_started, materials required.
@@ -244,6 +244,32 @@ test('a stale expectedVersion is 409 on every write, with no row and no activity
   }
   expect(t.footprint()).toEqual(before)
   expect(t.order(N).production_status).toBe('awaiting_materials')
+})
+
+test('the SQL itself refuses a stale version: every writer called directly writes nothing (Codex review of 6c6b7b5)', async () => {
+  const t = setup()
+  const o = t.order(N)
+  const g = { orderId: o.id, version: o.version - 1, actorId: 1 }
+  const before = t.footprint()
+  const values = { supplierId: 1, description: 'x', quantity: 1, sizes: null, estimatedUnitCostCents: null, actualUnitCostCents: null, expectedOn: null, notes: 'y' }
+  expect(await createPurchase(t.db, { ...g, values, supplierName: 'JDS' })).toBeNull()
+  expect(await updatePurchase(t.db, { ...g, purchaseId: 3, status: 'not_ordered', fields: ['notes'], before: values, after: values })).toBeNull()
+  expect(await markPurchaseOrdered(t.db, { ...g, purchaseId: 3, orderedOn: '2026-10-30' })).toBeNull()
+  expect(await cancelPurchase(t.db, { ...g, purchaseId: 3, from: 'not_ordered', reason: 'x' })).toBeNull()
+  expect(await recordReceipt(t.db, { ...g, purchaseId: 2, quantity: 1, sizes: null, receivedOn: '2026-10-30', notes: null })).toBeNull()
+  expect(await setPrepStatus(t.db, { ...g, from: 'not_started', to: 'ready' })).toBeNull()
+  expect(t.footprint()).toEqual(before)
+  expect(t.one('SELECT version, production_status, prep_status FROM orders WHERE id = ?', o.id)).toEqual({ version: o.version, production_status: 'awaiting_materials', prep_status: 'not_started' })
+})
+
+test('a purchase is never deleted or re-keyed, so DELETE + INSERT cannot undo a cancellation; quantities are capped', () => {
+  const t = setup()
+  expect(() => t.sqlite.exec('DELETE FROM order_purchases WHERE id = 1')).toThrow(/never deleted/)
+  expect(() => t.sqlite.exec('UPDATE order_purchases SET id = 99 WHERE id = 1')).toThrow(/purchase_order_fixed/)
+  expect(() => t.sqlite.exec("INSERT OR REPLACE INTO order_purchases (id, order_id, supplier_id, description, quantity, status, ordered_on) VALUES (1, 16, 1, 'x', 1, 'ordered', '2026-10-31')")).toThrow()
+  expect(t.one('SELECT status FROM order_purchases WHERE id = 1')).toEqual({ status: 'cancelled' })
+  expect(() => t.sqlite.exec("INSERT INTO order_purchases (order_id, supplier_id, description, quantity) VALUES (16, 1, 'x', 1000001)")).toThrow(/CHECK/)
+  expect(() => t.sqlite.exec("INSERT INTO purchase_receipts (purchase_id, quantity, received_on) VALUES (2, 1000001, '2026-10-31')")).toThrow(/CHECK/)
 })
 
 describe('"No purchasing needed" and prep', () => {
