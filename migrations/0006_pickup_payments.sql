@@ -191,6 +191,11 @@ BEGIN SELECT RAISE(ABORT, 'payments are never deleted'); END;
 -- is what the route maps to a retry (matchRetry); the check one can't happen through COLLECT_CHECK_SQL.
 CREATE TRIGGER payments_no_replace BEFORE INSERT ON payments
 BEGIN
+  -- A payment is born unvoided (a void is the guarded, owner-checked, audited UPDATE below), and never on a cancelled
+  -- order, which also refuses collecting a check whose order was cancelled: the whole collect batch rolls back
+  -- (Codex review of 5fba130).
+  SELECT RAISE(ABORT, 'payment_void_on_insert') WHERE NEW.voided_at IS NOT NULL OR NEW.voided_by IS NOT NULL OR NEW.void_reason IS NOT NULL;
+  SELECT RAISE(ABORT, 'payment_order_cancelled') WHERE (SELECT state FROM orders WHERE id = NEW.order_id) IS 'cancelled';
   SELECT RAISE(ABORT, 'payment_exists') WHERE EXISTS (SELECT 1 FROM payments WHERE id = NEW.id);
   SELECT RAISE(ABORT, 'payment_request_id_exists') WHERE NEW.request_id IS NOT NULL AND EXISTS (SELECT 1 FROM payments WHERE request_id = NEW.request_id);
   SELECT RAISE(ABORT, 'payment_check_exists')

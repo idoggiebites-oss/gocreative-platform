@@ -231,9 +231,17 @@ export function paymentRoutes() {
       const answer = async (r: db.CheckRow) => (same(r) ? checkWritten(c, r) : refuse(c, 'check_collect_conflict', 'This check was already collected with a different amount'))
       if (['collected', 'deposited', 'cleared'].includes(k.status)) return answer(k)
       if (!checkCheckTransition(k.status, 'collected').ok) return refuse(c, 'invalid_check_transition', `A ${k.status} check cannot be collected`)
-      await db.collectCheck(c.env.DB, {
-        orderId: k.order_id, actorId: c.get('user').id, checkId: k.id, amountCents: b.amountReceivedCents, checkNumber: b.checkNumber, paidOn: b.collectedOn ?? today(),
-      })
+      // No payment on a cancelled order; the payments trigger re-asserts it if the order is cancelled after this read.
+      const cancelled = () => refuse(c, 'order_not_active', 'Order is cancelled')
+      if (k.order_state === 'cancelled') return cancelled()
+      try {
+        await db.collectCheck(c.env.DB, {
+          orderId: k.order_id, actorId: c.get('user').id, checkId: k.id, amountCents: b.amountReceivedCents, checkNumber: b.checkNumber, paidOn: b.collectedOn ?? today(),
+        })
+      } catch (e) {
+        if (/payment_order_cancelled/.test(e instanceof Error ? e.message : String(e))) return cancelled()
+        throw e
+      }
       return answer((await db.getCheck(c.env.DB, k.id))!)
     }))
 }

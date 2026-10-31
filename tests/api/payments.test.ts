@@ -139,18 +139,56 @@ describe('check collection', () => {
     expect(await checkPost(t, 2, 'collect', { amountReceivedCents: 71000 })).toMatchObject({ status: 409, body: { code: 'check_collect_conflict' } })
     expect(await checkPost(t, 2, 'collect', { amountReceivedCents: 72000, checkNumber: '999' })).toMatchObject({ status: 409, body: { code: 'check_collect_conflict' } })
     expect(t.footprint()).toEqual(before)
-    // Lost race: someone collects for 500 between this request's read and its write; the read-back answers 409.
+    // Lost race: someone collects for 500 AFTER this request read the check as uncollected and BEFORE its batch runs
+    // (injected at the request's first batch), so the route reaches its write and the read-back answers 409
+    // (Codex review of 5fba130: the old version collected before the request started and only hit the early replay).
     const t2 = setup()
     const id = (await newCheck(t2, '2026-0004')).body.check.id
-    await dbm.collectCheck(t2.db, { orderId: 4, actorId: 2, checkId: id, amountCents: 500, checkNumber: null, paidOn: '2026-10-31' })
-    expect(await checkPost(t2, id, 'collect', { amountReceivedCents: 73000 })).toMatchObject({ status: 409, body: { code: 'check_collect_conflict' } })
-    expect(t2.one<{ n: number }>('SELECT COUNT(*) AS n FROM payments WHERE check_collection_id = ?', id).n).toBe(1)
+    const batch = t2.db.batch.bind(t2.db)
+    let raced = false
+    t2.db.batch = (async (stmts: Parameters<typeof batch>[0]) => {
+      if (!raced) { raced = true; t2.db.batch = batch; await dbm.collectCheck(t2.db, { orderId: 4, actorId: 2, checkId: id, amountCents: 500, checkNumber: null, paidOn: '2026-10-31' }) }
+      return batch(stmts)
+    }) as typeof batch
+    const mid = () => ({ payments: t2.one<{ n: number }>('SELECT COUNT(*) AS n FROM payments WHERE check_collection_id = ?', id).n, version: t2.o('2026-0004').version,
+      acts: t2.one<{ n: number }>(`SELECT COUNT(*) AS n FROM activity_log WHERE action = 'check_collected'`).n })
+    const res = await checkPost(t2, id, 'collect', { amountReceivedCents: 73000 })
+    expect(raced).toBe(true)
+    expect(res).toMatchObject({ status: 409, body: { code: 'check_collect_conflict' } })
+    const after = mid()
+    expect(after.payments).toBe(1)
+    // Exactly the competing collect's footprint: one payment, one check_collected row, one version bump.
+    expect(t2.one<{ amount_cents: number }>('SELECT amount_cents FROM payments WHERE check_collection_id = ?', id).amount_cents).toBe(500)
   })
 
   test('collecting the check that pays off a picked-up district order closes it in the same write', async () => {
     const t = setup()
     expect((await checkPost(t, 2, 'collect', { amountReceivedCents: 72000 })).body).toMatchObject({ state: 'closed' })
     expect(t.acts('2026-0006').slice(-2).map((a) => a.action)).toEqual(['check_collected', 'order_closed'])
+  })
+})
+
+describe('cancelled orders and void fields (Codex review of 5fba130)', () => {
+  test('a check on an order cancelled later can\'t be collected: refused at the route and by the payments trigger, nothing written', async () => {
+    const t = setup()
+    const id = (await newCheck(t, '2026-0004')).body.check.id
+    t.sqlite.exec(`UPDATE orders SET state = 'cancelled' WHERE number = '2026-0004'`)
+    const before = t.footprint()
+    expect(await checkPost(t, id, 'collect', { amountReceivedCents: 73000 })).toMatchObject({ status: 409, body: { code: 'order_not_active' } })
+    // Cancelled after the route's read: the batch's payment INSERT fails and the collection status rolls back with it.
+    await expect(dbm.collectCheck(t.db, { orderId: 4, actorId: 1, checkId: id, amountCents: 73000, checkNumber: null, paidOn: '2026-10-31' })).rejects.toThrow(/payment_order_cancelled/)
+    expect(t.footprint()).toEqual(before)
+    expect(t.one<{ status: string }>('SELECT status FROM check_collections WHERE id = ?', id).status).toBe('awaiting_payment')
+  })
+  test('a payment can\'t be inserted already voided, by anyone: voids go through the owner-checked, audited UPDATE', () => {
+    const t = setup()
+    const before = t.footprint()
+    for (const by of [1, 2, 3, 99]) {
+      expect(() => t.sqlite.exec(`INSERT INTO payments (order_id, amount_cents, method, paid_on, recorded_by, request_id, voided_at, voided_by, void_reason)
+        VALUES (4, 100, 'cash', '2026-10-31', 1, 'void-insert-${by}', '2026-10-31T00:00:00Z', ${by}, 'x')`), String(by)).toThrow(/payment_void_on_insert/)
+    }
+    expect(() => t.sqlite.exec(`INSERT INTO payments (order_id, amount_cents, method, paid_on, recorded_by, request_id, void_reason) VALUES (4, 100, 'cash', '2026-10-31', 1, 'void-insert-r', 'x')`)).toThrow(/payment_void_on_insert/)
+    expect(t.footprint()).toEqual(before)
   })
 })
 

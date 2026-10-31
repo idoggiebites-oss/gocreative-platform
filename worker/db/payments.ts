@@ -5,7 +5,7 @@
 // Each statement after the first runs only if the one before it changed a row (changes()), so a refused or lost write
 // changes and logs nothing. No re-derive: payments and pickups never change readiness, and a production_complete order
 // is never re-derived.
-import type { CheckStatus, CustomerKind, PaymentMethod, PaymentTerms, ProductionStatus } from '../../shared/enums'
+import type { CheckStatus, CustomerKind, OrderState, PaymentMethod, PaymentTerms, ProductionStatus } from '../../shared/enums'
 import type { ActivityAction, CheckRecord, PaymentRecord } from '../../shared/api'
 import { COLLECT_CHECK_SQL, RECORD_PAYMENT_SQL } from './paymentSql'
 import { GUARD, LOG_IF_CHANGED, NOW, type Stmt } from './orders'
@@ -97,11 +97,11 @@ export async function paymentByRequestId(db: D1Database, requestId: string) {
 }
 
 export type CheckRow = {
-  id: number; order_id: number; order_number: string; order_title: string; order_due_date: string | null; customer_name: string; expected_cents: number; amount_received_cents: number | null
+  id: number; order_id: number; order_state: OrderState; order_number: string; order_title: string; order_due_date: string | null; customer_name: string; expected_cents: number; amount_received_cents: number | null
   check_number: string | null; status: CheckStatus; available_on: string | null; collected_at: string | null; collected_by_name: string | null
   deposited_on: string | null; cleared_on: string | null; notes: string | null; created_at: string; payment_id: number | null
 }
-const CHECK_SELECT = `SELECT k.id, k.order_id, o.number AS order_number, o.title AS order_title, o.due_date AS order_due_date, c.name AS customer_name, k.expected_cents, k.amount_received_cents, k.check_number,
+const CHECK_SELECT = `SELECT k.id, k.order_id, o.state AS order_state, o.number AS order_number, o.title AS order_title, o.due_date AS order_due_date, c.name AS customer_name, k.expected_cents, k.amount_received_cents, k.check_number,
   k.status, k.available_on, k.collected_at, u.name AS collected_by_name, k.deposited_on, k.cleared_on, k.notes, k.created_at,
   (SELECT p.id FROM payments p WHERE p.check_collection_id = k.id) AS payment_id
   FROM check_collections k JOIN orders o ON o.id = k.order_id JOIN customers c ON c.id = o.customer_id LEFT JOIN users u ON u.id = k.collected_by`
