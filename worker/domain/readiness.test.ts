@@ -1,6 +1,8 @@
 import { orderArtworkStatus, readiness } from './readiness.ts'
-import type { ReadinessInput } from './readiness.ts'
-const ready: ReadinessInput = { state: 'active', quote: { status: 'accepted', itemsRevision: 1 }, itemsRevision: 1, artworkRequired: true, designs: [{ latestApproval: 'approved' }], poRequired: false, latestPo: null, authorizedAt: '2026-01-01T00:00:00Z', materialsRequired: true, purchases: [{ storedStatus: 'ordered', quantity: 5, receivedQuantity: 5 }], prepStatus: 'ready' }
+import type { Design, ReadinessInput } from './readiness.ts'
+const design = (approval: 'under_review' | 'changes_requested' | 'approved'): Design => ({ currentVersion: { id: 1, fileId: 1, approval } })
+const noVersion: Design = { currentVersion: null }
+const ready: ReadinessInput = { state: 'active', quote: { status: 'accepted', itemsRevision: 1, lineCount: 1 }, itemsRevision: 1, artworkRequired: true, designs: [design('approved')], poRequired: false, latestPo: null, authorizedAt: '2026-01-01T00:00:00Z', materialsRequired: true, purchases: [{ storedStatus: 'ordered', quantity: 5, receivedQuantity: 5 }], prepStatus: 'ready' }
 it('requires all five items, in fixed priority order', () => {
   expect(readiness(ready)).toMatchObject({ ready: true, preProductionStatus: 'ready' })
   expect(readiness(ready).items.map(i => i.key)).toEqual(['quote', 'authorization', 'artwork', 'materials', 'preparation'])
@@ -15,13 +17,16 @@ it('requires all five items, in fixed priority order', () => {
 })
 it.each([
   [{ quote: null }, 'quote', 'no_quote'],
-  [{ quote: { status: 'sent', itemsRevision: 1 } }, 'quote', 'not_accepted'],
+  [{ quote: { status: 'sent', itemsRevision: 1, lineCount: 1 } }, 'quote', 'not_accepted'],
+  [{ quote: { status: 'accepted', itemsRevision: 1, lineCount: 0 } }, 'quote', 'empty_quote'],
   [{ itemsRevision: 2 }, 'quote', 'items_changed_since_acceptance'],
   [{ poRequired: true }, 'authorization', 'po_missing'],
   [{ poRequired: true, latestPo: { status: 'rejected' } }, 'authorization', 'po_not_approved'],
   [{ authorizedAt: null }, 'authorization', 'not_authorized'],
   [{ designs: [] }, 'artwork', 'not_received'],
-  [{ designs: [{ latestApproval: 'approved' }, { latestApproval: 'under_review' }] }, 'artwork', 'under_review'],
+  [{ designs: [design('approved'), noVersion] }, 'artwork', 'not_received'],
+  [{ designs: [noVersion, design('changes_requested')] }, 'artwork', 'not_received'],
+  [{ designs: [design('approved'), design('under_review')] }, 'artwork', 'under_review'],
   [{ purchases: [] }, 'materials', 'not_ordered'],
   [{ purchases: [{ storedStatus: 'cancelled', quantity: 5, receivedQuantity: 5 }] }, 'materials', 'not_ordered'],
   [{ purchases: [{ storedStatus: 'ordered', quantity: 5, receivedQuantity: 4 }] }, 'materials', 'awaiting_delivery'],
@@ -45,9 +50,12 @@ it('supports explicit exemptions and never readies inactive orders', () => {
 it('derives the worst current artwork approval', () => {
   expect(orderArtworkStatus(false, [])).toBe('not_required')
   expect(orderArtworkStatus(true, [])).toBe('not_received')
-  expect(orderArtworkStatus(true, [{ latestApproval: 'approved' }])).toBe('approved')
-  expect(orderArtworkStatus(true, [{ latestApproval: 'approved' }, { latestApproval: 'under_review' }])).toBe('under_review')
-  const designs = [{ latestApproval: 'under_review' }, { latestApproval: 'changes_requested' }, { latestApproval: 'approved' }] as const
+  expect(orderArtworkStatus(true, [design('approved')])).toBe('approved')
+  expect(orderArtworkStatus(true, [design('approved'), design('under_review')])).toBe('under_review')
+  const designs = [design('under_review'), design('changes_requested'), design('approved')]
   expect(orderArtworkStatus(true, designs)).toBe('changes_requested')
   expect(orderArtworkStatus(true, [...designs].reverse())).toBe('changes_requested')
+  // A design whose current version is missing has not been received, whatever the others say.
+  expect(orderArtworkStatus(true, [design('approved'), noVersion])).toBe('not_received')
+  expect(orderArtworkStatus(false, [noVersion])).toBe('not_required')
 })

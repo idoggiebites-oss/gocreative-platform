@@ -1,4 +1,4 @@
-import { balance, checkCheckTransition } from './payments.ts'
+import { balance, checkCheckTransition, matchRetry } from './payments.ts'
 import { CHECK_STATUSES } from '../../shared/enums-next.ts'
 it.each([
   [null, [], null, 0, 'unpaid'], [null, [100], null, 0, 'partially_paid'],
@@ -21,5 +21,14 @@ it('only valid moves into collected create a payment, including retry rejection'
     const result = checkCheckTransition(from, to)
     expect(result.ok).toBe(allowed.includes(`${from}:${to}`))
     if (result.ok) expect(result.createsPayment).toBe(to === 'collected')
+  }
+})
+it('treats an identical request_id resubmission as a retry and any difference as a conflict', () => {
+  const existing = { id: 7, orderId: 1, amountCents: 500, method: 'cash' as const, paidOn: '2026-10-30', notes: null }
+  const incoming = { orderId: 1, amountCents: 500, method: 'cash' as const, paidOn: '2026-10-30', notes: '' }
+  expect(matchRetry(existing, incoming)).toEqual({ ok: true, payment: existing })
+  expect(matchRetry(existing, { ...incoming, notes: '  ' })).toEqual({ ok: true, payment: existing })
+  for (const patch of [{ orderId: 2 }, { amountCents: 501 }, { method: 'check' as const }, { paidOn: '2026-10-31' }, { notes: 'different' }]) {
+    expect(matchRetry(existing, { ...incoming, ...patch })).toEqual({ ok: false, error: 'request_id_conflict' })
   }
 })

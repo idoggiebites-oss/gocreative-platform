@@ -133,41 +133,64 @@ and a test fails if an internal edit bumps the revision.
 
 ### 4.3 One active production job, and the override (correction)
 
-The earlier idea (a unique index that skips overridden rows) allowed unlimited overrides.
-Replacement, a **slot** model:
+A **slot** model, with every rule enforced by the database so no SQL path can bypass it.
+DDL: [design/sql/production-slots.sql](design/sql/production-slots.sql); statements:
+`worker/db/productionSql.ts`. Both move verbatim into migration 0004 / the M3 routes.
 
-- `orders.production_slot INTEGER NULL CHECK (production_slot IN (1, 2))`
-- `CHECK ((production_status = 'in_production') = (production_slot IS NOT NULL))`: an order is
-  in production exactly when it holds a slot.
-- `CREATE UNIQUE INDEX one_job_per_slot ON orders (production_slot) WHERE production_slot IS NOT NULL`
+- `orders.production_slot INTEGER NULL CHECK (production_slot IN (1, 2))`, plus
+  `production_override_by INTEGER REFERENCES users(id)` and `production_override_reason TEXT`.
+- CHECKs: `(production_status = 'in_production') = (production_slot IS NOT NULL)`;
+  `production_slot IS NULL OR state = 'active'`; slot 2 requires a non-null overrider and a
+  non-blank reason; the override columns are NULL whenever the slot is not 2.
+- `CREATE UNIQUE INDEX one_job_per_slot ON orders (production_slot) WHERE production_slot IS NOT NULL`,
+  so at most two jobs ever run.
+- BEFORE INSERT/UPDATE triggers abort entering slot 2 (`production_override_invalid`) unless another
+  order holds slot 1 and the overrider is an existing, active `owner`; once in slot 2, who and why
+  can't be edited (`production_override_immutable`). An AFTER trigger writes the
+  `production_override` activity row (owner, reason, the order running in slot 1), so an override
+  can't happen without its audit entry.
+- **Start** = one batch: `UPDATE orders SET production_status='in_production', production_slot=?,
+  production_override_by=?, production_override_reason=? WHERE id=? AND state='active' AND
+  production_status='ready' AND production_slot IS NULL`, then the `production_started` activity
+  INSERT with `WHERE changes() = 1`. A losing start either matches no row (nothing logged) or hits
+  the unique index / triggers and the batch rolls back; both return 409 (`production_busy` names the
+  running job). `chooseSlot` picks the slot and explains refusals; the database is the enforcement.
+  Full readiness is not re-checked in SQL yet (M1/M3 add it); the guard trusts the readiness-derived `ready`.
+- Leaving `in_production` clears the slot (and override columns) in the same UPDATE. A slot-2 job
+  is never moved into slot 1; the next normal start uses the free slot 1.
+- **Pause and cancel:** pausing (`in_production` → pre-production) goes to readiness's current
+  `preProductionStatus` (e.g. `awaiting_authorization` if the PO was revoked), never a fixed `ready`.
+  Cancelling is `SET state='cancelled', production_status = CASE WHEN 'in_production' THEN 'ready' …,
+  production_slot=NULL, override columns NULL WHERE id=? AND state='active'`; reopening re-derives
+  readiness before any start.
 
-So **at most two jobs can ever run, enforced by the database**:
-- Starting a job takes **slot 1**. If slot 1 is taken, the start is refused (409
-  `production_busy`), naming the running job.
-- An **owner** may start a second job only with an explicit override and a reason. It takes
-  **slot 2** and writes a `production_override` activity row (who, why, which job was
-  running) in the same batch.
-- With both slots taken, every start is refused, override or not.
-- Leaving `in_production` (to QC, or back to ready) clears the slot in the same UPDATE. A
-  slot-2 job is never silently moved into slot 1; the next normal start uses the free slot 1.
-- Two simultaneous starts: the unique index makes the second INSERT/UPDATE fail inside its
-  batch, so nothing is logged for it and it returns 409. No application-level lock is needed.
-
-M0 proves this with a test against an in-memory SQLite copy of the DDL. It covers concurrent
-starts, the override cap, the CHECK tying slot to status, slot release, and a staff user
-attempting the override. The DDL then moves verbatim into migration 0004.
+Proven in `tests/api/production-slots.test.ts` (via the D1 adapter's transactional `batch()`):
+concurrent starts, the two-slot cap, direct-SQL bypasses (staff, inactive owner, blank reason,
+slot 2 with slot 1 empty), the single audit row, slot release, and cancelling a slot-1 or slot-2 job.
 
 ### 4.4 Payments can't be duplicated by check collection (correction)
 
-- `payments.check_collection_id INTEGER UNIQUE NULL`: a check collection can produce at
-  most one payment.
-- The collect transition is one batch: `UPDATE check_collections SET status='collected' …
-  WHERE id=? AND status IN ('awaiting_payment','ready_for_collection')`, then the payment
-  INSERT runs only if that UPDATE changed a row. A double click or retry changes nothing
-  the second time.
-- Manually recorded payments carry a client-generated `request_id TEXT UNIQUE`, so a
-  resubmitted form can't record the same payment twice.
+DDL: [design/sql/payments.sql](design/sql/payments.sql) (into migration 0005); statements:
+`COLLECT_CHECK_SQL` / `RECORD_PAYMENT_SQL` in `worker/db/paymentSql.ts`, reused verbatim by M5.
+
+- `payments.check_collection_id INTEGER UNIQUE REFERENCES check_collections(id)`: one payment per
+  collection. Triggers block changing a payment's `check_collection_id` and deleting a linked payment.
+- `payments.request_id TEXT UNIQUE`, and `CHECK (check_collection_id IS NOT NULL OR (request_id IS NOT
+  NULL AND length(trim(request_id)) > 0))`: every manual payment carries a client-generated request id.
+  `amount_cents` is a positive integer; `method` is one of `PAYMENT_METHODS`.
+- **Collect** = one batch of three adjacent statements: (1) `UPDATE check_collections SET
+  status='collected', amount_received_cents=? … WHERE id=? AND status IN
+  ('awaiting_payment','ready_for_collection')`; (2) `INSERT INTO payments (…) SELECT … FROM
+  check_collections WHERE id=? AND changes() = 1`; (3) the `check_collected` activity INSERT
+  `SELECT … FROM payments WHERE check_collection_id=? AND changes() = 1`, i.e. only for a payment that
+  exists and was inserted by (2). A retry or competing collect changes nothing; a failing payment
+  INSERT (e.g. amount 0) rolls the collection status back.
+- **Manual payment:** on a `request_id` UNIQUE failure the route loads the stored payment and calls
+  `matchRetry` (`worker/domain/payments.ts`): an identical resubmission returns the stored payment, a
+  different payload under the same id is 409 `request_id_conflict`.
 - Deposited and cleared are statuses on the collection only and never touch `payments`.
+
+Proven in `tests/api/payments-dedup.test.ts`.
 
 ### 4.5 Dates and time zones (correction)
 

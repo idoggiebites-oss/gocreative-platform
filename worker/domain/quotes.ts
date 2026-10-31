@@ -57,6 +57,17 @@ export function validateItem(item: Item): { ok: true } | Failure {
   return { ok: true }
 }
 
+// Gate for draft/sent -> accepted: a customer can't approve an empty or invalid quote. $0 with a real line is fine.
+export function checkQuoteAcceptable(lines: readonly Item[]): { ok: true } | Failure {
+  if (!lines.some(line => line.kind === 'product')) return { ok: false, error: 'no_product_line' }
+  for (const line of lines) {
+    const result = validateItem(line)
+    if (!result.ok) return result
+  }
+  const totals = quoteTotals(lines)
+  return totals.ok ? { ok: true } : totals
+}
+
 export const CUSTOMER_FACING_ITEM_FIELDS = ['kind', 'description', 'product', 'garmentColor', 'method', 'sizes', 'quantity', 'unitPriceCents'] as const
 function normalizedSizes(sizes: Item['sizes']): string {
   return JSON.stringify(Object.entries(sizes ?? {}).filter(([, n]) => n !== 0).sort(([a], [b]) => a.localeCompare(b)))
