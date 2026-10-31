@@ -430,3 +430,6 @@ Migration 0006 (additive), `worker/db/{pickups,payments}.ts`, `worker/routes/{pi
 ## 2026-10-31 — No payment on a cancelled order, ever; payments are born unvoided (Codex review of 5fba130)
 - A BEFORE INSERT trigger on `payments` refuses a cancelled order, which also covers collecting a check whose order was cancelled after the check was created (the collect batch rolls back whole; the route answers 409 `order_not_active`).
 - A payment can't be inserted with void fields set: every void is the owner-checked, audited UPDATE.
+
+## 2026-10-31 — Money display stays on fmt.money (Codex nit, M5 UI review)
+- Amounts are stored, sent and computed as integer cents everywhere (shared/money.ts parses). `fmt.money` divides by 100 only to format for display; for any amount below about $90 trillion that conversion is exact to the cent, so it is not moved into shared/money.ts. Revisit only if a sum is ever computed in dollars.
