@@ -190,7 +190,9 @@ export type OrderWriteResponse = {
 /**
  * Uploads are the raw file as the request body (not multipart): Content-Type = the file's type, X-Filename =
  * encodeURIComponent(file.name), and the other fields as query parameters (see ArtworkUploadQuery). At most 50 MB.
- * The server sniffs the type from the bytes; the declared Content-Type must match it.
+ * Content-Length is required (411 length_required without it; a File or Blob body always sends it) and the body
+ * must be exactly that long (400 otherwise). The server sniffs the type from the first 4 KB; the declared
+ * Content-Type must match it. An SVG must reach its <svg> element within those 4 KB.
  */
 export type UploadedFile = { id: number; filename: string | null; mime: string; bytes: number; uploadedBy: string | null; uploadedAt: string }
 export type ArtworkVersion = {
@@ -217,7 +219,12 @@ export type PurchaseOrderRecord = {
   id: number; poNumber: string | null; amountCents: number | null; status: PoStatus; createdAt: string; updatedAt: string
   documents: { id: number; file: UploadedFile }[]
 }
-export type PurchaseOrderCreateRequest = { poNumber?: string | null; amountCents?: number | null; expectedVersion: number }
+/**
+ * While the order's latest PO is approved, a new one is refused (409 po_approved_exists) unless replaceApproved is
+ * true and reason is non-blank: then it is created, logged as po_replaced, and authorization is pending again.
+ */
+export type PurchaseOrderCreateRequest = { poNumber?: string | null; amountCents?: number | null; replaceApproved?: boolean; reason?: string | null; expectedVersion: number }
+/** An approved PO's number and amount are locked (409 po_approved_locked). */
 export type PurchaseOrderDetailsRequest = { poNumber?: string | null; amountCents?: number | null; expectedVersion: number }
 export type PurchaseOrdersResponse = { purchaseOrders: PurchaseOrderRecord[] }
 
@@ -227,7 +234,7 @@ export const API_ERROR_CODES = [
   'contact_archived', 'contact_not_for_customer', 'confirmation_required', 'order_not_active', 'production_started', 'quote_stale',
   'quote_frozen', 'quote_not_draft', 'invalid_quote_transition', 'no_product_line', 'discount_exceeds_total', 'po_required',
   'not_authorized', 'file_too_large', 'unsupported_file_type', 'file_type_mismatch', 'not_current_version', 'artwork_unchanged',
-  'po_not_required',
+  'po_not_required', 'length_required', 'po_approved_locked', 'po_approved_exists',
 ] as const
 export type ApiErrorCode = (typeof API_ERROR_CODES)[number]
 export type ApiError = { error: string; code?: ApiErrorCode; reasons?: string[] }
@@ -238,7 +245,7 @@ export const ACTIVITY_ACTIONS = [
   'contact_updated', 'contact_archived', 'contact_unarchived', 'note_added', 'order_updated', 'no_purchasing_confirmed',
   'items_replaced', 'quote_created', 'quote_refreshed', 'quote_status_changed', 'order_repeated', 'authorization_recorded',
   'authorization_revoked', 'order_cancelled', 'order_reopened', 'artwork_uploaded', 'artwork_decided', 'po_created',
-  'po_details_updated', 'po_document_added',
+  'po_details_updated', 'po_document_added', 'po_replaced',
 ] as const
 export type ActivityAction = (typeof ACTIVITY_ACTIONS)[number]
 export const GATE_REASON_CODES = [

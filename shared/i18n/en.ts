@@ -104,6 +104,9 @@ export const en = {
       not_current_version: 'Only the latest version of a design can be approved or sent back.',
       artwork_unchanged: 'This version already has that decision.',
       po_not_required: 'This order does not need a purchase order.',
+      length_required: 'The upload did not say how large the file is. Try again from the app.',
+      po_approved_locked: 'This purchase order is approved, so its number and amount can no longer change. Add a replacement PO instead.',
+      po_approved_exists: 'This order already has an approved purchase order. To replace it, confirm the replacement and give a reason.',
     } satisfies Record<ApiErrorCode, string>,
     unknownReason: 'A requirement is not met.',
     // Codes the API adds before shared/api.ts lists them; looked up after `errors`.
@@ -182,6 +185,7 @@ export const en = {
     po_created: (n: string) => `Purchase order added on ${n}`,
     po_details_updated: (n: string) => `Purchase order details changed on ${n}`,
     po_document_added: (n: string) => `Purchase order document uploaded on ${n}`,
+    po_replaced: (n: string) => `Approved purchase order replaced on ${n}`,
     note_added: (n?: string) => (n ? `Note added on ${n}` : 'Note added'),
     other: (n: string) => (n ? `Update on ${n}` : 'Update'),
   } satisfies Record<ActivityAction | 'other', (n: string) => string>,

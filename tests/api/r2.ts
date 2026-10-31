@@ -10,9 +10,12 @@ export function createTestR2() {
   const objects = new Map<string, { bytes: Uint8Array; contentType?: string }>()
   const calls: [op: 'put' | 'get' | 'delete', key: string][] = []
   const bucket = {
-    put: async (key: string, value: ArrayBufferView, opts?: { httpMetadata?: { contentType?: string } }) => {
+    // A stream is read to the end first: if it errors (a body shorter or longer than its declared length), nothing is stored.
+    put: async (key: string, value: ArrayBufferView | ReadableStream<Uint8Array>, opts?: { httpMetadata?: { contentType?: string } }) => {
       calls.push(['put', key])
-      const bytes = new Uint8Array(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength))
+      const bytes = value instanceof ReadableStream
+        ? new Uint8Array(await new Response(value).arrayBuffer())
+        : new Uint8Array(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength))
       objects.set(key, { bytes, contentType: opts?.httpMetadata?.contentType })
       return { key, size: bytes.byteLength }
     },
@@ -53,10 +56,14 @@ export function setupUploads() {
     : { DB, FILES: r2.bucket, ACCESS_AUD: 'a', ACCESS_TEAM_DOMAIN: 't.cloudflareaccess.com' })
   const json = (method: string, path: string, body?: unknown, auth = true) =>
     app.request(`http://localhost/api/app${path}`, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined || method === 'GET' ? undefined : JSON.stringify(body) }, env(auth))
-  const upload = (path: string, bytes: Uint8Array, type: string, opts: { filename?: string; auth?: boolean; DB?: typeof db; headers?: Record<string, string> } = {}) =>
+  // Content-Length is the body's length unless `length` says otherwise (null: no header, as a chunked upload sends).
+  const upload = (path: string, bytes: Uint8Array, type: string, opts: { filename?: string; auth?: boolean; DB?: typeof db; length?: string | number | null } = {}) =>
     app.request(`http://localhost/api/app${path}`, {
       method: 'POST', body: bytes as Uint8Array<ArrayBuffer>,
-      headers: { 'Content-Type': type, ...(opts.filename === undefined ? {} : { 'X-Filename': encodeURIComponent(opts.filename) }), ...opts.headers },
+      headers: {
+        'Content-Type': type, ...(opts.filename === undefined ? {} : { 'X-Filename': encodeURIComponent(opts.filename) }),
+        ...(opts.length === null ? {} : { 'Content-Length': String(opts.length ?? bytes.byteLength) }),
+      },
     }, env(opts.auth ?? true, opts.DB ?? db))
   const get = (path: string, auth = true) => app.request(`http://localhost/api/app${path}`, {}, env(auth))
   const one = <T>(sql: string, ...p: (string | number)[]) => sqlite.prepare(sql).get(...p) as T

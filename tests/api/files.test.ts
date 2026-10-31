@@ -37,7 +37,7 @@ describe('file names', () => {
 })
 
 describe('upload', () => {
-  test('each allowed type is accepted by its bytes and stored under a content key, never the file name', async () => {
+  test('each allowed type is accepted by its bytes and stored under a random key, never the file name; the hash is in the row', async () => {
     const t = setupUploads()
     const orderId = t.order('2026-0022').id
     for (const [bytes, mime] of [[PNG, 'image/png'], [JPEG, 'image/jpeg'], [TIFF_LE, 'image/tiff'], [TIFF_BE, 'image/tiff'], [PDF, 'application/pdf'], [SVG, 'image/svg+xml']] as const) {
@@ -48,7 +48,7 @@ describe('upload', () => {
         'SELECT f.* FROM files f JOIN artwork a ON a.file_id = f.id WHERE a.id = ?', id)
       const sha = createHash('sha256').update(bytes).digest('hex')
       expect(f).toMatchObject({ mime, bytes: bytes.byteLength, sha256: sha, filename: 'evil name.png', uploaded_by: 1 })
-      expect(f.r2_key).toMatch(new RegExp(`^orders/${orderId}/${sha}-[0-9a-f-]{36}$`))
+      expect(f.r2_key).toMatch(new RegExp(`^orders/${orderId}/[0-9a-f-]{36}$`))
       expect(t.r2.objects.get(f.r2_key)).toMatchObject({ contentType: mime })
     }
   })
@@ -80,29 +80,90 @@ describe('upload', () => {
     expect(t.footprint().files).toBe(before.files + 1)
   })
 
-  test('over 50 MB is refused: by Content-Length before reading, and by counting when there is none', async () => {
+  test('Content-Length is required (411) and over 50 MB is refused (413), both before anything is read or stored', async () => {
     const t = setupUploads()
     const before = t.footprint()
     const v = t.order('2026-0022').version
-    const declared = await t.upload(`${ARTWORK}?expectedVersion=${v}`, PNG, 'image/png', { headers: { 'Content-Length': String(MAX_UPLOAD_BYTES + 1) } })
+    for (const length of [null, 'abc', '-1', '1.5', '']) {
+      const res = await t.upload(`${ARTWORK}?expectedVersion=${v}`, PNG, 'image/png', { length })
+      expect(res.status, String(length)).toBe(411)
+      expect(await res.json()).toMatchObject({ code: 'length_required' })
+    }
+    const declared = await t.upload(`${ARTWORK}?expectedVersion=${v}`, PNG, 'image/png', { length: MAX_UPLOAD_BYTES + 1 })
     expect(declared.status).toBe(413)
     expect(await declared.json()).toMatchObject({ code: 'file_too_large' })
-    const big = new Uint8Array(MAX_UPLOAD_BYTES + 1)
-    big.set(PNG)
-    const counted = await t.upload(`${ARTWORK}?expectedVersion=${v}`, big, 'image/png')
-    expect(counted.status).toBe(413)
     expect(t.footprint()).toEqual(before)
     expect(t.r2.calls).toEqual([])
-    // Exactly 50 MB is fine.
-    expect((await t.upload(`${ARTWORK}?expectedVersion=${v}`, big.subarray(0, MAX_UPLOAD_BYTES), 'image/png')).status).toBe(201)
+    // Exactly 50 MB is fine, and is stored whole.
+    const big = new Uint8Array(MAX_UPLOAD_BYTES)
+    big.set(PNG)
+    const res = await t.upload(`${ARTWORK}?expectedVersion=${v}`, big, 'image/png')
+    expect(res.status).toBe(201)
+    const f = t.one<{ r2_key: string; bytes: number; sha256: string }>('SELECT f.r2_key, f.bytes, f.sha256 FROM files f JOIN artwork a ON a.file_id = f.id WHERE a.id = ?', ((await res.json()) as UploadResponse).id)
+    expect(f).toMatchObject({ bytes: MAX_UPLOAD_BYTES, sha256: createHash('sha256').update(big).digest('hex') })
+    expect(t.r2.objects.get(f.r2_key)!.bytes.byteLength).toBe(MAX_UPLOAD_BYTES)
   })
 
-  test('if the D1 batch throws after the R2 put, the object is deleted', async () => {
+  test('a body shorter or longer than its Content-Length is refused, with no files row and no object left', async () => {
     const t = setupUploads()
     const before = t.footprint()
-    const failing = { prepare: t.db.prepare.bind(t.db), batch: async () => { throw new Error('D1 is down') } } as unknown as typeof t.db
+    const v = t.order('2026-0022').version
+    const long = new Uint8Array(64 * 1024)
+    long.set(PNG)
+    for (const [bytes, length] of [[PNG, PNG.byteLength + 10], [long, 1000], [long, long.byteLength * 4]] as const) {
+      const res = await t.upload(`${ARTWORK}?expectedVersion=${v}`, bytes, 'image/png', { length })
+      expect(res.status, `${bytes.byteLength} bytes, declared ${length}`).toBe(400)
+      expect(await res.json()).toMatchObject({ code: 'invalid_request' })
+    }
+    expect(t.footprint()).toEqual(before)
+  })
+
+  // Codex security review of 1729ff4: an object a committed row names must never be deleted.
+  test('the batch commits, then the follow-up read fails: the object stays and the rows reference it', async () => {
+    const t = setupUploads()
+    const before = t.footprint()
+    let committed = false
+    const flaky = {
+      prepare: (sql: string) => (committed ? { bind: () => ({ first: async () => { throw new Error('D1 read timed out') } }) } : t.db.prepare(sql)),
+      batch: async (stmts: Parameters<typeof t.db.batch>[0]) => {
+        const r = await t.db.batch(stmts)
+        committed = true
+        return r
+      },
+    } as unknown as typeof t.db
+    const res = await t.upload(`${ARTWORK}?expectedVersion=${t.order('2026-0022').version}`, PNG, 'image/png', { DB: flaky })
+    expect(res.status).toBe(500)
+    expect(t.r2.calls.map(([op]) => op)).toEqual(['put'])
+    expect(t.footprint()).toMatchObject({ files: before.files + 1, artwork: before.artwork + 1, r2: before.r2 + 1 })
+    const key = t.r2.calls[0]![1]
+    expect(t.count('SELECT COUNT(*) AS n FROM artwork a JOIN files f ON f.id = a.file_id WHERE f.r2_key = ?', key)).toBe(1)
+    expect(t.r2.objects.get(key)!.bytes).toEqual(PNG)
+  })
+
+  test('a D1 failure that may have committed keeps the object (an unreferenced object is harmless)', async () => {
+    const t = setupUploads()
+    const before = t.footprint()
+    const failing = { prepare: t.db.prepare.bind(t.db), batch: async () => { throw new Error('Network connection lost') } } as unknown as typeof t.db
     const res = await t.upload(`${ARTWORK}?expectedVersion=${t.order('2026-0022').version}`, PNG, 'image/png', { DB: failing })
     expect(res.status).toBe(500)
+    expect(t.r2.calls.map(([op]) => op)).toEqual(['put'])
+    expect(t.footprint()).toEqual({ ...before, r2: before.r2 + 1 })
+  })
+
+  test('a batch that certainly rolled back (a constraint failure) deletes the object', async () => {
+    const t = setupUploads()
+    const n = '2026-0017' // design 17
+    const before = t.footprint()
+    // Design 17 moves to another order between the route's read and the batch: the version subquery is NULL, NOT NULL aborts the batch.
+    const racing = {
+      prepare: t.db.prepare.bind(t.db),
+      batch: async (stmts: Parameters<typeof t.db.batch>[0]) => {
+        t.sqlite.exec(`UPDATE artwork SET order_id = 1 WHERE lineage_id = 17`)
+        return t.db.batch(stmts)
+      },
+    } as unknown as typeof t.db
+    const res = await t.upload(`/orders/${n}/artwork?expectedVersion=${t.order(n).version}&lineageId=17`, PNG, 'image/png', { DB: racing })
+    expect(res.status).toBe(409)
     expect(t.r2.calls.map(([op]) => op)).toEqual(['put', 'delete'])
     expect(t.footprint()).toEqual(before)
   })

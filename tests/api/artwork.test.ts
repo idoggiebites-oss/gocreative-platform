@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import type { ArtworkListResponse, OrderDetailResponse, OrderWriteResponse, UploadResponse } from '../../shared/api'
+import { decideArtwork } from '../../worker/db/files'
 import { PNG, SVG, setupUploads, type Uploads } from './r2'
 
 const up = (t: Uploads, n: string, query = '', bytes = PNG, mime = 'image/png') =>
@@ -102,6 +103,22 @@ describe('approval', () => {
     expect(res.status).toBe(409)
     expect(await res.json()).toMatchObject({ code: 'not_current_version' })
     expect(t.footprint()).toEqual(before)
+  })
+
+  // Codex security review of 1729ff4: the route refuses this first, so only a direct call proves the SQL guard.
+  test('decideArtwork itself changes nothing on an obsolete version, even when told it is current', async () => {
+    const t = setupUploads()
+    const o = t.order('2026-0007')
+    const before = t.footprint()
+    const row = () => t.one('SELECT approval_status, approved_at, approved_via, approval_recorded_by, notes FROM artwork WHERE id = 7')
+    const was = row()
+    // v1 (id 7) of design 7, changes requested; v2 (id 107) is the current one.
+    const state = await decideArtwork(t.db, {
+      orderId: o.id, version: o.version, actorId: 1, to: 'approved', via: 'email', note: 'should not land',
+      artwork: { id: 7, lineage_id: 7, version: 1, approval_status: 'changes_requested', is_current: 1 },
+    })
+    expect(state).toBeNull()
+    expect([row(), t.order('2026-0007').version, t.footprint()]).toEqual([was, o.version, before])
   })
 
   test('approving needs `via`', async () => {
