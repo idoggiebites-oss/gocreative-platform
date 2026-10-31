@@ -167,6 +167,20 @@ describe('quote immutability triggers', () => {
     expect(() => db.exec('DELETE FROM quotes WHERE id = 1')).toThrow(/quote_not_draft/)
     expect(() => db.exec("REPLACE INTO quotes (id, order_id, version, items_revision, created_by) VALUES (1, 1, 1, 1, 1)")).toThrow(/quote_not_draft/)
   })
+  it('UPDATE OR REPLACE cannot move a draft onto a frozen version and delete it', () => {
+    for (const status of ['sent', 'declined', 'superseded']) {
+      const { db, quote } = setup()
+      quote(1, 1, []) // Codex's case: an empty quote that has left draft
+      db.exec(`UPDATE quotes SET status = '${status}' WHERE id = 1`)
+      quote(2, 2)
+      expect(() => db.exec('UPDATE OR REPLACE quotes SET version = 1 WHERE order_id = 1 AND version = 2'), status).toThrow(/quote_frozen/)
+      expect(db.prepare('SELECT status FROM quotes WHERE order_id = 1 AND version = 1').get(), status).toEqual({ status })
+    }
+  })
+  it('an authorization timestamp is never blank', () => {
+    const { db } = setup()
+    for (const v of ["''", "'   '"]) expect(() => db.exec(`UPDATE orders SET authorized_at = ${v} WHERE id = 1`), v).toThrow(/CHECK/)
+  })
   it('allows exactly the transitions checkQuoteTransition and planNewVersion make', () => {
     const allowed: Record<string, string[]> = {
       draft: ['sent', 'accepted', 'declined', 'superseded'], sent: ['accepted', 'declined', 'superseded'], accepted: ['superseded'], declined: [], superseded: [],

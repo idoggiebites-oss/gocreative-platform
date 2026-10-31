@@ -22,7 +22,7 @@ const QUOTE_OK = `EXISTS (SELECT 1 FROM quotes q WHERE q.id = ${CURRENT_QUOTE_ID
   AND EXISTS (SELECT 1 FROM quote_items qi WHERE qi.quote_id = q.id AND qi.kind = 'product'))`
 const LATEST_PO_STATUS = `(SELECT status FROM purchase_orders WHERE order_id = orders.id ORDER BY id DESC LIMIT 1)`
 // Direct authorization cannot substitute for a required PO.
-const AUTH_OK = `((orders.po_required = 0 AND orders.authorized_at IS NOT NULL) OR (orders.po_required = 1 AND ${LATEST_PO_STATUS} IS 'approved'))`
+const AUTH_OK = `((orders.po_required = 0 AND orders.authorized_at IS NOT NULL AND trim(orders.authorized_at) <> '') OR (orders.po_required = 1 AND ${LATEST_PO_STATUS} IS 'approved'))`
 // A design = an artwork lineage on this order; its current version = the highest version attached to the order.
 const CURRENT_ARTWORK = `artwork a WHERE a.order_id = orders.id
   AND a.version = (SELECT MAX(b.version) FROM artwork b WHERE b.lineage_id = a.lineage_id AND b.order_id = orders.id)`

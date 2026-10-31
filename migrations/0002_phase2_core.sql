@@ -47,7 +47,7 @@ CREATE TABLE orders (
   artwork_required INTEGER NOT NULL DEFAULT 1 CHECK (artwork_required IN (0,1)),
   po_required INTEGER NOT NULL DEFAULT 0 CHECK (po_required IN (0,1)),
   -- Direct authorization (non-PO orders); history lives in activity_log.
-  authorized_at TEXT,
+  authorized_at TEXT CHECK (authorized_at IS NULL OR length(trim(authorized_at)) > 0),
   authorized_by INTEGER REFERENCES users (id) ON DELETE SET NULL,
   authorization_method TEXT CHECK (authorization_method IS NULL OR authorization_method IN ('phone','email','in_person','signed_form','other')),
   authorization_notes TEXT,
@@ -243,6 +243,11 @@ WHEN NEW.id IS NOT OLD.id OR (OLD.status <> 'draft' AND (
   OR NEW.subtotal_cents IS NOT OLD.subtotal_cents OR NEW.charges_cents IS NOT OLD.charges_cents
   OR NEW.discounts_cents IS NOT OLD.discounts_cents OR NEW.total_cents IS NOT OLD.total_cents
   OR NEW.created_by IS NOT OLD.created_by OR NEW.created_at IS NOT OLD.created_at))
+BEGIN SELECT RAISE(ABORT, 'quote_frozen'); END;
+-- A quote's order and version never change, draft or not: UPDATE OR REPLACE onto another
+-- version's (order_id, version) would otherwise silently delete that (possibly frozen) quote.
+CREATE TRIGGER quotes_identity_fixed BEFORE UPDATE OF order_id, version ON quotes
+WHEN NEW.order_id IS NOT OLD.order_id OR NEW.version IS NOT OLD.version
 BEGIN SELECT RAISE(ABORT, 'quote_frozen'); END;
 -- The union of checkQuoteTransition (draft -> sent/accepted/declined, sent -> accepted/declined) and
 -- planNewVersion (draft/sent/accepted -> superseded). Declined and superseded are final.

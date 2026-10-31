@@ -371,7 +371,8 @@ function Order({ d }: { d: Detail }) {
   const c: Controls = { po: useChangePo(d.order.number), prod: useChangeProduction(d.order.number) }
   const moves = useMoves(d)
   const [tab, setTab] = useState<Tab>('items')
-  const qty = d.items.reduce((s, i) => s + i.quantity, 0)
+  // Products only: charge and discount lines carry a quantity too, but aren't items.
+  const qty = d.items.filter((i) => i.kind === 'product').reduce((s, i) => s + i.quantity, 0)
   return (
     <div className={cn(PAGE, 'max-w-[1280px] gap-4 pt-5')}>
       <nav aria-label={m.order.breadcrumb} className="text-[13px] text-muted-foreground">
