@@ -273,7 +273,7 @@ logic it can test, Claude for design, integration and verification).
       new version resets approval; PO document upload. *(Opus, same task)*
 - [x] UI: artwork tab (designs, versions, previews, approve), PO documents. *(Sonnet)*
 
-### M3 — Purchasing and preparation (brief Step 3) → acceptance 7, 8, 10 — built and Codex-reviewed ("M3 ready") 2026-10-31; migration 0004 + deploy await Arturo's go
+### M3 — Purchasing and preparation (brief Step 3) → acceptance 7, 8, 10 — built and Codex-reviewed ("M3 ready") 2026-10-31; LIVE 2026-10-31 (0004 applied remotely, Worker version 5f845264)
 - [x] Migration 0004 (0003 went to M2); suppliers (JDS default, add new); purchases; receipts (partial);
       "No purchasing needed"; prep status; **gate extended to all five items** in the domain
       and in the SQL guard, with the parity test. *(Sonnet for CRUD; Opus for the gate change)*
