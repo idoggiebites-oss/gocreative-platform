@@ -27,10 +27,10 @@ One Cloudflare Worker serves everything. It has three surfaces on one origin:
   `/api/app/files/:id`, which checks auth on every request and never serves a
   public R2 URL. SVG is only ever shown via `<img>` (scripts can't run there) and
   is served with `Content-Disposition: attachment` and a sandbox CSP.
-- **Previews:** PNG/JPEG/SVG render natively. For TIFF (only Safari renders it) and
-  PDF, the browser makes a PNG thumbnail at upload time (utif2 / pdf.js, lazy-loaded
-  on the upload screen only) and stores it next to the original. Originals are
-  never modified.
+- **Previews:** native only, no thumbnails and no extra libraries (decided for M2a,
+  2026-10-31): PNG/JPEG render natively, SVG only through `<img>`, PDF in the
+  browser's viewer, TIFF in Safari (other browsers offer the download). Originals
+  are never modified; `files.preview_key` stays unused.
 - **Integration boundary for later (Wave, payments):** for now `invoice_ref` and
   `payment_ref` are free-text fields on the order. A future sync writes those same
   fields. No integration code yet.

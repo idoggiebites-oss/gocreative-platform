@@ -4,6 +4,8 @@ import { listUsers } from '../db/users'
 import { customerRoutes } from './customers'
 import { orderRoutes } from './orders'
 import { orderWriteRoutes } from './orderWrites'
+import { artworkRoutes } from './artwork'
+import { fileRoutes } from '../files'
 
 /** Employee API, mounted at /api/app. getKeys is injectable for tests. */
 export function appRoutes(getKeys?: GetKeys) {
@@ -14,4 +16,6 @@ export function appRoutes(getKeys?: GetKeys) {
     .route('/', orderRoutes())
     .route('/', customerRoutes())
     .route('/', orderWriteRoutes())
+    .route('/', artworkRoutes())
+    .route('/', fileRoutes())
 }

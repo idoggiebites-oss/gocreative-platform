@@ -227,3 +227,24 @@ longer be edited, and changes go in 0003+.
   Before this, the app could only change the status of a PO that already existed.
 - From M2 on, schema changes are new additive migrations (0003+) that preserve
   the live data.
+
+### 2026-10-31 — M2a: artwork, file and PO-document API (agent; Codex security review next)
+- **Previews are native only:** PNG/JPEG, SVG as `<img>`, PDF in the browser's viewer, TIFF in Safari. No
+  thumbnail generation, no new libraries (replaces ARCHITECTURE's utif2 / pdf.js plan). Files are write-once.
+- **Uploads are the raw body**, not multipart: `Content-Type` = declared type, `X-Filename` = the URI-encoded
+  name, other fields as query parameters. One copy of the file in memory instead of two, which matters at the
+  50 MB cap under the Worker's 128 MB. Content-Length over the cap is refused before reading; without one, the
+  read stops at the cap.
+- **Type by magic bytes** (PNG, JPEG, TIFF, PDF; SVG = UTF-8 text whose first element after the prolog,
+  comments and a plain DOCTYPE is `<svg>`). The declared type must match; the sniffed one is stored. PO
+  documents refuse SVG.
+- **R2 first, then one D1 batch** (files row + artwork / po_documents row + version bump + activity + re-derive).
+  A batch that throws or applies nothing (stale version) deletes the R2 object, best effort. A failed delete
+  leaves an object no row names, which nothing can serve.
+- **Downloads** (`/api/app/files/:id`) serve only files an artwork version or PO document links to an order,
+  with nosniff, a sandbox CSP and `private, max-age=0`; SVG always as an attachment (`<img>` still renders it).
+- **A design's name** is `artwork.design_name`, copied to each new version (migration 0003, additive). A new
+  version starts under review. Only a design's current version can be decided; a decision can be reversed
+  (approved ⇄ changes requested), and changes requested clears the approval fields. Approval notes are stored
+  on the version and never copied into the activity log.
+- **Migration numbering:** M2a took 0003, so M3–M5's migrations become 0004–0006.

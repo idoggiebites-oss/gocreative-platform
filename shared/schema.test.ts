@@ -8,12 +8,14 @@ import * as e from './enums'
 const read = (f: string) => readFileSync(new URL(`../migrations/${f}`, import.meta.url).pathname, 'utf8')
 const M1 = read('0001_init.sql')
 const M2 = read('0002_phase2_core.sql')
+const M3 = read('0003_artwork_po.sql')
 // D1 runs a migration in one transaction; defer_foreign_keys checks at its commit.
 const apply = (db: DatabaseSync, sql: string) => db.exec(`BEGIN; ${sql}; COMMIT;`)
 function migrated() {
   const db = new DatabaseSync(':memory:') // foreign keys on by default, like D1
   apply(db, M1)
   apply(db, M2)
+  apply(db, M3)
   return db
 }
 
@@ -38,7 +40,7 @@ const enumColumns: [table: string, column: string, values: readonly string[]][] 
   ['inquiries', 'status', e.INQUIRY_STATUSES],
 ]
 
-describe('final schema (0001 + 0002)', () => {
+describe('final schema (0001 + 0002 + 0003)', () => {
   const db = migrated()
   const tableSql = (table: string) => (db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(table) as { sql: string } | undefined)?.sql
   function checkList(table: string, column: string): string[] {
@@ -111,6 +113,12 @@ describe('final schema (0001 + 0002)', () => {
     db.exec("INSERT INTO artwork (id, customer_id, lineage_id, version, file_id) VALUES (1, 1, 1, 1, 1)")
     expect(() => db.exec("UPDATE artwork SET approval_status = 'approved' WHERE id = 1")).toThrow(/CHECK/)
     db.exec("UPDATE artwork SET approval_status = 'approved', approved_at = '2026-10-30T00:00:00Z', approved_via = 'email', approval_recorded_by = 1 WHERE id = 1")
+  })
+  it('an artwork version keeps its design, number, file and customer (0003)', () => {
+    for (const set of ['file_id = 2', 'version = 2', 'lineage_id = 9', 'customer_id = 2']) {
+      expect(() => db.exec(`UPDATE artwork SET ${set} WHERE id = 1`), set).toThrow(/artwork_version_fixed|FOREIGN KEY/)
+    }
+    db.exec("UPDATE artwork SET notes = 'n', design_name = 'Logo' WHERE id = 1")
   })
 })
 
@@ -277,5 +285,45 @@ describe('0002 applies on top of 0001', () => {
     expect(() => apply(db, broken)).toThrow()
     db.exec('ROLLBACK')
     expect(db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'estimates'").get()).toEqual({ n: 1 })
+  })
+})
+
+describe('0003 applies on top of 0002 with real data', () => {
+  it('keeps every row, adds the columns empty, and the triggers and indexes', () => {
+    const db = new DatabaseSync(':memory:')
+    apply(db, M1)
+    apply(db, M2)
+    db.exec(`INSERT INTO users (id, email, name, role) VALUES (1, 'a@x', 'A', 'owner'), (2, 'b@x', 'B', 'staff');
+      INSERT INTO customers (id, kind, name, default_po_required) VALUES (1, 'district', 'ISD', 1), (2, 'individual', 'Pat', 0);
+      INSERT INTO customer_contacts (id, customer_id, name) VALUES (1, 1, 'Buyer');
+      INSERT INTO orders (id, number, customer_id, contact_id, source, title, po_required, production_status, version) VALUES
+        (1, '2026-0001', 1, 1, 'email', 'Band shirts', 1, 'awaiting_artwork', 4), (2, '2026-0002', 2, NULL, 'phone', 'Mug', 0, 'awaiting_quote', 0);
+      INSERT INTO order_items (order_id, product, method, quantity, unit_price_cents) VALUES (1, 'Tee', 'screen', 40, 900);
+      INSERT INTO quotes (id, order_id, version, items_revision, subtotal_cents, total_cents, created_by) VALUES (1, 1, 1, 0, 36000, 36000, 1);
+      INSERT INTO quote_items (quote_id, position, kind, product, method, quantity, unit_price_cents, line_total_cents) VALUES (1, 0, 'product', 'Tee', 'screen', 40, 900, 36000);
+      UPDATE quotes SET status = 'accepted' WHERE id = 1;
+      INSERT INTO files (id, r2_key, mime, bytes, sha256, uploaded_by) VALUES (1, 'orders/1/a', 'image/png', 10, 'a', 1), (2, 'orders/1/b', 'application/pdf', 20, 'b', 2);
+      INSERT INTO artwork (id, customer_id, order_id, lineage_id, version, file_id, approval_status, approved_at, approved_via, approval_recorded_by)
+        VALUES (1, 1, 1, 1, 1, 1, 'approved', '2026-10-31T00:00:00Z', 'email', 2);
+      INSERT INTO purchase_orders (id, order_id, po_number, amount_cents, status) VALUES (1, 1, 'PO-1', 36000, 'approved');
+      INSERT INTO po_documents (id, po_id, file_id) VALUES (1, 1, 2);
+      INSERT INTO notes (entity_type, entity_id, author_id, body) VALUES ('order', 1, 1, 'kept');
+      INSERT INTO activity_log (actor_kind, actor_id, entity_type, entity_id, action) VALUES ('user', 1, 'order', 1, 'created');
+      INSERT INTO counters (name, year, next) VALUES ('order', 2026, 3);`)
+    const snapshot = (sql: string) => db.prepare(sql).all()
+    const tables = ['users', 'customers', 'customer_contacts', 'orders', 'order_items', 'quotes', 'quote_items', 'purchase_orders', 'po_documents', 'notes', 'activity_log', 'counters']
+    const before = Object.fromEntries(tables.map((t) => [t, snapshot(`SELECT * FROM ${t} ORDER BY rowid`)]))
+    const filesBefore = snapshot('SELECT * FROM files ORDER BY id')
+    const artworkBefore = snapshot('SELECT * FROM artwork ORDER BY id')
+    apply(db, M3)
+    for (const t of tables) expect(snapshot(`SELECT * FROM ${t} ORDER BY rowid`), t).toEqual(before[t])
+    expect(snapshot('SELECT * FROM files ORDER BY id')).toEqual(filesBefore.map((r) => ({ ...(r as object), filename: null })))
+    expect(snapshot('SELECT * FROM artwork ORDER BY id')).toEqual(artworkBefore.map((r) => ({ ...(r as object), design_name: null })))
+    const names = (type: string) => (db.prepare('SELECT name FROM sqlite_master WHERE type = ?').all(type) as { name: string }[]).map((r) => r.name)
+    expect(names('trigger')).toEqual(expect.arrayContaining(['files_write_once', 'files_no_replace', 'artwork_version_fixed', 'po_documents_write_once']))
+    expect(names('index')).toEqual(expect.arrayContaining(['idx_artwork_file', 'idx_po_documents_file', 'idx_artwork_order', 'idx_po_documents_po']))
+    expect(() => db.exec("UPDATE files SET filename = 'x' WHERE id = 1")).toThrow(/write-once/)
+    expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([])
+    expect(db.prepare('PRAGMA integrity_check').get()).toEqual({ integrity_check: 'ok' })
   })
 })

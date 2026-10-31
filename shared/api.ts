@@ -1,7 +1,7 @@
 // Request/response types for /api/app order screens. Dates are returned as stored
 // (due_date YYYY-MM-DD, timestamps ISO UTC text); money is integer cents.
 import type {
-  AuthorizationMethod, CustomerKind, ItemKind, Method, OrderArtworkStatus, OrderSource, OrderState, PaymentTerms, PoStatus, PrepStatus,
+  ArtworkApproval, AuthorizationMethod, CustomerKind, ItemKind, Method, OrderArtworkStatus, OrderSource, OrderState, PaymentTerms, PoStatus, PrepStatus,
   ProductionStatus, QuoteStatus,
 } from './enums'
 
@@ -133,7 +133,10 @@ export type OrderDetailResponse = {
     decidedAt: string | null
     items: (OrderItem & { lineTotalCents: number })[]
   } | null
-  purchaseOrders: { id: number; poNumber: string | null; amountCents: number | null; status: PoStatus; createdAt: string; updatedAt: string }[]
+  /** Newest first, each with its documents (newest first). */
+  purchaseOrders: PurchaseOrderRecord[]
+  /** The order's designs, each with every version newest first (versions[0] is the current one). */
+  designs: ArtworkDesign[]
   notes: { id: number; body: string; authorName: string | null; createdAt: string }[]
   activity: { id: number; actor: string; action: string; before: unknown; after: unknown; createdAt: string }[]
   /** ok = readiness.ready; reasons = 'order_not_active' and/or '<item>.<reason>' for each pending item (GATE_REASON_CODES). */
@@ -183,12 +186,48 @@ export type OrderWriteResponse = {
   quote?: { version: number; status: QuoteStatus }
 }
 
+// ---- artwork, files and PO documents (M2a) ----
+/**
+ * Uploads are the raw file as the request body (not multipart): Content-Type = the file's type, X-Filename =
+ * encodeURIComponent(file.name), and the other fields as query parameters (see ArtworkUploadQuery). At most 50 MB.
+ * The server sniffs the type from the bytes; the declared Content-Type must match it.
+ */
+export type UploadedFile = { id: number; filename: string | null; mime: string; bytes: number; uploadedBy: string | null; uploadedAt: string }
+export type ArtworkVersion = {
+  id: number
+  version: number
+  approvalStatus: ArtworkApproval
+  approvedAt: string | null
+  approvedVia: AuthorizationMethod | null
+  approvalRecordedBy: string | null
+  /** Internal approval notes; never copied into the activity log. */
+  notes: string | null
+  createdAt: string
+  /** Download at /api/app/files/:id (add ?download=1 to force a download). */
+  file: UploadedFile
+}
+export type ArtworkDesign = { lineageId: number; name: string | null; orderNumber: string; versions: ArtworkVersion[] }
+/** Query of POST /orders/:number/artwork: omit lineageId for a new design, or pass it for a new version of that design. */
+export type ArtworkUploadQuery = { expectedVersion: number; designName?: string; lineageId?: number }
+export type ArtworkDecisionRequest = { to: 'approved' | 'changes_requested'; via?: AuthorizationMethod; note?: string | null; expectedVersion: number }
+export type ArtworkListResponse = { designs: ArtworkDesign[] }
+/** The written order's state plus the new row's id (artworkId / poId / documentId). */
+export type UploadResponse = OrderWriteResponse & { id: number }
+export type PurchaseOrderRecord = {
+  id: number; poNumber: string | null; amountCents: number | null; status: PoStatus; createdAt: string; updatedAt: string
+  documents: { id: number; file: UploadedFile }[]
+}
+export type PurchaseOrderCreateRequest = { poNumber?: string | null; amountCents?: number | null; expectedVersion: number }
+export type PurchaseOrderDetailsRequest = { poNumber?: string | null; amountCents?: number | null; expectedVersion: number }
+export type PurchaseOrdersResponse = { purchaseOrders: PurchaseOrderRecord[] }
+
 // `error` is English text for logs; the UI shows a translation of `code` (and of each gate reason code in `reasons`).
 export const API_ERROR_CODES = [
   'transition_not_allowed', 'gate_failed', 'conflict_retry', 'po_transition_not_allowed', 'not_found', 'invalid_request',
   'contact_archived', 'contact_not_for_customer', 'confirmation_required', 'order_not_active', 'production_started', 'quote_stale',
   'quote_frozen', 'quote_not_draft', 'invalid_quote_transition', 'no_product_line', 'discount_exceeds_total', 'po_required',
-  'not_authorized',
+  'not_authorized', 'file_too_large', 'unsupported_file_type', 'file_type_mismatch', 'not_current_version', 'artwork_unchanged',
+  'po_not_required',
 ] as const
 export type ApiErrorCode = (typeof API_ERROR_CODES)[number]
 export type ApiError = { error: string; code?: ApiErrorCode; reasons?: string[] }
@@ -198,7 +237,8 @@ export const ACTIVITY_ACTIONS = [
   'created', 'production_status_changed', 'po_status_changed', 'customer_created', 'customer_updated', 'contact_added',
   'contact_updated', 'contact_archived', 'contact_unarchived', 'note_added', 'order_updated', 'no_purchasing_confirmed',
   'items_replaced', 'quote_created', 'quote_refreshed', 'quote_status_changed', 'order_repeated', 'authorization_recorded',
-  'authorization_revoked', 'order_cancelled', 'order_reopened',
+  'authorization_revoked', 'order_cancelled', 'order_reopened', 'artwork_uploaded', 'artwork_decided', 'po_created',
+  'po_details_updated', 'po_document_added',
 ] as const
 export type ActivityAction = (typeof ACTIVITY_ACTIONS)[number]
 export const GATE_REASON_CODES = [

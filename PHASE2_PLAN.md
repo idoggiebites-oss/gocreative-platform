@@ -88,6 +88,9 @@ Migrations, one per milestone, each with its own schema test like `shared/schema
 - **0002** (M1): customer defaults; order columns for quotes and authorization; `order_items.kind`;
   `quotes` + `quote_items` replacing `estimates`; immutability triggers; artwork status rename
   (`none` → `not_received`, `pending` → `under_review`, + `not_required`); time zone in `business.ts` (not SQL)
+- **0003 is M2a's** `0003_artwork_po.sql` (added 2026-10-31: `files.filename`, `artwork.design_name`, artwork-version and
+  PO-document write-once triggers, file-link indexes). The M3, M4 and M5 migrations below each move up one number
+  (0004, 0005, 0006); the references further down still use the old numbers.
 - **0003** (M3): `suppliers` (+ JDS), `order_purchases`, `purchase_receipts`, `materials_required`, `prep_status`
 - **0004** (M4): `queue_position`, `units_completed`, the §4.3 slot DDL. (The production status set moved into 0002, see below.)
 - **0005** (M5): `pickups`, `payments`, `check_collections`, `payment_terms`, `payment_due_on`

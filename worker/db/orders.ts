@@ -8,6 +8,7 @@ import type {
 import type { ActivityAction, InquiryListRow, OrderCounts, OrderDetailResponse, OrderListRow, OrderView } from '../../shared/api'
 import type { DashInquiry, DashOrder } from '../domain/dashboard'
 import type { ReadinessInput } from '../domain/readiness'
+import { listDesigns, listPoDocuments } from './files'
 
 // ---- readiness in SQL ----
 // The SQL twin of domain/readiness.ts, correlated on the `orders` row (an UPDATE's target, or `FROM orders`).
@@ -97,7 +98,8 @@ const VIEW_WHERE: Record<Exclude<OrderView, 'inquiries'>, string> = {
 // Never note bodies or authorization notes; `reason` is the staff-typed cancel/revoke reason, shown in the history.
 const ACTIVITY_KEYS = ['production_status', 'state', 'po_status', 'po_id', 'artwork_status', 'reason', 'items_revision', 'quote_version',
   'quote_status', 'order_number', 'repeat_of', 'authorization_method', 'fields',
-  'title', 'due_date', 'contact_id', 'source', 'po_required', 'payment_terms', 'artwork_required', 'materials_required', 'assignee_id']
+  'title', 'due_date', 'contact_id', 'source', 'po_required', 'payment_terms', 'artwork_required', 'materials_required', 'assignee_id',
+  'artwork_id', 'lineage_id', 'artwork_version', 'design_name', 'approval_status', 'approved_via', 'po_number', 'amount_cents']
 
 const likeEscape = (q: string) => q.replace(/[\\%_]/g, (ch) => `\\${ch}`)
 
@@ -280,7 +282,7 @@ const toItem = (i: ItemRow) => ({
 export async function getOrderDetail(db: D1Database, number: string): Promise<(Omit<OrderDetailResponse, 'gate' | 'readiness'> & { readinessInput: ReadinessInput }) | null> {
   const o = await getOrderByNumber(db, number)
   if (!o) return null
-  const [customer, contact, items, quote, pos, notes, activity, input] = await Promise.all([
+  const [customer, contact, items, quote, pos, notes, activity, input, designs, poDocs] = await Promise.all([
     db.prepare('SELECT id, name, kind, email, phone FROM customers WHERE id = ?').bind(o.customer_id).first<OrderDetailResponse['customer']>(),
     o.contact_id === null
       ? null
@@ -300,6 +302,8 @@ export async function getOrderDetail(db: D1Database, number: string): Promise<(O
         LEFT JOIN users u ON u.id = a.actor_id WHERE a.entity_type = 'order' AND a.entity_id = ? ORDER BY a.id DESC LIMIT 50`).bind(o.id)
       .all<{ id: number; actor: string; action: string; before: string | null; after: string | null; at: string }>(),
     readinessInput(db, o),
+    listDesigns(db, { orderId: o.id }),
+    listPoDocuments(db, o.id),
   ])
   const quoteItems = quote
     ? (await db.prepare('SELECT id, kind, description, product, garment_color, method, sizes, quantity, unit_price_cents, line_total_cents FROM quote_items WHERE quote_id = ? ORDER BY position')
@@ -330,7 +334,11 @@ export async function getOrderDetail(db: D1Database, number: string): Promise<(O
       createdAt: quote.created_at, sentAt: quote.sent_at, decidedAt: quote.decided_at,
       items: quoteItems.map((i) => ({ ...toItem(i), lineTotalCents: i.line_total_cents })),
     },
-    purchaseOrders: pos.results.map((p) => ({ id: p.id, poNumber: p.po_number, amountCents: p.amount_cents, status: p.status, createdAt: p.created_at, updatedAt: p.updated_at })),
+    purchaseOrders: pos.results.map((p) => ({
+      id: p.id, poNumber: p.po_number, amountCents: p.amount_cents, status: p.status, createdAt: p.created_at, updatedAt: p.updated_at,
+      documents: poDocs.get(p.id) ?? [],
+    })),
+    designs,
     notes: notes.results.map((n) => ({ id: n.id, body: n.body, authorName: n.author_name, createdAt: n.created_at })),
     activity: activity.results.map((a) => ({ id: a.id, actor: a.actor, action: a.action, before: payload(a.before), after: payload(a.after), createdAt: a.at })),
     readinessInput: input,
@@ -402,7 +410,7 @@ export async function applyPoChange(db: D1Database, p: { orderId: number; poId: 
 
 // A pre-production order whose stored status isn't what readiness says now.
 const DERIVABLE = `orders.state = 'active' AND orders.production_status IN (${PRE_PRODUCTION_LIST}) AND orders.production_status <> ${PRE_PRODUCTION}`
-type Stmt = ReturnType<D1Database['prepare']>
+export type Stmt = ReturnType<D1Database['prepare']>
 type Value = string | number | null
 
 /**
@@ -428,7 +436,7 @@ export function rederive(db: D1Database, orderId: number, actorId: number, reaso
 // The data statements come first and each carries GUARD, so they see the version before the bump and all apply or
 // none do; the order UPDATE then bumps it. A stale version changes nothing, logs nothing, and the caller gets null.
 
-const GUARD = `EXISTS (SELECT 1 FROM orders g WHERE g.id = ? AND g.version = ?)`
+export const GUARD = `EXISTS (SELECT 1 FROM orders g WHERE g.id = ? AND g.version = ?)`
 const toJson = (v: object | undefined) => (v === undefined ? null : JSON.stringify(v))
 
 export type OrderStateRow = { number: string; version: number; productionStatus: ProductionStatus; itemsRevision: number; state: OrderState }
@@ -439,7 +447,7 @@ export async function orderState(db: D1Database, by: { id: number } | { number: 
   return r && { number: r.number, version: r.version, productionStatus: r.production_status, itemsRevision: r.items_revision, state: r.state }
 }
 
-type OrderWrite = {
+export type OrderWrite = {
   orderId: number; version: number; actorId: number; action: ActivityAction; before?: object; after?: object
   /** `column = expr` fragments, each a constant from this file (never user input), with their binds. */
   set?: [sql: string, ...binds: Value[]][]
@@ -448,6 +456,10 @@ type OrderWrite = {
   data?: Stmt[]
 }
 async function orderWrite(db: D1Database, w: OrderWrite): Promise<OrderStateRow | null> {
+  return (await orderWriteResults(db, w)).state
+}
+/** orderWrite, also handing back each data statement's result (for RETURNING ids). */
+export async function orderWriteResults(db: D1Database, w: OrderWrite) {
   const set = w.set ?? []
   const data = w.data ?? []
   const results = await db.batch([
@@ -457,7 +469,8 @@ async function orderWrite(db: D1Database, w: OrderWrite): Promise<OrderStateRow 
     db.prepare(LOG_IF_CHANGED).bind(w.actorId, w.orderId, w.action, toJson(w.before), toJson(w.after)),
     ...rederive(db, w.orderId, w.actorId, w.action),
   ])
-  return (results[data.length]?.meta.changes ?? 0) > 0 ? orderState(db, { id: w.orderId }) : null
+  const state = (results[data.length]?.meta.changes ?? 0) > 0 ? await orderState(db, { id: w.orderId }) : null
+  return { state, data: results.slice(0, data.length) }
 }
 
 export type ItemWrite = {
