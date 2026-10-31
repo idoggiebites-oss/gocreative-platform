@@ -279,7 +279,7 @@ logic it can test, Claude for design, integration and verification).
       and in the SQL guard, with the parity test. *(Sonnet for CRUD; Opus for the gate change)*
 - [x] UI: purchasing panel, receipts, prep, **readiness checklist** at the top of the workspace. *(Sonnet)*
 
-### M4 — Production queue (brief Step 4) → acceptance 9, 11, 12, 17 (production part) — built and Codex-reviewed ("M4 ready") 2026-10-31; migration 0005 + deploy await Arturo's go
+### M4 — Production queue (brief Step 4) → acceptance 9, 11, 12, 17 (production part) — built and Codex-reviewed ("M4 ready") 2026-10-31; LIVE 2026-10-31 (0005 applied remotely, Worker version 44221cd0)
 - [x] *(migration is 0005, so M5's payments migration becomes 0006)* Migration 0005; queue ordering; start / QC / production complete transitions; units
       completed (correctable); the §4.3 slot DDL + owner override; production history. *(Opus; Codex
       reviews concurrency specifically)*
