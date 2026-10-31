@@ -3,5 +3,6 @@
 export const business = {
   name: 'GoCreative Designs',
   shortName: 'GoCreative',
+  timeZone: 'America/Chicago',
   orderNumberPrefix: '',
 } as const
