@@ -194,6 +194,20 @@ test('a lost upload reply: the file is recognised, not sent twice, and retry is 
   await expect(page.getByRole('status').filter({ hasText: 'reached.png uploaded.' })).toHaveCount(1)
 })
 
+test('a server error after the file was stored, with a name the server cleans, is recognised and not sent twice', async ({ page }) => {
+  await toStep3(page)
+  let posts = 0
+  await page.route('**/api/public/submissions/files', async (route) => {
+    if (route.request().method() !== 'POST') return route.fallback()
+    posts++
+    await route.fetch()
+    return route.fulfill({ status: 500, body: 'Internal Server Error' })
+  })
+  await artworkInput(page).setInputFiles([png('art"final.png')])
+  await expect(page.getByText(/^Artwork, .*Uploaded\.$/)).toBeVisible()
+  expect(posts).toBe(1)
+})
+
 test('cancelling while the session is still opening sends nothing', async ({ page }) => {
   await toStep3(page)
   let release!: () => void

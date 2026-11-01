@@ -11,6 +11,8 @@ export type Row = {
 }
 
 const MB = 2 ** 20
+// No reply, or a server error: the store can commit before the failure, so the file may be there.
+const mayHaveReached = (e: PublicError) => e.code === 'network' || e.code === 'timeout' || e.code.startsWith('http_5')
 const MAX_FILES = 5
 const MAX_FILE = 20 * MB
 const MAX_TOTAL = 60 * MB
@@ -74,7 +76,7 @@ export function useUploads(p: { initial: SavedFile[]; ensureToken: () => Promise
       return hit
     }
     for (const t of tombstones.current.splice(0)) {
-      const hit = claim((f) => f.bytes === t.bytes && f.filename === t.name)
+      const hit = claim((f) => f.bytes === t.bytes) // the server cleans file names, so the size is what matches; candidates are files no row has claimed
       // A file that won't delete is still going to be sent, so it goes back in the list below and gets a visible row.
       if (hit) await removeFile(token, hit.id).catch(() => { free = [...free, hit] })
     }
@@ -82,7 +84,7 @@ export function useUploads(p: { initial: SavedFile[]; ensureToken: () => Promise
     const inFlight = rowsRef.current.some((r) => r.state === 'uploading')
     const next = rowsRef.current.map((r): Row => {
       if (r.state === 'failed' && !r.id) {
-        const hit = claim((f) => f.bytes === r.bytes && f.purpose === r.purpose && (f.filename === r.name || !f.filename))
+        const hit = claim((f) => f.bytes === r.bytes && f.purpose === r.purpose)
         return hit ? { ...r, id: hit.id, state: 'done', progress: 1, error: undefined, ambiguous: false } : { ...r, ambiguous: false }
       }
       return r.state === 'done' && r.id && knownBefore.has(r.id) && !ids.has(r.id) ? { ...r, id: undefined, state: 'failed', progress: 0, error: r.file ? 'This file did not reach us. Please retry.' : 'This file did not reach us. Please remove it and add it again.' } : r
@@ -115,10 +117,10 @@ export function useUploads(p: { initial: SavedFile[]; ensureToken: () => Promise
       if (SESSION_ENDED.has(err.code)) sessionEnded()
       if (err.code === 'intake_closed') p.onClosed()
       if (err.code === 'upload_limit') setCanRestart(true)
-      patch(key, { state: 'failed', progress: 0, error: err.message, ambiguous: err.code === 'network' || err.code === 'timeout' })
+      patch(key, { state: 'failed', progress: 0, error: err.message, ambiguous: mayHaveReached(err) })
       setAnnouncement(`${file.name} did not upload. ${err.message}`)
       // The body may have arrived with only the reply lost. If so this row is really fine, and a retry would duplicate it.
-      if (err.code === 'network' || err.code === 'timeout') {
+      if (mayHaveReached(err)) {
         await reconcile().catch(() => {})
         if (rowsRef.current.find((r) => r.key === key)?.state === 'done') setAnnouncement(`${file.name} uploaded.`)
       }
