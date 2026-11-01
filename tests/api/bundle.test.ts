@@ -114,4 +114,13 @@ test('the drive copy opens with its own tool; --check and a failed extraction le
   expect(run([file, out]).status).toBe(0)
   expect(readdirSync(out).sort()).toEqual(['2026-02-01T00-00-00-000Z'])
   expect(OPEN.endsWith('unbundle.mjs')).toBe(true)
+  // A second extraction changes nothing and says why; plaintext staged by a lost-power run is cleared.
+  const before = readFileSync(join(out, '2026-02-01T00-00-00-000Z', 'manifest.json'))
+  mkdirSync(join(out, '.extracting'))
+  writeFileSync(join(out, '.extracting', 'stale'), 'old plaintext')
+  const again = run([file, out])
+  expect(again.status).toBe(1)
+  expect(again.stderr).toContain('already in')
+  expect(existsSync(join(out, '.extracting'))).toBe(false)
+  expect(readFileSync(join(out, '2026-02-01T00-00-00-000Z', 'manifest.json')).equals(before)).toBe(true)
 })

@@ -4,7 +4,7 @@
 // The file is AES-256-GCM with a key from the passphrase (scrypt). Nothing is extracted unless the whole file proves authentic.
 import { execFileSync } from 'node:child_process'
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto'
-import { closeSync, createReadStream, createWriteStream, fstatSync, fsyncSync, mkdirSync, openSync, readdirSync, readSync, renameSync, rmSync } from 'node:fs'
+import { closeSync, createReadStream, existsSync, createWriteStream, fstatSync, fsyncSync, mkdirSync, openSync, readdirSync, readSync, renameSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
@@ -128,18 +128,32 @@ if (process.argv[1] && basename(process.argv[1]) === 'unbundle.mjs') {
     if (check) {
       console.log(`OK: ${basename(source)} opens and is undamaged.`)
     } else {
+      rmSync(extracting, { recursive: true, force: true }) // left by a run that lost power
       mkdirSync(extracting, { recursive: true })
       try {
         execFileSync('tar', ['-xf', tar, '-C', extracting], { stdio: 'inherit' })
       } catch {
         throw new Error('Could not unpack the bundle. Check that tar is available (it is built into Windows 10 and later) and that the disk has room. Nothing was kept.')
       }
-      for (const name of readdirSync(extracting)) {
-        const to = join(folder, name)
-        if (name === 'files' || name === 'journal') {
-          mkdirSync(to, { recursive: true })
-          for (const f of readdirSync(join(extracting, name))) renameSync(join(extracting, name, f), join(to, f))
-        } else renameSync(join(extracting, name), to)
+      const snapshots = readdirSync(extracting).filter((n) => n !== 'files' && n !== 'journal')
+      const taken = snapshots.find((n) => existsSync(join(folder, n)))
+      if (taken) throw new Error(`${taken} is already in ${folder}. Nothing was changed.`)
+      // All or nothing: a move that fails takes back the ones before it. Files already there are identical by name and stay.
+      const moved = []
+      const move = (from, to) => {
+        renameSync(from, to)
+        moved.push(to)
+      }
+      try {
+        for (const name of ['files', 'journal']) {
+          if (!existsSync(join(extracting, name))) continue
+          mkdirSync(join(folder, name), { recursive: true })
+          for (const f of readdirSync(join(extracting, name))) if (!existsSync(join(folder, name, f))) move(join(extracting, name, f), join(folder, name, f))
+        }
+        for (const n of snapshots) move(join(extracting, n), join(folder, n))
+      } catch (e) {
+        for (const m of moved) rmSync(m, { recursive: true, force: true })
+        throw e
       }
       console.log(`Extracted to ${folder}. It holds customer data: keep it private and delete it when finished.`)
     }
