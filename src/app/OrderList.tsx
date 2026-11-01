@@ -147,7 +147,7 @@ export default function OrderList() {
             )}
           >
             {m.orders.view[v]}
-            {counts && v !== 'completed' && <span className="num text-xs text-[#7A766E]">{counts[v]}</span>}
+            {counts && v !== 'completed' && <span className="num text-xs text-muted-foreground">{counts[v]}</span>}
           </Link>
         ))}
       </nav>

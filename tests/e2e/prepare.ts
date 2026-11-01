@@ -4,7 +4,16 @@ import { execFileSync } from 'node:child_process'
 import { copyFileSync, existsSync, rmSync } from 'node:fs'
 
 export function reseed() {
-  const run = (...args: string[]) => execFileSync('npx', ['wrangler', 'd1', ...args, '--local', '--persist-to', '.wrangler/e2e'], { stdio: 'pipe' })
+  // ponytail: retries a symptom. This process shares the SQLite files with the running dev server and workerd sometimes answers "internal error" (2 of 6 verify runs, 2026-11-01). Serve reseeds through the app if retries ever stop being enough.
+  const run = (...args: string[]) => {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return execFileSync('npx', ['wrangler', 'd1', ...args, '--local', '--persist-to', '.wrangler/e2e'], { stdio: 'pipe' })
+      } catch (e) {
+        if (attempt === 3 || !String((e as { stderr?: Buffer }).stderr).includes('internal error')) throw e
+      }
+    }
+  }
   run('migrations', 'apply', 'gocreative')
   run('execute', 'gocreative', '--file', 'scripts/seed.sql')
 }

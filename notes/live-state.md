@@ -16,4 +16,5 @@ Update this whenever something deploys. History is in git and ROADMAP.md; this i
 - Signed-in smoke test after Arturo signs in again (the Access session expired).
 - Suggested: Access cookie SameSite=Lax.
 - Family read-through of the Spanish.
-- Colour-contrast check not done.
+- Colour contrast: checked 2026-11-01 on rendered dashboard text (about 128 views per viewport, seed data). One failure, fixed: order filter counts, 4.15:1. Not covered: disabled controls, hover and focus states, the storefront, and dialogs beyond the first add/record button on each view.
+- The contrast fix (`OrderList.tsx`) is committed but not deployed; it goes out with the next deploy.

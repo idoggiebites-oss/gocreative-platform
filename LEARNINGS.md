@@ -101,3 +101,7 @@ inside its card in Spanish.
 ### 2026-10-31 — D1 is stricter than SQLite; in-memory tests can't see it
 - **Cost:** restore passed its node:sqlite test, then the first real run failed because D1 refuses `PRAGMA integrity_check` (`SQLITE_AUTH`). `quick_check` is allowed.
 - **Rule:** anything that runs against D1 from outside the Worker gets one run on real D1 before it counts as tested.
+
+### 2026-11-01 — A flaky afterAll looks like a failing test
+- **Cost:** `npm run verify` failed 2 of 6 runs on `review.spec.ts:109` in 169 ms. The test itself was fine: the failure came from `reseed()` in `afterAll`, where a second process hits the dev server's SQLite files and workerd sometimes answers "internal error".
+- **Rule:** read the failing stack before the test name. `reseed()` now retries only that error.
