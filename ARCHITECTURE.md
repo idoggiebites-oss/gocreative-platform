@@ -182,11 +182,13 @@ Writes from the browser send the `expectedVersion` they read; a stale one is a 4
 
 **Tests**
 - Vitest on `domain/`: transitions, production gate, order numbering.
-- Vitest on the Workers pool for the API, against local D1/R2. These include the
-  **boundary tests**: public routes never return internal notes, employee data or
-  another customer's records; `/api/app/*` with no Access JWT returns 401; a
-  `staff` user hitting an owner-only route returns 403.
-- Playwright for the critical flows, plus screenshots at 390px and 1440px.
+- Vitest API tests (`tests/api`) run the Hono app in Node against an in-memory `node:sqlite`
+  D1 adapter (`tests/api/d1.ts`) and an R2 fake (`tests/api/r2.ts`); they are not in the Workers
+  pool. These include the **boundary tests**: public routes never return internal notes, employee
+  data or another customer's records; `/api/app/*` with no Access JWT returns 401; a `staff`
+  user hitting an owner-only route returns 403.
+- Vitest `tests/d1` runs the real workerd D1 (via `getPlatformProxy`) for batch semantics and uploads.
+- Playwright for the critical flows, run against wrangler/vite on port 4280 with its own local D1, plus screenshots at 390px and 1440px.
 - One `npm run verify` gate (typecheck, lint, unit, api, e2e). Read its exit code.
 - **Codex** reviews each phase's diff read-only (`codex exec -s read-only`) with a
   checklist covering security, SQL and accessibility, before merge. Claude builds and

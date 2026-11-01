@@ -73,17 +73,25 @@ function ReadyList({ jobs, running }: { jobs: ProductionJob[]; running: Producti
   const reorder = useReorderQueue()
   // Moving a row re-renders the list and the browser drops focus from the button just used (or it is now disabled at the end):
   // put it back on that job's move button, or on its other one.
-  const refocus = useRef<{ number: string; dir: -1 | 1 } | null>(null)
+  const refocus = useRef<{ number: string; dir: -1 | 1; from: Element | null } | null>(null)
+  // Only while the user has not moved on: a focus move to anything but the control they pressed cancels the restore.
+  useEffect(() => {
+    const onIn = (e: FocusEvent) => { if (refocus.current && e.target !== refocus.current.from) refocus.current = null }
+    document.addEventListener('focusin', onIn)
+    return () => document.removeEventListener('focusin', onIn)
+  }, [])
   useEffect(() => {
     const r = refocus.current
     if (!r || reorder.isPending) return
     refocus.current = null
+    const a = document.activeElement
+    if (a && a !== document.body && a !== r.from) return
     const label = (d: -1 | 1) => m.production.ariaFor(d === -1 ? m.production.moveUp : m.production.moveDown, r.number)
     const find = (d: -1 | 1) => document.querySelector<HTMLButtonElement>(`button[aria-label="${label(d)}"]:not(:disabled)`)
     ;(find(r.dir) ?? find(r.dir === -1 ? 1 : -1))?.focus()
   }, [jobs, reorder.isPending, m])
   const move = (i: number, dir: -1 | 1) => {
-    refocus.current = { number: jobs[i].number, dir }
+    refocus.current = { number: jobs[i].number, dir, from: document.activeElement }
     const next = jobs.map((j) => j.number)
     ;[next[i], next[i + dir]] = [next[i + dir], next[i]]
     reorder.mutate({ seen: jobs.map((j) => j.number), orderNumbers: next })

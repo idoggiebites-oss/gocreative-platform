@@ -22,6 +22,18 @@ const paymentsOf = async (page: Page, n: string) => (await (await page.request.g
   payments: { voided: unknown }[]; checks: { status: string }[]; balance: { receivedCents: number; outstandingCents: number | null; agreedCents: number | null }
 }
 
+const outstandingRows = async (page: Page) =>
+  ((await (await page.request.get('/api/app/payments')).json()) as { outstanding: { number: string; outstandingCents: number | null }[] }).outstanding
+
+/** Acceptance 17: this order, specifically, is on the dashboard as "Ready for pickup" and owing money (the tile total is the sum of the rows). */
+async function expectPendingOnDashboard(page: Page, n: string, owedCents: number) {
+  await page.goto('/app')
+  await expect(page.getByRole('region', { name: 'Ready for pickup', exact: true }).locator(`[data-ready="${n}"]`)).toBeVisible()
+  const rows = await outstandingRows(page)
+  expect(rows.find((r) => r.number === n)?.outstandingCents).toBe(owedCents)
+  await expect(page.getByRole('region', { name: 'Outstanding payments' }).locator('[data-outstanding]')).toHaveAttribute('data-outstanding', String(rows.reduce((t, r) => t + (r.outstandingCents ?? 0), 0)))
+}
+
 async function createCustomer(page: Page, name: string, kind: string) {
   await page.goto('/app/customers')
   await page.getByRole('button', { name: 'New customer' }).click()
@@ -70,6 +82,10 @@ async function runProduction(page: Page, n: string, pieces: number) {
   await btn(page, 'Start', n).click()
   const current = page.getByRole('region', { name: 'Currently in production' })
   await expect(current).toContainText(n)
+  // 17: while it runs, this order is the dashboard's current production job
+  await page.goto('/app')
+  await expect(page.getByRole('region', { name: 'Current production job' })).toContainText(n)
+  await page.goto('/app/production')
   await page.getByLabel(`Units completed (number): ${n}`).fill(String(pieces))
   await page.getByRole('button', { name: 'Save units' }).first().click()
   await expect(current.getByText(`${pieces} of ${pieces}`).first()).toBeVisible()
@@ -96,11 +112,23 @@ test('regular customer: direct authorization, JDS purchase, pickup unpaid with a
   await page.getByRole('main').getByRole('link', { name: 'New order' }).click()
   const n = await newOrder(page, 'Lifecycle spirit wear')
 
-  // 3, 4: a draft quote exists; accept it
+  // 3: a draft quote exists; the items change after it (price 12 -> 15), so the quote is stale and a new version is made
   await expect(row(page, 'quote')).toContainText('Pending')
+  await page.getByRole('button', { name: 'Edit items' }).click()
+  await page.getByRole('group', { name: 'Item 1' }).getByLabel('Unit price').fill('15')
+  await page.getByRole('button', { name: 'Save items' }).click()
+  await expect(page.getByText('The items changed after this quote was made.').first()).toBeVisible()
+  await expect(row(page, 'quote').getByRole('button', { name: 'Accept quote' })).toHaveCount(0)
+  await row(page, 'quote').getByRole('button', { name: 'New quote version' }).click()
+  await expect(page.getByText('v2', { exact: true })).toBeVisible()
+  // v1 is superseded: the server will not decline it (only a live draft or sent quote can be)
+  const v1 = await page.request.patch(`/api/app/orders/${n}/quotes/1`, { data: { to: 'declined', expectedVersion: (await detail(page, n)).order.version } })
+  expect(v1.status()).toBe(409)
+  expect((await v1.json()).code).toBe('invalid_quote_transition')
+  // 4: accept the new version; the order's total is the new one ($60.00 = 4 x $15.00)
   await row(page, 'quote').getByRole('button', { name: 'Accept quote' }).click()
   await expect(row(page, 'quote')).toContainText('Complete')
-  await expect(page.getByText('$48.00', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('$60.00', { exact: true }).first()).toBeVisible()
 
   // 6: direct authorization (no PO on this order)
   await row(page, 'authorization').getByRole('button', { name: 'Record authorization' }).click()
@@ -137,6 +165,7 @@ test('regular customer: direct authorization, JDS purchase, pickup unpaid with a
 
   // 9, 11: start from the Production page, units, QC, complete
   await runProduction(page, n, 4)
+  await expectPendingOnDashboard(page, n, 6000) // 17: complete, so it is under Ready for pickup and owes money
 
   // 12, 13: it is ready for pickup; record the notification
   await page.goto(`/app/orders/${n}`)
@@ -149,7 +178,7 @@ test('regular customer: direct authorization, JDS purchase, pickup unpaid with a
   // 13, 14: pickup of an unpaid pay-at-pickup order warns; the owner overrides with a reason
   await btn(page, 'Record pickup', n).click()
   await dialog(page).getByLabel('Collected by').fill('Pat Parent')
-  await expect(dialog(page).getByRole('alert').filter({ hasText: 'still owes $48.00' })).toBeVisible()
+  await expect(dialog(page).getByRole('alert').filter({ hasText: 'still owes $60.00' })).toBeVisible()
   await expect(submit(page, 'Record pickup')).toBeDisabled()
   await dialog(page).getByRole('button', { name: 'Release anyway (override)' }).click()
   await dialog(page).getByLabel('Reason for releasing it unpaid').fill('Pays by mail on Friday')
@@ -160,17 +189,19 @@ test('regular customer: direct authorization, JDS purchase, pickup unpaid with a
 
   // 14, 17: the unpaid order is on the dashboard's outstanding list; then payment in full closes it
   await page.goto('/app')
-  await expect(page.getByRole('region', { name: 'Outstanding payments' })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Ready for pickup', exact: true }).locator(`[data-ready="${n}"]`)).toHaveCount(0) // picked up
+  expect((await outstandingRows(page)).find((r) => r.number === n)?.outstandingCents).toBe(6000) // still owed
   await page.goto(`/app/orders/${n}`)
   await tab(page, 'Payments')
   await page.getByRole('button', { name: 'Record payment', exact: true }).click()
-  await expect(dialog(page).getByLabel('Amount')).toHaveValue('48.00')
+  await expect(dialog(page).getByLabel('Amount')).toHaveValue('60.00')
   await submit(page, 'Record payment').click()
   await expect(dialog(page)).toHaveCount(0)
   await expect.poll(async () => (await detail(page, n)).order.state).toBe('closed')
   const p = await paymentsOf(page, n)
   expect(p.payments).toHaveLength(1)
-  expect(p.balance).toMatchObject({ receivedCents: 4800, outstandingCents: 0 })
+  expect(p.balance).toMatchObject({ receivedCents: 6000, outstandingCents: 0 })
+  expect((await outstandingRows(page)).some((r) => r.number === n)).toBe(false) // paid: gone from outstanding
 
   // The history has the key events.
   await activityHas(page, n, [
@@ -218,30 +249,50 @@ test('school district: PO gate, no purchasing, pickup before payment, check coll
   }
   await approveArtwork(page)
 
-  // 10: with the PO not approved, production cannot start: no Start on the order, and the server refuses it
-  await expect(row(page, 'authorization')).toContainText('Pending')
-  await tab(page, 'Production')
-  await expect(btn(page, 'Start', n)).toHaveCount(0)
-  await expect(page.getByText('Not ready for production')).toBeVisible()
-  const before = await detail(page, n)
-  const refused = await page.request.patch(`/api/app/orders/${n}/production`, { data: { to: 'in_production', expectedVersion: before.order.version } })
-  expect(refused.ok()).toBe(false)
-  expect((await detail(page, n)).order.productionStatus).not.toBe('in_production')
-
-  // 6: approve the PO from the gate banner; focus must land somewhere real afterwards (Phase 1 carry-over)
-  await page.getByRole('button', { name: 'Record approval' }).click()
-  await expect(row(page, 'authorization')).toContainText('Complete')
-
-  // 7, 8: no purchasing needed (confirmed), preparation not required
+  // 7, 8: everything else the gate needs is done first (quote accepted, artwork approved, no purchasing needed, prep not required),
+  // so the only thing left is the PO approval
   await row(page, 'materials').getByRole('button', { name: 'Confirm no purchasing needed' }).click()
   await dialog(page).getByText('No purchasing needed').first().waitFor()
   await submit(page, 'Confirm').click()
   await expect(row(page, 'materials')).toContainText('Not required')
+  await tab(page, 'Production')
   await row(page, 'preparation').getByRole('button', { name: 'Mark not required' }).click()
+  await expect(row(page, 'preparation')).toContainText('Not required')
+  for (const key of ['quote', 'artwork', 'materials', 'preparation']) await expect(row(page, key), key).not.toContainText('Pending')
+
+  // 10: with only the PO unapproved, production cannot start: no Start on the order, and the server refuses it at the authorization gate
+  await expect(row(page, 'authorization')).toContainText('Pending')
+  await expect(btn(page, 'Start', n)).toHaveCount(0)
+  await expect(page.getByText('Not ready for production')).toBeVisible()
+  const before = await detail(page, n)
+  const refused = await page.request.patch(`/api/app/orders/${n}/production`, { data: { to: 'in_production', expectedVersion: before.order.version } })
+  expect(refused.status()).toBe(409)
+  expect((await refused.json()).code).toBe('transition_not_allowed') // from an awaiting status a start is not even a legal move
+  // Asking for "ready" is where the gate itself answers: it names the one pending item, the PO.
+  const gated = await page.request.patch(`/api/app/orders/${n}/production`, { data: { to: 'ready', expectedVersion: before.order.version } })
+  expect(gated.status()).toBe(409)
+  const refusal = await gated.json()
+  expect(refusal.code).toBe('gate_failed')
+  expect(refusal.reasons).toEqual(['authorization.po_not_approved'])
+  expect((await detail(page, n)).order.productionStatus).not.toBe('in_production')
+  // 17: while it waits on the PO, the order is under "Pending POs" in Action required
+  // (the card lists only the first three rows, so the specific order is read from the same data the card renders)
+  await page.goto('/app')
+  await expect(page.getByRole('group', { name: 'Pending POs' })).toBeVisible()
+  const dash = (await (await page.request.get('/api/app/dashboard')).json()) as { actionRequired: { pendingPos: { number: string }[] } }
+  expect(dash.actionRequired.pendingPos.map((r) => r.number)).toContain(n)
+  await page.goto(`/app/orders/${n}`)
+  await tab(page, 'Production')
+
+  // 6: approve the PO from the gate banner; Start is now offered, and the order is ready for production
+  await page.getByRole('button', { name: 'Record approval' }).click()
+  await expect(row(page, 'authorization')).toContainText('Complete')
   await expect(productionChip(page)).toContainText('Ready for production')
+  await expect(btn(page, 'Start', n)).toBeVisible()
 
   // 9, 11: start, units, QC, complete
   await runProduction(page, n, 4)
+  await expectPendingOnDashboard(page, n, 4800) // 17
 
   // 12, 13, 15: pickup before payment is allowed for a district, without an override
   await page.goto(`/app/orders/${n}`)
@@ -289,6 +340,7 @@ test('school district: PO gate, no purchasing, pickup before payment, check coll
   // 17: the order is no longer pending anywhere on the dashboard
   await page.goto('/app')
   await expect(page.getByRole('region', { name: 'Ready for pickup', exact: true }).locator(`[data-ready="${n}"]`)).toHaveCount(0)
+  expect((await outstandingRows(page)).some((r) => r.number === n)).toBe(false)
 
   await activityHas(page, n, [
     'Order created', 'Purchase order added on {n}', 'Purchase order document uploaded on {n}', 'Artwork decision recorded on {n}', 'No purchasing needed confirmed on {n}',

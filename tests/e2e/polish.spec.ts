@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { clearRunning, makeOrder, readyOrder } from './helpers.ts'
+import { clearRunning, makeOrder, production, readyOrder } from './helpers.ts'
 import { reseed } from './prepare.ts'
 
 // M6 polish: the Phase 1 carry-overs (Spanish column overflow, focus after a button disappears) and the Phase 2 accessibility pass.
@@ -8,6 +8,9 @@ test.afterAll(() => {
 })
 
 const dialog = (page: Page) => page.getByRole('dialog')
+// Where focus goes when the pressed button disappears: the first usable control in its parent (the PO status menu, the next action).
+const AFTER_APPROVE = 'Purchase order: Approved. Change status'
+const row = (page: Page, key: string) => page.locator(`[data-readiness="${key}"]`)
 const desktopOnly = (info: { project: { name: string } }) => test.skip(info.project.name === 'phone')
 const btn = (page: Page, action: string, n: string) => page.getByRole('button', { name: `${action}: ${n}`, exact: true })
 // In-page code is passed as source strings: the e2e files are type-checked without the DOM lib.
@@ -47,7 +50,7 @@ test('focus after "Record approval" lands on a real element, not the page body',
   await approve.focus()
   await page.keyboard.press('Enter')
   await expect(approve).toHaveCount(0)
-  await expect.poll(() => focusedLabel(page)).not.toBeNull()
+  await expect.poll(() => focusedLabel(page)).toBe(AFTER_APPROVE)
 })
 
 test('focus follows a production-tab button that turns into another one', async ({ page }, info) => {
@@ -60,11 +63,11 @@ test('focus follows a production-tab button that turns into another one', async 
   await start.focus()
   await page.keyboard.press('Enter')
   await expect(start).toHaveCount(0)
-  await expect.poll(() => focusedLabel(page)).not.toBeNull()
+  await expect.poll(() => focusedLabel(page)).toBe(`Send to quality control: ${n}`)
   await btn(page, 'Send to quality control', n).focus()
   await page.keyboard.press('Enter')
   await expect(btn(page, 'Mark production complete', n)).toBeVisible()
-  await expect.poll(() => focusedLabel(page)).not.toBeNull()
+  await expect.poll(() => focusedLabel(page)).toBe(`Restart from quality control: ${n}`)
   await clearRunning(page)
 })
 
@@ -100,8 +103,10 @@ test('keyboard: Production page controls are reachable by Tab and named; move up
   await btn(page, 'Move down', first).focus()
   await page.keyboard.press('Space')
   await expect.poll(async () => (await order()).indexOf(second) < (await order()).indexOf(first)).toBe(true)
-  // The button that was just used may now be disabled (it reached the end): focus must not be stranded on the body.
-  await expect.poll(() => focusedLabel(page)).not.toBeNull()
+  // The button just used is now disabled (the job reached the end of the queue, or stayed with a move down left): focus goes to
+  // that job's other move button when this one is disabled, else it stays on the same one.
+  const queue = (await production(page)).readyToStart.map((j) => j.number)
+  await expect.poll(() => focusedLabel(page)).toBe(queue.indexOf(first) === queue.length - 1 ? `Move up: ${first}` : `Move down: ${first}`)
 
   // The override dialog: needs a running job in slot 1 and an owner (the e2e user).
   const job = (await (await page.request.get('/api/app/production')).json()).readyToStart.find((j: { number: string }) => j.number === running)
@@ -152,4 +157,75 @@ test('order tabs work from the keyboard (arrow keys move between them)', async (
   await expect(page.getByRole('tab', { name: 'Artwork', exact: true })).toHaveAttribute('aria-selected', 'true')
   await page.keyboard.press('End')
   await expect(page.getByRole('tab', { name: 'Activity', exact: true })).toHaveAttribute('aria-selected', 'true')
+})
+
+test('a slow reorder response does not steal focus from an input the user moved to', async ({ page }, info) => {
+  desktopOnly(info)
+  await clearRunning(page)
+  const first = await readyOrder(page, 'Slow first')
+  await readyOrder(page, 'Slow second')
+  const running = await readyOrder(page, 'Slow running')
+  const job = (await production(page)).readyToStart.find((j) => j.number === running)!
+  expect((await page.request.patch(`/api/app/orders/${running}/production`, { data: { to: 'in_production', expectedVersion: job.version } })).ok()).toBe(true)
+  let release = () => {}
+  const held = new Promise<void>((r) => { release = r })
+  await page.route('**/api/app/production/queue', async (route) => {
+    await held
+    await route.continue()
+  })
+  await page.goto('/app/production')
+  await btn(page, 'Move down', first).focus()
+  await page.keyboard.press('Enter') // the request is now held
+  const units = page.getByLabel(`Units completed (number): ${running}`)
+  await units.focus()
+  await units.selectText()
+  await page.keyboard.type('1')
+  release()
+  await expect.poll(async () => (await production(page)).readyToStart.map((j) => j.number).indexOf(first)).toBeGreaterThan(0)
+  await expect(btn(page, 'Move up', first)).toBeEnabled() // the page has refetched and the list is idle again
+  await expect(units).toBeFocused()
+  await expect(units).toHaveValue('1')
+  await page.unroute('**/api/app/production/queue')
+  await clearRunning(page)
+})
+
+test('typing keeps focus while unrelated parts of the page change underneath', async ({ page }, info) => {
+  desktopOnly(info)
+  await page.goto('/app/orders/2026-0020')
+  const note = page.getByLabel('Add a note')
+  const other = page.getByRole('tab', { name: 'Artwork', exact: true })
+  // Focus a control, remove it and enable/disable/replace other controls (focus loss elsewhere), while the user is already typing in the note.
+  await other.focus()
+  await note.focus()
+  await page.keyboard.type('abc')
+  await inPage(page, `
+    const dom = document.createElement('div'); document.body.appendChild(dom)
+    for (let i = 0; i < 6; i++) setTimeout(() => { const b = document.createElement('button'); b.textContent = 'x' + i; dom.appendChild(b); b.focus(); b.disabled = true; b.remove() }, i * 40)
+    return null`)
+  await page.waitForTimeout(500)
+  await note.focus()
+  await page.keyboard.type('def')
+  await page.waitForTimeout(400)
+  await expect(note).toBeFocused()
+  await expect(note).toHaveValue('abcdef')
+})
+
+test('an open dialog keeps focus while the page behind it updates', async ({ page }, info) => {
+  desktopOnly(info)
+  const o = await makeOrder(page, 'Dialog focus')
+  await page.goto(`/app/orders/${o.number}`)
+  await row(page, 'authorization').getByRole('button', { name: 'Record authorization' }).click()
+  await expect(dialog(page)).toBeVisible()
+  await dialog(page).getByLabel('How they authorized').focus()
+  await inPage(page, "window.__f = document.activeElement; return null")
+  // Behind the dialog: a refetch with changed data (a note added elsewhere) and controls that appear, disable and vanish.
+  expect((await page.request.post(`/api/app/orders/${o.number}/notes`, { data: { body: 'changed behind the dialog' } })).ok()).toBe(true)
+  await inPage(page, `
+    window.dispatchEvent(new Event('focus'))
+    const host = document.querySelector('main') ?? document.body
+    for (let i = 0; i < 6; i++) setTimeout(() => { const b = document.createElement('button'); b.textContent = 'x' + i; host.appendChild(b); b.disabled = true; b.remove() }, i * 40)
+    return null`)
+  await page.waitForTimeout(600)
+  await expect(dialog(page)).toBeVisible()
+  expect(await inPage<boolean>(page, 'return document.activeElement === window.__f')).toBe(true)
 })
