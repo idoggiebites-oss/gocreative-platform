@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { cleanupIntake } from '../../worker/cron'
-import { DAILY_MAX_SESSIONS, IP_SESSIONS_PER_HOUR, OPEN_SESSIONS_MAX, OUTSTANDING_MAX_BYTES, SESSION_MAX_FILES, newRef } from '../../worker/domain/intake'
+import { CLEANUP_BATCH, DAILY_MAX_SESSIONS, IP_SESSIONS_PER_HOUR, OPEN_SESSIONS_MAX, ORPHAN_PAGES_PER_RUN, OUTSTANDING_MAX_BYTES, SESSION_MAX_ATTEMPTS, SESSION_MAX_FILES, newRef } from '../../worker/domain/intake'
 import { app } from '../../worker/index'
 import { INQUIRY_STATUSES } from '../../shared/enums'
 import { createTestD1 } from './d1'
@@ -183,6 +183,88 @@ test('file rules: type, purpose, size, and one session cannot touch another sess
   expect(t.r2.objects.size).toBe(2)
 })
 
+test('rejected uploads never touch the daily budget, and one session cannot keep trying forever (Codex)', async () => {
+  const t = setup()
+  const token = await t.open()
+  const refused = await Promise.all(Array.from({ length: SESSION_MAX_ATTEMPTS }, () => t.upload(token, HTML, { type: 'text/html', length: 20 * 2 ** 20 })))
+  expect(refused.every((r) => r.status === 400 || r.status === 415)).toBe(true)
+  expect(t.sqlite.prepare('SELECT COALESCE(SUM(bytes), 0) AS b FROM intake_usage').get()).toEqual({ b: 0 })
+  expect(await code(await t.upload(token))).toEqual([429, 'upload_limit']) // out of attempts
+  const other = await t.open('203.0.113.77')
+  expect((await t.upload(other)).status).toBe(201)
+  expect(t.sqlite.prepare('SELECT SUM(bytes) AS b FROM intake_usage').get()).toEqual({ b: PNG.byteLength }) // stored bytes are charged
+})
+
+test('removing a file claims it first: a delete that loses to submit touches nothing, and R2 failing leaves it queued (Codex)', async () => {
+  const t = setup()
+  const token = await t.open()
+  const del = (id: string, tok = token) => t.call(`/submissions/files/${id}`, { method: 'DELETE', headers: t.auth(tok) })
+  const gone = await (await t.upload(token)).json() as { id: string }
+  const flaky = await (await t.upload(token)).json() as { id: string }
+  const kept = await (await t.upload(token)).json() as { id: string }
+
+  const realDelete = t.r2.bucket.delete
+  t.r2.bucket.delete = (async () => { throw new Error('R2 down') }) as never
+  expect((await del(flaky.id)).status).toBe(200)
+  t.r2.bucket.delete = realDelete
+  expect(t.n(`inquiry_files WHERE id = '${flaky.id}' AND status = 'deleting'`)).toBe(1)
+
+  // The claim happens with the object untouched, so submit can't link a file that is on its way out.
+  let duringDelete = ''
+  t.r2.bucket.delete = (async (k: string) => {
+    duringDelete = (t.sqlite.prepare(`SELECT status FROM inquiry_files WHERE id = '${gone.id}'`).get() as { status: string }).status
+    return realDelete(k)
+  }) as never
+  expect((await del(gone.id)).status).toBe(200)
+  t.r2.bucket.delete = realDelete
+  expect(duringDelete).toBe('deleting')
+
+  expect((await t.submit(token)).status).toBe(201)
+  const objects = t.r2.objects.size
+  expect(await code(await del(kept.id))).toEqual([409, 'session_closed'])
+  const { claimStored } = await import('../../worker/db/intake')
+  const sid = (t.sqlite.prepare('SELECT id FROM inquiry_submissions').get() as { id: string }).id
+  expect(await claimStored(t.db as never, kept.id, sid)).toBeNull() // a delete already past its checks loses too
+  expect(t.r2.objects.size).toBe(objects)
+  expect(t.n(`inquiry_files WHERE id = '${kept.id}' AND status = 'linked'`)).toBe(1)
+})
+
+test('the orphan sweep pages through the bucket and keeps its place across runs (Codex)', async () => {
+  const t = setup()
+  const old = new Date(Date.now() - 25 * 3_600_000)
+  const token = await t.open()
+  await t.upload(token)
+  await t.submit(token)
+  // Many objects a row still names sort first; the orphan sits past ten pages of them.
+  const linked = t.sqlite.prepare('SELECT submission_id AS s FROM inquiry_files').get() as { s: string }
+  const many = CLEANUP_BATCH * ORPHAN_PAGES_PER_RUN + 3
+  t.sqlite.exec('BEGIN')
+  for (let i = 0; i < many; i++) {
+    const key = `inquiries/a-${String(i).padStart(5, '0')}`
+    t.sqlite.prepare(`INSERT INTO inquiry_files (id, submission_id, r2_key, kind, status, bytes) VALUES (?, ?, ?, 'artwork', 'stored', 1)`).run(key, linked.s, key)
+    await t.r2.bucket.put(key, JPEG)
+    t.r2.uploaded.set(key, old)
+  }
+  t.sqlite.exec('COMMIT')
+  await t.r2.bucket.put('inquiries/z-orphan', JPEG)
+  t.r2.uploaded.set('inquiries/z-orphan', old)
+  expect((await cleanupIntake(t.env, new Date())).orphans).toBe(0)
+  expect(t.n("settings WHERE key = 'orphan_cursor'")).toBe(1)
+  expect((await cleanupIntake(t.env, new Date())).orphans).toBe(1)
+  expect(t.r2.objects.has('inquiries/z-orphan')).toBe(false)
+  expect(t.n("settings WHERE key = 'orphan_cursor'")).toBe(0)
+})
+
+test('an R2 cursor that has gone stale resets instead of failing every future run', async () => {
+  const t = setup()
+  t.sqlite.exec("INSERT INTO settings (key, value) VALUES ('orphan_cursor', 'stale')")
+  const list = t.r2.bucket.list
+  t.r2.bucket.list = (async () => { throw new Error('invalid cursor') }) as never
+  expect((await cleanupIntake(t.env, new Date())).orphans).toBe(0)
+  t.r2.bucket.list = list
+  expect(t.n("settings WHERE key = 'orphan_cursor'")).toBe(0)
+})
+
 test('only schools and organizations may attach a PO', async () => {
   const t = setup()
   const token = await t.open()
@@ -255,7 +337,8 @@ test('submit vs settle: an upload in flight blocks submit; one that settles afte
   expect(await code(await t.upload(token))).toEqual([409, 'session_closed'])
   const { settleFile } = await import('../../worker/db/intake')
   t.sqlite.exec(`INSERT INTO inquiry_files (id, submission_id, r2_key, kind, bytes) SELECT 'late', id, 'inquiries/' || id || '/late', 'artwork', 10 FROM inquiry_submissions`)
-  expect(await settleFile(t.db as never, 'late', { r2Key: 'k', mime: 'image/png', bytes: 10, sha256: 'x', filename: null })).toBeNull()
+  expect(await settleFile(t.db as never, 'late', { r2Key: 'k', mime: 'image/png', bytes: 10, sha256: 'x', filename: null }, '2026-01-01')).toBeNull()
+  expect(t.n("intake_usage WHERE day = '2026-01-01'")).toBe(0)
   expect(t.n("inquiry_files WHERE id = 'late' AND status = 'reserved' AND file_id IS NULL")).toBe(1)
 })
 
@@ -340,7 +423,7 @@ test('settle vs cleanup: once claimed, a late settle loses, and an R2 failure ke
   expect(t.n(`inquiry_files WHERE id = '${ack.id}' AND status = 'deleting'`)).toBe(1)
   expect(await code(await t.submit(token))).toEqual([410, 'session_expired'])
   const { settleFile } = await import('../../worker/db/intake')
-  expect(await settleFile(t.db as never, ack.id, { r2Key: 'k', mime: 'image/png', bytes: 1, sha256: 'x', filename: null })).toBeNull()
+  expect(await settleFile(t.db as never, ack.id, { r2Key: 'k', mime: 'image/png', bytes: 1, sha256: 'x', filename: null }, '2026-01-01')).toBeNull()
   // The retry finishes the job.
   expect((await cleanupIntake(t.env, new Date())).deleted).toBe(1)
   expect(t.r2.objects.size).toBe(0)

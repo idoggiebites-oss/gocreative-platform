@@ -57,7 +57,9 @@ test('upload, parallel submits, retry: one inquiry, one audit row, the file link
   expect(sql("SELECT COUNT(*) AS n FROM activity_log WHERE action = 'inquiry_received'")).toEqual([{ n: 1 }])
   expect(sql('SELECT i.status, f.via_portal, f.filename FROM inquiry_files i JOIN files f ON f.id = i.file_id')).toEqual([{ status: 'linked', via_portal: 1, filename: 'logo.png' }])
   expect(sql("SELECT status FROM inquiry_submissions WHERE id = 'real'")).toEqual([{ status: 'submitted' }])
+  expect(sql('SELECT bytes FROM intake_usage')).toEqual([{ bytes: PNG.length }]) // settle charged exactly what was stored
   expect((await upload(TOKEN)).status).toBe(409)
+  expect(sql('SELECT bytes FROM intake_usage')).toEqual([{ bytes: PNG.length }]) // a refused upload charged nothing
 }, 60_000)
 
 test('parallel uploads on real D1 stop at the cap', async () => {

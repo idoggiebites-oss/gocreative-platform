@@ -31,26 +31,31 @@ export async function openSession(db: D1Database, p: { id: string; tokenHash: st
 /** Holds the declared bytes before any are read. False when a cap refused it. */
 export async function reserveFile(db: D1Database, p: { id: string; submissionId: string; r2Key: string; kind: 'artwork' | 'po'; bytes: number; day: string }) {
   const held = `FROM inquiry_files WHERE submission_id = ? AND status IN ('reserved','stored')`
-  const [inserted] = await db.batch([
-    db.prepare(`INSERT INTO inquiry_files (id, submission_id, r2_key, kind, bytes) SELECT ?, ?, ?, ?, ?
+  const inserted = await db.prepare(`INSERT INTO inquiry_files (id, submission_id, r2_key, kind, bytes) SELECT ?, ?, ?, ?, ?
       WHERE EXISTS (SELECT 1 FROM inquiry_submissions WHERE id = ? AND ${OPEN})
+        AND (SELECT COUNT(*) FROM inquiry_files WHERE submission_id = ?) < ?
         AND (SELECT COUNT(*) ${held}) < ?
         AND (SELECT COALESCE(SUM(bytes), 0) ${held}) + ? <= ?
         AND ${OUTSTANDING} + ? <= ?
         AND ${usage('bytes')} + ? <= ?`)
-      .bind(p.id, p.submissionId, p.r2Key, p.kind, p.bytes, p.submissionId, p.submissionId, limits.SESSION_MAX_FILES, p.submissionId, p.bytes, limits.SESSION_MAX_BYTES,
-        p.bytes, limits.OUTSTANDING_MAX_BYTES, p.day, p.bytes, limits.DAILY_MAX_BYTES),
-    db.prepare(`INSERT INTO intake_usage (day, bytes) SELECT ?, ? WHERE EXISTS (SELECT 1 FROM inquiry_files WHERE id = ?)
-      ON CONFLICT (day) DO UPDATE SET bytes = bytes + excluded.bytes`).bind(p.day, p.bytes, p.id),
-  ])
+      .bind(p.id, p.submissionId, p.r2Key, p.kind, p.bytes, p.submissionId, p.submissionId, limits.SESSION_MAX_ATTEMPTS, p.submissionId, limits.SESSION_MAX_FILES, p.submissionId, p.bytes, limits.SESSION_MAX_BYTES,
+        p.bytes, limits.OUTSTANDING_MAX_BYTES, p.day, p.bytes, limits.DAILY_MAX_BYTES).run()
   return inserted.meta.changes > 0
 }
 
-/** reserved -> stored, only while the session is still open. Null means it lost: the caller's object must go. */
-export async function settleFile(db: D1Database, id: string, file: NewFile) {
-  const r = await db.prepare(`UPDATE inquiry_files SET status = 'stored', mime = ?, sha256 = ?, filename = ?
-    WHERE id = ? AND status = 'reserved' AND EXISTS (SELECT 1 FROM inquiry_submissions s WHERE s.id = submission_id AND s.status = 'open')`)
-    .bind(file.mime, file.sha256, file.filename, id).run()
+/**
+ * reserved -> stored, only while the session is still open. Null means it lost: the caller's object must go. The daily
+ * budget is charged here, for bytes actually stored: a declared size costs nothing, or one session could spend it all
+ * on uploads refused after the first few bytes (Codex). Parallel uploads may overshoot it slightly; the outstanding-storage cap is exact.
+ */
+export async function settleFile(db: D1Database, id: string, file: NewFile, day: string) {
+  const [r] = await db.batch([
+    db.prepare(`UPDATE inquiry_files SET status = 'stored', mime = ?, sha256 = ?, filename = ?
+      WHERE id = ? AND status = 'reserved' AND EXISTS (SELECT 1 FROM inquiry_submissions s WHERE s.id = submission_id AND s.status = 'open')`)
+      .bind(file.mime, file.sha256, file.filename, id),
+    db.prepare(`INSERT INTO intake_usage (day, bytes) SELECT ?, ? WHERE changes() > 0
+      ON CONFLICT (day) DO UPDATE SET bytes = bytes + excluded.bytes`).bind(day, file.bytes),
+  ])
   return r.meta.changes > 0 ? { id, filename: file.filename, bytes: file.bytes } : null
 }
 
@@ -60,9 +65,17 @@ export const markFailed = (db: D1Database, id: string, from: string[] = ['reserv
 /** An object may exist: cron retries the delete, and the bytes stay held until it succeeds. */
 export const markDeleting = (db: D1Database, id: string, from: string[] = ['reserved', 'stored']) =>
   db.prepare(`UPDATE inquiry_files SET status = 'deleting' WHERE id = ? AND status IN (${from.map(() => '?').join(',')})`).bind(id, ...from).run()
+/** Claims a stored file before its object is touched, so a concurrent submit can no longer link it. */
+export const claimStored = async (db: D1Database, id: string, submissionId: string) =>
+  (await db.prepare(`UPDATE inquiry_files SET status = 'deleting' WHERE id = ? AND submission_id = ? AND status = 'stored'
+    AND EXISTS (SELECT 1 FROM inquiry_submissions s WHERE s.id = ? AND s.status = 'open') RETURNING r2_key`).bind(id, submissionId, submissionId).first<{ r2_key: string }>())?.r2_key ?? null
 
-export const findOwnFile = (db: D1Database, submissionId: string, id: string) =>
-  db.prepare(`SELECT id, r2_key, status FROM inquiry_files WHERE id = ? AND submission_id = ?`).bind(id, submissionId).first<{ id: string; r2_key: string; status: string }>()
+/** Where the orphan sweep got to, so a long bucket can't hide objects past its first pages. */
+export const orphanCursor = async (db: D1Database) =>
+  (await db.prepare(`SELECT value FROM settings WHERE key = 'orphan_cursor'`).first<{ value: string }>())?.value
+export const saveOrphanCursor = (db: D1Database, cursor: string | undefined) => cursor
+  ? db.prepare(`INSERT INTO settings (key, value) VALUES ('orphan_cursor', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`).bind(cursor).run()
+  : db.prepare(`DELETE FROM settings WHERE key = 'orphan_cursor'`).run()
 
 export const sessionFileKinds = async (db: D1Database, submissionId: string) =>
   (await db.prepare(`SELECT kind, status FROM inquiry_files WHERE submission_id = ?`).bind(submissionId).all<{ kind: string; status: string }>()).results
@@ -85,8 +98,9 @@ export async function submitInquiry(db: D1Database, p: { submissionId: string; r
     db.prepare(`INSERT INTO inquiries (payload, contact_name, contact_email, contact_phone, status, ref, submission_id, customer_kind, organization, preferred_contact, due_date, ip_hash)
       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
       WHERE EXISTS (SELECT 1 FROM inquiry_submissions WHERE id = ? AND ${OPEN})
-        AND NOT EXISTS (SELECT 1 FROM inquiry_files WHERE submission_id = ? AND status = 'reserved')`)
-      .bind(payload, i.contactName, i.contactEmail ?? null, i.contactPhone ?? null, p.spam ? 'spam' : 'new', p.ref, sid, i.customerKind, i.organization ?? null, i.preferredContact ?? null, i.dueDate ?? null, p.ipHash, sid, sid),
+        AND NOT EXISTS (SELECT 1 FROM inquiry_files WHERE submission_id = ? AND status = 'reserved')
+        AND (? <> 'individual' OR NOT EXISTS (SELECT 1 FROM inquiry_files WHERE submission_id = ? AND status = 'stored' AND kind = 'po'))`)
+      .bind(payload, i.contactName, i.contactEmail ?? null, i.contactPhone ?? null, p.spam ? 'spam' : 'new', p.ref, sid, i.customerKind, i.organization ?? null, i.preferredContact ?? null, i.dueDate ?? null, p.ipHash, sid, sid, i.customerKind, sid),
     db.prepare(`INSERT INTO files (r2_key, mime, bytes, sha256, via_portal, filename)
       SELECT r2_key, mime, bytes, sha256, 1, filename FROM inquiry_files WHERE submission_id = ? AND status = 'stored' AND ${justInserted}`).bind(sid, sid, sid),
     db.prepare(`UPDATE inquiry_files SET status = 'linked', inquiry_id = ${mine}, file_id = (SELECT id FROM files WHERE files.r2_key = inquiry_files.r2_key)

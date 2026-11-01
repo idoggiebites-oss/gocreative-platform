@@ -106,7 +106,7 @@ export function publicRoutes() {
       }
       let stored
       try {
-        stored = await storeUpload(c, { key, maxBytes: FILE_MAX_BYTES }, PUBLIC_KINDS[purpose], (file) => db.settleFile(c.env.DB, id, file))
+        stored = await storeUpload(c, { key, maxBytes: FILE_MAX_BYTES }, PUBLIC_KINDS[purpose], (file) => db.settleFile(c.env.DB, id, file, usageDay(new Date())))
       } catch (e) {
         // The settle may have committed, so the object can't be deleted here. Only a row still reserved is queued.
         await db.markDeleting(c.env.DB, id, ['reserved']).catch(() => {})
@@ -127,9 +127,15 @@ export function publicRoutes() {
       const s = await session(c)
       if (!s) return badSession(c)
       if (s.status !== 'open') return fail(c, 409, 'session_closed', 'This request has already been sent.')
-      const f = await db.findOwnFile(c.env.DB, s.id, c.req.param('id'))
-      if (!f || f.status !== 'stored') return fail(c, 404, 'not_found', 'No such file')
-      await release(c, f.id, f.r2_key)
+      const id = c.req.param('id')
+      const key = await db.claimStored(c.env.DB, id, s.id)
+      if (!key) return fail(c, 404, 'not_found', 'No such file')
+      try {
+        await c.env.FILES.delete(key)
+        await db.markFailed(c.env.DB, id, ['deleting'])
+      } catch (e) {
+        console.error('Inquiry file delete failed; cron retries', e) // the row is 'deleting', so nothing is lost
+      }
       return c.json({ ok: true })
     })
 
@@ -144,10 +150,6 @@ export function publicRoutes() {
       const parsed = inquirySubmitSchema.safeParse(await readJson(c))
       if (!parsed.success) return fail(c, 400, 'invalid_request', 'Please check the form and try again.') // no echo of what was sent
       const { website, ...input } = parsed.data
-      const files = await db.sessionFileKinds(c.env.DB, s.id)
-      if (input.customerKind === 'individual' && files.some((f) => f.kind === 'po' && f.status === 'stored')) {
-        return fail(c, 400, 'po_not_accepted', 'Purchase orders are for schools, districts and organizations.')
-      }
       if (!c.env.IP_HASH_SALT) return fail(c, 503, 'intake_closed', 'We are not taking online requests right now. Please call or email us.')
       const ipHash = await hashIp(clientIp(c), c.env.IP_HASH_SALT)
 
@@ -163,10 +165,14 @@ export function publicRoutes() {
         throw e
       }
       if (submitted) return c.json({ ref }, 201)
+      // Nothing committed. Work out why, for the customer: the conditions were checked atomically above.
       const raced = await db.findRef(c.env.DB, s.id)
       if (raced) return c.json({ ref: raced })
+      const files = await db.sessionFileKinds(c.env.DB, s.id)
       if (files.some((f) => f.status === 'reserved')) return fail(c, 409, 'uploads_in_progress', 'Your files are still uploading.')
-      const current = await session(c)
-      return current?.expired ? fail(c, 410, 'session_expired', 'Your session has ended. Please start again.') : fail(c, 409, 'uploads_in_progress', 'Your files are still uploading.')
+      if (input.customerKind === 'individual' && files.some((f) => f.kind === 'po' && f.status === 'stored')) {
+        return fail(c, 400, 'po_not_accepted', 'Purchase orders are for schools, districts and organizations.')
+      }
+      return fail(c, 410, 'session_expired', 'Your session has ended. Please start again.')
     })
 }

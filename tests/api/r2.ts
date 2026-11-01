@@ -32,10 +32,16 @@ export function createTestR2() {
         objects.delete(key)
       }
     },
-    list: async (o: { prefix?: string } = {}) => ({
-      objects: [...objects.keys()].filter((k) => k.startsWith(o.prefix ?? '')).map((key) => ({ key, uploaded: uploaded.get(key) ?? new Date() })),
-      truncated: false,
-    }),
+    list: async (o: { prefix?: string; limit?: number; cursor?: string } = {}) => {
+      const keys = [...objects.keys()].filter((k) => k.startsWith(o.prefix ?? '')).sort()
+      const start = Number(o.cursor ?? 0)
+      const end = start + (o.limit ?? 1000)
+      return {
+        objects: keys.slice(start, end).map((key) => ({ key, uploaded: uploaded.get(key) ?? new Date() })),
+        truncated: end < keys.length,
+        cursor: String(end),
+      }
+    },
   }
   // Cast: the real R2Bucket type comes from workers-types; this covers the three methods the Worker calls.
   return { bucket: bucket as unknown as Env['FILES'], objects, calls, uploaded }

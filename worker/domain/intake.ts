@@ -4,6 +4,7 @@ const MB = 2 ** 20
 export const SESSION_HOURS = 2
 export const SESSION_MAX_FILES = 5
 export const SESSION_MAX_BYTES = 60 * MB
+export const SESSION_MAX_ATTEMPTS = 20 // refused and removed uploads count: they return their bytes, but not forever
 export const FILE_MAX_BYTES = 20 * MB
 export const JSON_MAX_BYTES = 64 * 1024
 export const IP_SESSIONS_PER_HOUR = 20 // cautious: a school shares one address
@@ -13,6 +14,7 @@ export const OPEN_SESSIONS_MAX = 200
 export const OUTSTANDING_MAX_BYTES = 2 * 2 ** 30
 export const ORPHAN_GRACE_HOURS = 24
 export const CLEANUP_BATCH = 500
+export const ORPHAN_PAGES_PER_RUN = 10
 export const USAGE_KEEP_DAYS = 7
 
 // No 0/O or 1/I: this gets read aloud over the phone.
