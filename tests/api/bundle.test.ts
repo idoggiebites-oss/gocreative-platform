@@ -95,7 +95,7 @@ test('a failed run never touches a good copy; pruning keeps only copies that ope
   expect(bundles(usb)).not.toContain(first)
   expect(bundles(usb).some((f) => f.includes('2026-01-03'))).toBe(true)
   expect(bundles(usb).some((f) => f.includes('2026-01-04'))).toBe(true)
-})
+}, 120_000) // real commands with real scrypt: seconds each
 
 test('the drive copy opens with its own tool; --check and a failed extraction leave no plaintext behind', () => {
   const usb = mkdtempSync(join(dir, 'usb-'))
@@ -123,4 +123,4 @@ test('the drive copy opens with its own tool; --check and a failed extraction le
   expect(again.stderr).toContain('already in')
   expect(existsSync(join(out, '.extracting'))).toBe(false)
   expect(readFileSync(join(out, '2026-02-01T00-00-00-000Z', 'manifest.json')).equals(before)).toBe(true)
-})
+}, 120_000)

@@ -98,7 +98,7 @@ wrangler('d1', 'migrations', 'apply', name, ...where)
 
 // 7. Replay deletions made since the backup.
 const current = d1("SELECT name, sql FROM sqlite_schema WHERE type = 'trigger' ORDER BY name") as { name: string; sql: string }[]
-const replayText = replaySql(replay, current)
+const replayText = replaySql(replay, current, (d1("SELECT name FROM sqlite_schema WHERE type = 'table'") as { name: string }[]).map((t) => t.name))
 if (replayText) {
   const replayFile = join(scratch, 'replay.sql')
   writeFileSync(replayFile, replayText, { mode: 0o600 })

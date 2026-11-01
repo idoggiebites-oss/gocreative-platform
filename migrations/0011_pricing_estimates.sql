@@ -26,6 +26,10 @@ CREATE TRIGGER pricing_published_no_delete BEFORE DELETE ON pricing_versions
 WHEN OLD.status <> 'draft'
 BEGIN SELECT RAISE(ABORT, 'pricing_published_no_delete'); END;
 
+CREATE TRIGGER pricing_no_replace BEFORE INSERT ON pricing_versions
+WHEN EXISTS (SELECT 1 FROM pricing_versions WHERE id = NEW.id)
+BEGIN SELECT RAISE(ABORT, 'pricing_no_replace'); END;
+
 -- One calculation, kept exactly as made. A later price change or a staff review adds a new row and never edits this one.
 CREATE TABLE inquiry_estimates (
   id INTEGER PRIMARY KEY,
@@ -64,6 +68,9 @@ CREATE TABLE estimate_overrides (
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 CREATE INDEX idx_estimate_overrides_estimate ON estimate_overrides (estimate_id);
+CREATE TRIGGER estimate_overrides_no_replace BEFORE INSERT ON estimate_overrides
+WHEN EXISTS (SELECT 1 FROM estimate_overrides WHERE id = NEW.id)
+BEGIN SELECT RAISE(ABORT, 'estimate_overrides_no_replace'); END;
 CREATE TRIGGER estimate_overrides_no_update BEFORE UPDATE ON estimate_overrides
 BEGIN SELECT RAISE(ABORT, 'estimate_overrides_no_update'); END;
 CREATE TRIGGER estimate_overrides_only_with_claim BEFORE DELETE ON estimate_overrides

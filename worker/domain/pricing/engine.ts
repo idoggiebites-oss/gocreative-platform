@@ -90,7 +90,7 @@ function priceOf(costCents: number, p: { mode: 'markup' | 'margin'; rateBps: num
   const cost = BigInt(costCents)
   const num = (p.mode === 'markup' ? cost * (B10K + BigInt(p.rateBps)) : cost * B10K) * (B10K + BigInt(adjustmentBps))
   const den = (p.mode === 'markup' ? B10K : B10K - BigInt(p.rateBps)) * B10K
-  return Number((num + den - 1n) / den)
+  return Number((num + den - 1n) / den) // the caller refuses an unsafe result
 }
 /** A selling fee takes the adjustment too, once, exactly as the plan says. It is not marked up: it is already a selling price. */
 const feeOf = (sell: number, adjustmentBps: number) => priceOf(sell, { mode: 'markup', rateBps: 0 }, adjustmentBps)
@@ -181,6 +181,8 @@ export function calculateEstimate(config: PricingConfig | null, request: Estimat
       internal.push({ label: f.label, costCents: f.cost * f.quantity, priceCents: each * f.quantity })
     }
   })
+  // Past 2^53 a Number can't hold every cent, so an amount that large is a person's job, not a rounding error.
+  if ([...lines.flatMap((l) => [l.unitPriceCents, l.lineTotalCents]), ...internal.map((l) => l.costCents)].some((n) => !Number.isSafeInteger(n))) reasons.push('amount too large to calculate exactly')
   // One line that can't be priced means no figure at all: a partial total would mislead.
   if (reasons.length > 0) return manual(reasons, [...assumptions])
 
@@ -192,10 +194,12 @@ export function calculateEstimate(config: PricingConfig | null, request: Estimat
     total = config.minOrderCents
   }
   const cost = internal.reduce((n, l) => n + l.costCents, 0)
-  const marginBps = total > 0 ? Math.floor(((total - cost) * 10000) / total) : null
-  const floor = config.minMarginBps
+  if (!Number.isSafeInteger(total) || !Number.isSafeInteger(cost)) return manual(['amount too large to calculate exactly'], [...assumptions])
   if (total <= 0) return manual(['the calculation came to nothing'], [...assumptions])
-  if (floor !== undefined && (total - cost) * 10000 < floor * total) return manual(['below the minimum margin'], [...assumptions])
+  const margin = (BigInt(total) - BigInt(cost)) * B10K
+  const marginBps = Number(margin / BigInt(total))
+  const floor = config.minMarginBps
+  if (floor !== undefined && margin < BigInt(floor) * BigInt(total)) return manual(['below the minimum margin'], [...assumptions])
   if (config.review?.maxTotalCents !== undefined && total > config.review.maxTotalCents) return manual(['total over the review limit'], [...assumptions])
   return {
     engineVersion: ENGINE_VERSION, status: assumptions.size > 0 ? 'assumption_based' : 'available', totalCents: total, lines, assumptions: [...assumptions], reasons: [],

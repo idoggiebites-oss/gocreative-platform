@@ -69,6 +69,30 @@ test('publishing is bound to what was previewed: a draft edited afterwards, or a
   expect(t.n("activity_log WHERE action = 'pricing_published'")).toBe(1)
 })
 
+test('the first publish with a stale idea of what is active is refused too', async () => {
+  const t = setup()
+  const hash = (await db.saveDraft(t.d1, { config: config(1), expectedHash: null, actorId: t.actor, note: null }))!
+  const draft = (await db.getDraftPricing(t.d1))!
+  expect(await db.publishDraft(t.d1, { draftId: draft.id, draftHash: hash, expectedActiveId: 999, actorId: t.actor })).toBe(false)
+  expect(await db.getActivePricing(t.d1)).toBeNull()
+  expect(await db.publishDraft(t.d1, { draftId: draft.id, draftHash: hash, expectedActiveId: null, actorId: t.actor })).toBe(true)
+})
+
+test('a published version cannot be swapped by INSERT OR REPLACE, whatever the settings', async () => {
+  const t = setup()
+  const v1 = await t.publish(300, null)
+  const before = (await db.getPricingVersion(t.d1, v1))!
+  expect(() => t.sqlite.exec(`INSERT OR REPLACE INTO pricing_versions (id, status, config, config_hash, created_by, published_by, published_at) VALUES (${v1}, 'active', '{}', 'x', ${t.actor}, ${t.actor}, '2026-01-01')`)).toThrow(/pricing_no_replace/)
+  expect(await db.getPricingVersion(t.d1, v1)).toEqual(before)
+})
+
+test('replaying a deletion into a backup older than these tables still works', () => {
+  const target = createTestD1('CREATE TABLE inquiries (id INTEGER PRIMARY KEY, status TEXT); CREATE TABLE inquiry_files (inquiry_id INTEGER, submission_id TEXT); CREATE TABLE files (id INTEGER, r2_key TEXT); CREATE TABLE inquiry_submissions (id TEXT); INSERT INTO inquiries VALUES (1, \'new\');')
+  const sql = replaySql([{ kind: 'inquiry', inquiryId: 1, submissionId: 's', at: '2030', reason: 'owner', files: [] }], [], ['inquiries', 'inquiry_files', 'files', 'inquiry_submissions'])
+  target.sqlite.exec('BEGIN'); target.sqlite.exec(sql); target.sqlite.exec('COMMIT')
+  expect(target.sqlite.prepare('SELECT COUNT(*) AS n FROM inquiries').get()).toEqual({ n: 0 })
+})
+
 test('parallel publishes: exactly one wins, and there is always exactly one active version', async () => {
   const t = setup()
   const v1 = await t.publish(300, null)

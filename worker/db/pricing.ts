@@ -42,7 +42,8 @@ export async function publishDraft(db: D1Database, p: { draftId: number; draftHa
   const results = await db.batch([
     db.prepare(`UPDATE pricing_versions SET status = 'retired' WHERE status = 'active' AND id IS ? AND ${draftOk}`).bind(p.expectedActiveId, p.draftId, p.draftHash),
     db.prepare(`UPDATE pricing_versions SET status = 'active', published_by = ?, published_at = ${NOW}
-      WHERE id = ? AND status = 'draft' AND config_hash = ? AND NOT EXISTS (SELECT 1 FROM pricing_versions a WHERE a.status = 'active')`).bind(p.actorId, p.draftId, p.draftHash),
+      WHERE id = ? AND status = 'draft' AND config_hash = ? AND NOT EXISTS (SELECT 1 FROM pricing_versions a WHERE a.status = 'active')
+        AND (? IS NULL OR EXISTS (SELECT 1 FROM pricing_versions e WHERE e.id = ? AND e.status = 'retired'))`).bind(p.actorId, p.draftId, p.draftHash, p.expectedActiveId, p.expectedActiveId),
     db.prepare(`INSERT INTO activity_log (actor_kind, actor_id, entity_type, entity_id, action, after)
       SELECT 'user', ?, 'pricing_version', ?, 'pricing_published', json_object('replaced', ?, 'rollback_of', rollback_of) FROM pricing_versions WHERE id = ? AND status = 'active' AND changes() > 0`)
       .bind(p.actorId, p.draftId, p.expectedActiveId, p.draftId),

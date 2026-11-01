@@ -192,6 +192,12 @@ describe('money stays exact', () => {
     expect(Number.isSafeInteger(r.totalCents)).toBe(true)
     expect(r.lines[0].unitPriceCents).toBe((99_999_999 + 200) * 2)
   })
+  test('an amount beyond exact integers is manual review, never a figure that is off by cents', () => {
+    const huge: PricingConfig = { ...CONFIG, productCostCents: { tshirts: 100_000_000 }, services: { screen: { adjustmentBps: 100000, pricing: { mode: 'markup', rateBps: 1000000 }, colorCostTiers: [{ minQty: 1, costCents: 99_999_999 }] } } }
+    const r = one({ product: 'tshirts', method: 'screen', quantity: 999999, decorations: [{ colors: 20 }] }, huge)
+    expect(r.status).toBe('manual_review_required')
+    expect(r.totalCents).toBeNull()
+  })
   test('the same config and request always give the same result', () => {
     expect(one(shirt(10))).toEqual(one(shirt(10)))
   })

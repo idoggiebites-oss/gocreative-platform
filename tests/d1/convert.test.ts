@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, expect, test } from 'vitest'
 import { unstable_dev } from 'wrangler'
+import { getActivePricing, getDraftPricing, publishDraft, saveDraft } from '../../worker/db/pricing'
 
 const dir = mkdtempSync(join(tmpdir(), 'gocreative-convert-'))
 const config = join(dir, 'wrangler.json')
@@ -95,16 +96,34 @@ test('real owner delete and the real cron: journal, objects and rows go, a conve
   expect(sql('PRAGMA foreign_key_check')).toEqual([])
 }, 90_000)
 
-test('pricing on real D1: parallel publishes leave one active version; estimates are append-only', async () => {
-  const actor = sql("SELECT id FROM users LIMIT 1")[0].id
-  sql(`INSERT INTO pricing_versions (config, config_hash, created_by) VALUES ('{}', 'h1', ${actor})`)
-  const [{ id }] = sql("SELECT id FROM pricing_versions WHERE status = 'draft'")
-  sql(`UPDATE pricing_versions SET status = 'active', published_by = ${actor}, published_at = '2026-01-01' WHERE id = ${id}`)
-  expect(() => sql(`UPDATE pricing_versions SET config = '{"x":1}' WHERE id = ${id}`)).toThrow()
-  expect(() => sql(`INSERT INTO pricing_versions (status, config, config_hash, created_by, published_by, published_at) VALUES ('active', '{}', 'h2', ${actor}, ${actor}, '2026-01-02')`)).toThrow()
-  const [{ id: inq }] = sql("SELECT id FROM inquiries WHERE submission_id = 'alpha'")
-  sql(`INSERT INTO inquiry_estimates (inquiry_id, engine_version, status, facts_source, inputs, customer_result, internal_result) VALUES (${inq}, 1, 'manual_review_required', 'none', '{}', '{}', '{}')`)
-  expect(() => sql("UPDATE inquiry_estimates SET status = 'available'")).toThrow()
-  expect(() => sql('DELETE FROM inquiry_estimates')).toThrow()
-  expect(sql('PRAGMA foreign_key_check')).toEqual([])
-}, 60_000)
+test('pricing on real D1: publishDraft itself, in parallel, with stale guards; one active version; estimates append-only', async () => {
+  const { getPlatformProxy } = await import('wrangler')
+  const proxy = await getPlatformProxy<{ DB: D1Database }>({ configPath: config, persist: { path: join(dir, 'v3') } })
+  try {
+    const d1 = proxy.env.DB
+    const actor = (await d1.prepare('SELECT id FROM users LIMIT 1').first<{ id: number }>())!.id
+    const CONFIG = { productCostCents: {}, services: {} }
+    const hash = (await saveDraft(d1, { config: CONFIG, expectedHash: null, actorId: actor, note: null }))!
+    const first = (await getDraftPricing(d1))!
+    expect(await publishDraft(d1, { draftId: first.id, draftHash: hash, expectedActiveId: 999, actorId: actor })).toBe(false)
+    expect(await publishDraft(d1, { draftId: first.id, draftHash: 'wrong', expectedActiveId: null, actorId: actor })).toBe(false)
+    expect(await publishDraft(d1, { draftId: first.id, draftHash: hash, expectedActiveId: null, actorId: actor })).toBe(true)
+    const second = { ...CONFIG, minOrderCents: 100 }
+    const hash2 = (await saveDraft(d1, { config: second, expectedHash: null, actorId: actor, note: null }))!
+    const draft = (await getDraftPricing(d1))!
+    const results = await Promise.all([1, 2, 3, 4].map(() => publishDraft(d1, { draftId: draft.id, draftHash: hash2, expectedActiveId: first.id, actorId: actor })))
+    expect(results.filter(Boolean)).toHaveLength(1)
+    expect((await getActivePricing(d1))!.id).toBe(draft.id)
+    expect((await d1.prepare("SELECT COUNT(*) AS n FROM activity_log WHERE action = 'pricing_published'").first<{ n: number }>())!.n).toBe(2)
+    expect((await d1.prepare(`SELECT status FROM pricing_versions WHERE id = ?`).bind(first.id).first<{ status: string }>())!.status).toBe('retired')
+    await expect(d1.prepare(`UPDATE pricing_versions SET config = '{"x":1}' WHERE id = ?`).bind(draft.id).run()).rejects.toThrow()
+    await expect(d1.prepare(`INSERT OR REPLACE INTO pricing_versions (id, status, config, config_hash, created_by, published_by, published_at) VALUES (?, 'active', '{}', 'x', ?, ?, 'x')`).bind(draft.id, actor, actor).run()).rejects.toThrow()
+    const inq = (await d1.prepare("SELECT id FROM inquiries WHERE submission_id = 'alpha'").first<{ id: number }>())!.id
+    await d1.prepare(`INSERT INTO inquiry_estimates (inquiry_id, engine_version, status, facts_source, inputs, customer_result, internal_result) VALUES (?, 1, 'manual_review_required', 'none', '{}', '{}', '{}')`).bind(inq).run()
+    await expect(d1.prepare("UPDATE inquiry_estimates SET status = 'available'").run()).rejects.toThrow()
+    await expect(d1.prepare('DELETE FROM inquiry_estimates').run()).rejects.toThrow()
+    expect((await d1.prepare('PRAGMA foreign_key_check').all()).results).toEqual([])
+  } finally {
+    await proxy.dispose()
+  }
+}, 90_000)

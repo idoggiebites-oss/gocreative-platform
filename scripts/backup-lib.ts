@@ -90,13 +90,14 @@ export type JournalEntry = { kind: 'inquiry'; inquiryId: number; submissionId: s
  * Runs in the isolated target with its triggers off, like the load, and restores them after. A converted inquiry is never
  * journaled, so the only rows touched are ones already deleted from live.
  */
-export function replaySql(entries: JournalEntry[], triggers: { name: string; sql: string }[]): string {
+export function replaySql(entries: JournalEntry[], triggers: { name: string; sql: string }[], tables?: string[]): string {
   if (entries.length === 0) return ''
   const lines = ['PRAGMA defer_foreign_keys = ON;']
   for (const t of triggers) lines.push(`DROP TRIGGER ${id(t.name)};`)
   for (const e of entries) {
-    lines.push(`DELETE FROM "estimate_overrides" WHERE estimate_id IN (SELECT id FROM "inquiry_estimates" WHERE inquiry_id = ${sqlValue(e.inquiryId)});`)
-    lines.push(`DELETE FROM "inquiry_estimates" WHERE inquiry_id = ${sqlValue(e.inquiryId)};`)
+    // An older backup may predate these tables. Normally newer migrations run first, so this is a safety net.
+    if (!tables || tables.includes('estimate_overrides')) lines.push(`DELETE FROM "estimate_overrides" WHERE estimate_id IN (SELECT id FROM "inquiry_estimates" WHERE inquiry_id = ${sqlValue(e.inquiryId)});`)
+    if (!tables || tables.includes('inquiry_estimates')) lines.push(`DELETE FROM "inquiry_estimates" WHERE inquiry_id = ${sqlValue(e.inquiryId)};`)
     lines.push(`DELETE FROM "inquiry_files" WHERE inquiry_id = ${sqlValue(e.inquiryId)}${e.submissionId ? ` OR submission_id = ${sqlValue(e.submissionId)}` : ''};`)
     for (const f of e.files) if (f.fileId !== null) lines.push(`DELETE FROM "files" WHERE id = ${sqlValue(f.fileId)} AND r2_key = ${sqlValue(f.r2Key)};`)
     lines.push(`DELETE FROM "inquiries" WHERE id = ${sqlValue(e.inquiryId)} AND status <> 'converted';`)

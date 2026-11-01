@@ -14,13 +14,17 @@ export type AnalysisSettings = {
   gradientBinShare: number // distinct color bins per 1000 flat pixels, above which colors are a ramp, not inks
   gradientMinBins: number
   softBoundaryShare: number // this share of flat pixels where two inks touch with no edge between them means a ramp
+  rampCellDeltaE: number // one color drifting this much across the image is a soft gradient, however few shades it has
+  edgeColorDistance: number // an edge pixel further than this (RGB) from any blend of two found colors belongs to an ink we didn't count
+  unexplainedShare: number // this share of opaque pixels unexplained means thin artwork, so no count can be defended
+  semiManualShare: number // this share of visible pixels partly transparent means no solid inks can be assumed
   backgroundEdgeShare: number // this share of the border in one color suggests a background
 }
 export const ANALYSIS_DEFAULTS: AnalysisSettings = {
-  maxPixels: 4_000_000, alphaOpaque: 200, flatTolerance: 30, mergeDeltaE: 14, minCoverage: 0.004, minFlatShare: 0.4, maxSpotColors: 8, gradientBinShare: 6, gradientMinBins: 48, softBoundaryShare: 0.002, backgroundEdgeShare: 0.6,
+  maxPixels: 4_000_000, alphaOpaque: 250, flatTolerance: 30, mergeDeltaE: 14, minCoverage: 0.004, minFlatShare: 0.4, maxSpotColors: 8, gradientBinShare: 6, gradientMinBins: 48, softBoundaryShare: 0.002, rampCellDeltaE: 5, edgeColorDistance: 45, unexplainedShare: 0.002, semiManualShare: 0.25, backgroundEdgeShare: 0.6,
 }
 
-export type AnalysisFlag = 'gradient' | 'photographic' | 'too_little_flat_color' | 'too_many_colors' | 'small_details_dropped' | 'likely_background' | 'partly_transparent' | 'fully_transparent' | 'too_large' | 'too_small'
+export type AnalysisFlag = 'gradient' | 'photographic' | 'too_little_flat_color' | 'too_many_colors' | 'small_details_dropped' | 'likely_background' | 'partly_transparent' | 'fully_transparent' | 'too_large' | 'too_small' | 'thin_details'
 export type AnalysisColor = { hex: string; coverage: number; likelyBackground: boolean }
 export type ArtworkAnalysis = {
   analyzerVersion: number
@@ -96,7 +100,7 @@ export function analyzeArtwork(px: Pixels, settings: AnalysisSettings = ANALYSIS
       bins.set(key, bin)
     }
   }
-  if (opaque === 0) return refuse('fully_transparent')
+  if (opaque === 0) return semi > 0 ? refuse('partly_transparent') : refuse('fully_transparent')
 
   const flags: AnalysisFlag[] = []
   if (semi > 0 && semi / total > 0.02) flags.push('partly_transparent')
@@ -148,8 +152,67 @@ export function analyzeArtwork(px: Pixels, settings: AnalysisSettings = ANALYSIS
     flags.push('gradient')
     return { ...base, detectedColors: 0, estimatedInkColors: null, confidence: 'low', needsManualReview: true, flags, palette: [] }
   }
+  // One "color" whose shade drifts across the image is a ramp too faint to split into clusters. Noise averages out within a cell; a drift doesn't.
+  const CELLS = 8
+  const cells = new Map<number, { r: number; g: number; b: number; n: number }>()
+  for (let p = 0; p < total; p++) {
+    if (flatKey[p] < 0) continue
+    const c = clusterOf.get(flatKey[p])!
+    const id = c * 64 + Math.floor(((p % w) * CELLS) / w) * 8 + Math.floor((Math.floor(p / w) * CELLS) / h)
+    const cell = cells.get(id) ?? { r: 0, g: 0, b: 0, n: 0 }
+    const i = p * 4
+    cell.r += data[i]; cell.g += data[i + 1]; cell.b += data[i + 2]; cell.n++
+    cells.set(id, cell)
+  }
+  const span = new Map<number, Lab[]>()
+  for (const [id, cell] of cells) {
+    if (cell.n < 16) continue
+    const c = Math.floor(id / 64)
+    span.set(c, [...(span.get(c) ?? []), toLab(cell.r / cell.n, cell.g / cell.n, cell.b / cell.n)])
+  }
+  for (const labs of span.values()) {
+    for (let a = 0; a < labs.length; a++) {
+      for (let b = a + 1; b < labs.length; b++) {
+        if (deltaE(labs[a], labs[b]) >= settings.rampCellDeltaE) {
+          flags.push('gradient')
+          return { ...base, detectedColors: 0, estimatedInkColors: null, confidence: 'low', needsManualReview: true, flags, palette: [] }
+        }
+      }
+    }
+  }
   const kept = clusters.filter((c) => c.n / flat >= settings.minCoverage)
   if (kept.length < clusters.length) flags.push('small_details_dropped')
+
+  // Pixels that aren't flat should be edges: blends of two colors we found. One that isn't is ink too thin to be flat (a line, small type) and would vanish from the count.
+  const anchors = kept.map((c) => [c.r / c.n, c.g / c.n, c.b / c.n] as const)
+  const explained = new Map<number, boolean>()
+  const isExplained = (r: number, g: number, b: number) => {
+    const key = (r >> 2 << 12) | (g >> 2 << 6) | (b >> 2)
+    const known = explained.get(key)
+    if (known !== undefined) return known
+    let best = Infinity
+    for (let i = 0; i < anchors.length; i++) {
+      best = Math.min(best, Math.hypot(r - anchors[i][0], g - anchors[i][1], b - anchors[i][2]))
+      for (let j = i + 1; j < anchors.length; j++) {
+        const [A, B] = [anchors[i], anchors[j]]
+        const d = [B[0] - A[0], B[1] - A[1], B[2] - A[2]]
+        const t = Math.max(0, Math.min(1, ((r - A[0]) * d[0] + (g - A[1]) * d[1] + (b - A[2]) * d[2]) / (d[0] ** 2 + d[1] ** 2 + d[2] ** 2 || 1)))
+        best = Math.min(best, Math.hypot(r - A[0] - t * d[0], g - A[1] - t * d[1], b - A[2] - t * d[2]))
+      }
+    }
+    const ok = best <= settings.edgeColorDistance
+    explained.set(key, ok)
+    return ok
+  }
+  let unexplained = 0
+  if (anchors.length <= 12) {
+    for (let p = 0; p < total; p++) {
+      const i = p * 4
+      if (flatKey[p] < 0 && data[i + 3] >= settings.alphaOpaque && !isExplained(data[i], data[i + 1], data[i + 2])) unexplained++
+    }
+  }
+  const thin = unexplained / opaque >= settings.unexplainedShare
+  if (thin) flags.push('thin_details')
 
   const borderTotal = kept.reduce((n, c) => n + c.border, 0)
   const background = borderTotal > 0 ? kept.find((c) => c.border / borderTotal >= settings.backgroundEdgeShare) : undefined
@@ -160,8 +223,10 @@ export function analyzeArtwork(px: Pixels, settings: AnalysisSettings = ANALYSIS
   if (inks > settings.maxSpotColors) flags.push('too_many_colors')
 
   const tooMany = flags.includes('too_many_colors')
-  const confidence = tooMany ? 'low' : flatShare >= 0.7 && !flags.includes('small_details_dropped') && !flags.includes('partly_transparent') ? 'high' : 'medium'
-  return { ...base, detectedColors: palette.length, estimatedInkColors: tooMany || inks < 1 ? null : inks, confidence, needsManualReview: tooMany || inks < 1, flags, palette }
+  const mostlySemi = semi / (opaque + semi) >= settings.semiManualShare
+  const unsure = tooMany || thin || mostlySemi
+  const confidence = unsure ? 'low' : flatShare >= 0.7 && !flags.includes('small_details_dropped') && !flags.includes('partly_transparent') ? 'high' : 'medium'
+  return { ...base, detectedColors: palette.length, estimatedInkColors: unsure || inks < 1 ? null : inks, confidence, needsManualReview: unsure || inks < 1, flags, palette }
 }
 
 /** Width and height from a PNG or JPEG header, without decoding, so an oversized image can be refused first. Null when it can't tell. */

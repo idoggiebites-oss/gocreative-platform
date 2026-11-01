@@ -81,6 +81,15 @@ describe('transparency', () => {
     const r = analyzeArtwork(image(200, 200, (x, y) => (Math.hypot(x - 100, y - 100) < 60 ? NAVY : [255, 0, 0, 0])))
     expect(r.estimatedInkColors).toBe(1)
   })
+  test('uniform partial transparency is not solid ink, even when nearly opaque', () => {
+    const r = analyzeArtwork(image(100, 100, () => [100, 20, 30, 220]))
+    expect(r.flags).toContain('partly_transparent')
+    expect(r.estimatedInkColors).toBeNull()
+    expect(r.needsManualReview).toBe(true)
+  })
+  test('mostly semi-transparent artwork has no count', () => {
+    expect(analyzeArtwork(image(100, 100, (x) => (x < 30 ? NAVY : [240, 180, 30, 120]))).needsManualReview).toBe(true)
+  })
   test('nothing but transparency goes to manual review', () => {
     const r = analyzeArtwork(image(50, 50, () => CLEAR))
     expect(r.flags).toEqual(['fully_transparent'])
@@ -90,7 +99,7 @@ describe('transparency', () => {
   test('broad semi-transparency is flagged and lowers confidence', () => {
     const r = analyzeArtwork(image(200, 200, (_x, y) => (y < 100 ? NAVY : [240, 180, 30, 120])))
     expect(r.flags).toContain('partly_transparent')
-    expect(r.confidence).not.toBe('high')
+    expect(r.confidence).toBe('low')
   })
 })
 
@@ -111,6 +120,22 @@ describe('artwork that has no honest ink count', () => {
       return [120 + 60 * Math.sin(x / 17) + n, 110 + 50 * Math.cos(y / 23) + n, 90 + 40 * Math.sin((x + y) / 31) + n, 255]
     }))
     expect(r.flags.some((f) => f === 'photographic' || f === 'gradient')).toBe(true)
+    expect(r.estimatedInkColors).toBeNull()
+  })
+  test('a faint gradient too narrow to split into colors is still a gradient', () => {
+    const r = analyzeArtwork(image(300, 300, (x) => { const v = 100 + (20 * x) / 299; return [v, v, v, 255] }))
+    expect(r.flags).toContain('gradient')
+    expect(r.estimatedInkColors).toBeNull()
+  })
+  test('a thin line of another ink is not lost: no count rather than a wrong one', () => {
+    const r = analyzeArtwork(image(100, 100, (x, y) => (x === 50 ? RED : x > 10 && x < 35 && y > 10 && y < 35 ? [20, 40, 200, 255] : WHITE)))
+    expect(r.flags).toContain('thin_details')
+    expect(r.estimatedInkColors).toBeNull()
+    expect(r.needsManualReview).toBe(true)
+  })
+  test('line art with no solid ink at all goes to manual review, not "one color: white"', () => {
+    const r = analyzeArtwork(image(200, 200, (x, y) => ((x % 40 === 0 || y % 40 === 0) ? [0, 0, 0, 255] : WHITE)))
+    expect(r.needsManualReview).toBe(true)
     expect(r.estimatedInkColors).toBeNull()
   })
   test('a halftone-style dot pattern does not pretend to be flat', () => {
