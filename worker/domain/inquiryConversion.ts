@@ -1,12 +1,21 @@
 // Pure rules for turning an inquiry into an order. Nothing the customer sent is dropped: each line becomes one order item.
 import { z } from 'zod'
 import { business } from '../../shared/business'
-import type { Method, ProductionStatus } from '../../shared/enums'
-import { inquiryLineSchema } from '../../shared/inquiry'
+import { METHODS, type Method, type ProductionStatus } from '../../shared/enums'
 
-const payloadSchema = z.object({ lines: z.array(inquiryLineSchema).min(1), designHelp: z.boolean().optional(), description: z.string().nullable().optional() })
+// Reading a stored request is not validating a new one. The catalogue changes over time and later versions add fields, so a stored line
+// needs only to be safe to show and convert: submit-time rules (shared/inquiry.ts) stay strict, and are deliberately not used here.
+const storedText = z.string().nullish().transform((v) => v || undefined)
+const storedLine = z.looseObject({
+  product: z.string().min(1).max(200),
+  method: z.string().min(1).max(40),
+  quantity: z.number().int().min(1).max(1_000_000),
+  sizes: z.record(z.string().max(20), z.number().int().min(0).max(1_000_000)).nullish().transform((v) => v ?? undefined),
+  color: storedText, material: storedText, personalization: storedText, notes: storedText,
+})
+const payloadSchema = z.looseObject({ lines: z.array(storedLine).min(1), designHelp: z.boolean().nullish(), description: z.string().nullish() })
 export type InquiryPayload = z.infer<typeof payloadSchema>
-/** The stored request, or null for one that can't be converted (only ever a row from before public intake). */
+/** The stored request, or null only for one with no usable lines at all (a row from before public intake, or corruption). */
 export const parsePayload = (raw: string): InquiryPayload | null => {
   try {
     const p = payloadSchema.safeParse(JSON.parse(raw))
@@ -26,15 +35,25 @@ export type ConvertedItem = {
 const DESCRIPTION_MAX = 500
 const COLOR_MAX = 100
 const details = (l: InquiryPayload['lines'][number]) => [l.personalization && `Personalization: ${l.personalization}`, l.material && `Material or item: ${l.material}`, l.notes].filter(Boolean).join('\n')
+const knownMethod = (m: string): Method | null => METHODS.find((x) => x === m) ?? null
+/** Sizes that don't add up to the quantity would make the item uneditable, so such a grid stays in the note rather than on the item. */
+const usableSizes = (l: InquiryPayload['lines'][number]) => {
+  if (!l.sizes || Object.keys(l.sizes).length === 0) return null
+  return Object.values(l.sizes).reduce((a, b) => a + b, 0) === l.quantity ? l.sizes : null
+}
 
 /** Prices stay 0 until staff quote. "Help me choose" has no method yet, so it becomes 'other' with a note saying why. */
 export function lineToItem(l: InquiryPayload['lines'][number]): ConvertedItem {
   const text = details(l)
   return {
-    kind: 'product', product: productName(l.product), method: l.method === 'help' ? 'other' : l.method, garmentColor: l.color ? l.color.slice(0, COLOR_MAX) : null,
-    sizes: l.sizes && Object.keys(l.sizes).length > 0 ? l.sizes : null, quantity: l.quantity, unitPriceCents: 0,
+    kind: 'product', product: productName(l.product), method: knownMethod(l.method) ?? 'other', garmentColor: l.color ? l.color.slice(0, COLOR_MAX) : null,
+    sizes: usableSizes(l), quantity: l.quantity, unitPriceCents: 0,
     description: !text ? null : text.length <= DESCRIPTION_MAX ? text : `${text.slice(0, DESCRIPTION_MAX - 28)}… (full text in order note)`,
-    notes: l.method === 'help' ? 'Customer asked for help choosing the method.' : null,
+    // A method no longer in the list is kept in words, and never passed to the database's constrained column.
+    notes: [
+      l.method === 'help' ? 'Customer asked for help choosing the method.' : !knownMethod(l.method) ? `Customer asked for: ${l.method}.` : null,
+      l.sizes && Object.keys(l.sizes).length > 0 && !usableSizes(l) ? `Sizes as sent: ${JSON.stringify(l.sizes)}` : null,
+    ].filter(Boolean).join(' ') || null,
   }
 }
 

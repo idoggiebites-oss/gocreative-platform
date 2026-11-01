@@ -54,7 +54,7 @@ export function inquiryRoutes() {
           product: business.storefront.products.find((p) => p.slug === l.product)?.name ?? l.product, method: l.method, quantity: l.quantity, sizes: l.sizes ?? null,
           color: l.color ?? null, material: l.material ?? null, personalization: l.personalization ?? null, notes: l.notes ?? null,
         })),
-        description: payload?.description ?? null, designHelp: payload?.designHelp ?? false, convertible: payload !== null,
+        description: payload?.description ?? null, designHelp: payload?.designHelp === true, convertible: payload !== null,
         files: (await db.listInquiryFiles(c.env.DB, row.id)).map((f) => ({ id: f.file_id, kind: f.kind, filename: f.filename, mime: f.mime, bytes: f.bytes })),
         matches: row.status === 'new' ? await db.matchCustomers(c.env.DB, row.contact_email, row.contact_phone) : [],
       }

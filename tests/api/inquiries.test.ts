@@ -207,6 +207,57 @@ test('two overlapping deletions: the journal keeps the first, full entry, and on
   expect(t.n("activity_log WHERE action = 'inquiry_deleted'")).toBe(1)
 })
 
+test('an old request stays readable and convertible after the catalogue changes, with nothing lost', async () => {
+  const t = setup()
+  const { id } = await t.submit()
+  // As if the request was sent long ago: a product since retired, a method since removed, a method that no longer fits, a later field, and sizes that don't add up.
+  const stored = { designHelp: false, description: 'Old job.', futureField: { kept: true }, lines: [
+    { product: 'retired-mugs', method: 'sublimation', quantity: 10, color: 'Red' },
+    { product: 'hats', method: 'screen', quantity: 5 },
+    { product: 'tshirts', method: 'screen', quantity: 4, sizes: { M: 4 }, printLocations: ['left chest'] },
+    { product: 'polos', method: 'embroidery', quantity: 9, sizes: { XXXXL: 2 } },
+  ] }
+  const text = JSON.stringify(stored)
+  t.sqlite.prepare('UPDATE inquiries SET payload = ? WHERE id = ?').run(text, id)
+  const d = await t.detail(id)
+  expect(d.lines.map((l) => { const x = l as { product: string; method: string; quantity: number }; return [x.product, x.method, x.quantity] })).toEqual([['retired-mugs', 'sublimation', 10], ['Hats', 'screen', 5], ['T-shirts', 'screen', 4], ['Polos', 'embroidery', 9]])
+  expect((d as unknown as { convertible: boolean }).convertible).toBe(true)
+  const res = await t.convert(id, 1)
+  expect(res.status).toBe(201)
+  const { number } = await res.json() as { number: string }
+  const o = t.sqlite.prepare('SELECT id, version FROM orders WHERE number = ?').get(number) as { id: number; version: number }
+  expect(t.sqlite.prepare('SELECT product, method, quantity, sizes, garment_color, notes FROM order_items WHERE order_id = ? ORDER BY id').all(o.id)).toEqual([
+    { product: 'retired-mugs', method: 'other', quantity: 10, sizes: null, garment_color: 'Red', notes: 'Customer asked for: sublimation.' },
+    { product: 'Hats', method: 'screen', quantity: 5, sizes: null, garment_color: null, notes: null },
+    { product: 'T-shirts', method: 'screen', quantity: 4, sizes: '{"M":4}', garment_color: null, notes: null },
+    { product: 'Polos', method: 'embroidery', quantity: 9, sizes: null, garment_color: null, notes: 'Sizes as sent: {"XXXXL":2}' },
+  ])
+  // The original is preserved byte for byte, and the items work with the ordinary editor.
+  expect((t.sqlite.prepare('SELECT payload FROM inquiries WHERE id = ?').get(id) as { payload: string }).payload).toBe(text)
+  const items = (await (await t.staff('GET', `/orders/${number}`)).json() as { items: Record<string, unknown>[] }).items
+  const edit = await t.staff('PUT', `/orders/${number}/items`, { expectedVersion: o.version, items: items.map((i) => ({ id: i.id, kind: i.kind, description: i.description, product: i.product, garmentColor: i.garmentColor, method: i.method, sizes: i.sizes, quantity: i.quantity, unitPriceCents: 500, notes: i.notes ?? null })) })
+  expect(edit.status, await edit.clone().text()).toBe(200)
+})
+
+test('a stored request with nothing usable is refused cleanly, never half converted', async () => {
+  const t = setup()
+  const { id } = await t.submit()
+  const orders = t.n('orders')
+  for (const bad of ['{}', '{"lines":[]}', '{"lines":[{"product":"hats","method":"screen","quantity":"many"}]}', '{"lines":[{"product":"hats","method":"screen","quantity":-1}]}']) {
+    t.sqlite.prepare('UPDATE inquiries SET payload = ? WHERE id = ?').run(bad, id)
+    expect((await (await t.staff('GET', `/inquiries/${id}`)).json() as { convertible: boolean }).convertible, bad).toBe(false)
+    expect((await t.convert(id, 1)).status, bad).toBe(409)
+  }
+  expect(t.n('orders')).toBe(orders)
+})
+
+test('new submissions stay strict: the lenient reader is for stored requests only', async () => {
+  const t = setup()
+  const { token } = await (await t.pub('/submissions', { method: 'POST', body: '{}' })).json() as { token: string }
+  const res = await t.pub('/submissions/submit', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ ...FORM, lines: [{ product: 'retired-mugs', method: 'sublimation', quantity: 1 }] }) })
+  expect(res.status).toBe(400)
+})
+
 test('the converted order follows the normal Phase 2 workflow: quote and PO approval', async () => {
   const t = setup()
   const { id } = await t.submit(FORM, [PO])
