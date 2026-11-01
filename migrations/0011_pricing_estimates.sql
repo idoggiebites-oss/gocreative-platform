@@ -27,7 +27,7 @@ WHEN OLD.status <> 'draft'
 BEGIN SELECT RAISE(ABORT, 'pricing_published_no_delete'); END;
 
 CREATE TRIGGER pricing_no_replace BEFORE INSERT ON pricing_versions
-WHEN EXISTS (SELECT 1 FROM pricing_versions WHERE id = NEW.id)
+WHEN EXISTS (SELECT 1 FROM pricing_versions WHERE id = NEW.id OR (NEW.status IN ('active','draft') AND status = NEW.status))
 BEGIN SELECT RAISE(ABORT, 'pricing_no_replace'); END;
 
 -- One calculation, kept exactly as made. A later price change or a staff review adds a new row and never edits this one.

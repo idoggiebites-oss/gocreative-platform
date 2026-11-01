@@ -21,7 +21,7 @@ export type AnalysisSettings = {
   backgroundEdgeShare: number // this share of the border in one color suggests a background
 }
 export const ANALYSIS_DEFAULTS: AnalysisSettings = {
-  maxPixels: 4_000_000, alphaOpaque: 250, flatTolerance: 30, mergeDeltaE: 14, minCoverage: 0.004, minFlatShare: 0.4, maxSpotColors: 8, gradientBinShare: 6, gradientMinBins: 48, softBoundaryShare: 0.002, rampCellDeltaE: 5, edgeColorDistance: 45, unexplainedShare: 0.002, semiManualShare: 0.25, backgroundEdgeShare: 0.6,
+  maxPixels: 4_000_000, alphaOpaque: 255, flatTolerance: 30, mergeDeltaE: 14, minCoverage: 0.004, minFlatShare: 0.4, maxSpotColors: 8, gradientBinShare: 6, gradientMinBins: 48, softBoundaryShare: 0.002, rampCellDeltaE: 5, edgeColorDistance: 45, unexplainedShare: 0.002, semiManualShare: 0.25, backgroundEdgeShare: 0.6,
 }
 
 export type AnalysisFlag = 'gradient' | 'photographic' | 'too_little_flat_color' | 'too_many_colors' | 'small_details_dropped' | 'likely_background' | 'partly_transparent' | 'fully_transparent' | 'too_large' | 'too_small' | 'thin_details'
@@ -183,32 +183,41 @@ export function analyzeArtwork(px: Pixels, settings: AnalysisSettings = ANALYSIS
   const kept = clusters.filter((c) => c.n / flat >= settings.minCoverage)
   if (kept.length < clusters.length) flags.push('small_details_dropped')
 
-  // Pixels that aren't flat should be edges: blends of two colors we found. One that isn't is ink too thin to be flat (a line, small type) and would vanish from the count.
+  // Pixels that aren't flat should be edges: blends of two colors found right beside them. Anything else is ink too thin to be flat (a line, small type) and would vanish from
+  // the count. A color matching an ink elsewhere is that ink, so thin parts of a counted color are fine. "Beside" matters: a gray line isn't a black-and-white edge if no black is near.
   const anchors = kept.map((c) => [c.r / c.n, c.g / c.n, c.b / c.n] as const)
-  const explained = new Map<number, boolean>()
-  const isExplained = (r: number, g: number, b: number) => {
-    const key = (r >> 2 << 12) | (g >> 2 << 6) | (b >> 2)
-    const known = explained.get(key)
-    if (known !== undefined) return known
-    let best = Infinity
-    for (let i = 0; i < anchors.length; i++) {
-      best = Math.min(best, Math.hypot(r - anchors[i][0], g - anchors[i][1], b - anchors[i][2]))
-      for (let j = i + 1; j < anchors.length; j++) {
-        const [A, B] = [anchors[i], anchors[j]]
-        const d = [B[0] - A[0], B[1] - A[1], B[2] - A[2]]
-        const t = Math.max(0, Math.min(1, ((r - A[0]) * d[0] + (g - A[1]) * d[1] + (b - A[2]) * d[2]) / (d[0] ** 2 + d[1] ** 2 + d[2] ** 2 || 1)))
-        best = Math.min(best, Math.hypot(r - A[0] - t * d[0], g - A[1] - t * d[1], b - A[2] - t * d[2]))
-      }
-    }
-    const ok = best <= settings.edgeColorDistance
-    explained.set(key, ok)
-    return ok
+  const keptIndex = new Map<number, number>()
+  kept.forEach((c, i) => { for (const k of c.keys) keptIndex.set(k, i) })
+  const distTo = (r: number, g: number, b: number, A: readonly number[]) => Math.hypot(r - A[0], g - A[1], b - A[2])
+  const segmentDist = (r: number, g: number, b: number, A: readonly number[], B: readonly number[]) => {
+    const d = [B[0] - A[0], B[1] - A[1], B[2] - A[2]]
+    const t = Math.max(0, Math.min(1, ((r - A[0]) * d[0] + (g - A[1]) * d[1] + (b - A[2]) * d[2]) / (d[0] ** 2 + d[1] ** 2 + d[2] ** 2 || 1)))
+    return Math.hypot(r - A[0] - t * d[0], g - A[1] - t * d[1], b - A[2] - t * d[2])
   }
+  const NEAR = 4
   let unexplained = 0
   if (anchors.length <= 12) {
     for (let p = 0; p < total; p++) {
       const i = p * 4
-      if (flatKey[p] < 0 && data[i + 3] >= settings.alphaOpaque && !isExplained(data[i], data[i + 1], data[i + 2])) unexplained++
+      if (flatKey[p] >= 0 || data[i + 3] < settings.alphaOpaque) continue
+      const [r, g, b] = [data[i], data[i + 1], data[i + 2]]
+      if (anchors.some((A) => distTo(r, g, b, A) <= settings.edgeColorDistance)) continue
+      const x = p % w
+      const y = Math.floor(p / w)
+      const near = new Set<number>()
+      for (let ny = Math.max(0, y - NEAR); ny <= Math.min(h - 1, y + NEAR); ny++) {
+        for (let nx = Math.max(0, x - NEAR); nx <= Math.min(w - 1, x + NEAR); nx++) {
+          const key = flatKey[ny * w + nx]
+          const c = key >= 0 ? keptIndex.get(key) : undefined
+          if (c !== undefined) near.add(c)
+        }
+      }
+      const around = [...near]
+      let blend = false
+      for (let m = 0; m < around.length && !blend; m++) {
+        for (let n = m + 1; n < around.length && !blend; n++) blend = segmentDist(r, g, b, anchors[around[m]], anchors[around[n]]) <= settings.edgeColorDistance
+      }
+      if (!blend) unexplained++
     }
   }
   const thin = unexplained / opaque >= settings.unexplainedShare

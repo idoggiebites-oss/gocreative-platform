@@ -83,6 +83,7 @@ test('a published version cannot be swapped by INSERT OR REPLACE, whatever the s
   const v1 = await t.publish(300, null)
   const before = (await db.getPricingVersion(t.d1, v1))!
   expect(() => t.sqlite.exec(`INSERT OR REPLACE INTO pricing_versions (id, status, config, config_hash, created_by, published_by, published_at) VALUES (${v1}, 'active', '{}', 'x', ${t.actor}, ${t.actor}, '2026-01-01')`)).toThrow(/pricing_no_replace/)
+  expect(() => t.sqlite.exec(`INSERT OR REPLACE INTO pricing_versions (status, config, config_hash, created_by, published_by, published_at) VALUES ('active', '{}', 'x', ${t.actor}, ${t.actor}, '2026-01-01')`)).toThrow(/pricing_no_replace/)
   expect(await db.getPricingVersion(t.d1, v1)).toEqual(before)
 })
 

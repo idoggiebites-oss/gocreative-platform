@@ -82,10 +82,12 @@ describe('transparency', () => {
     expect(r.estimatedInkColors).toBe(1)
   })
   test('uniform partial transparency is not solid ink, even when nearly opaque', () => {
-    const r = analyzeArtwork(image(100, 100, () => [100, 20, 30, 220]))
-    expect(r.flags).toContain('partly_transparent')
-    expect(r.estimatedInkColors).toBeNull()
-    expect(r.needsManualReview).toBe(true)
+    for (const alpha of [220, 250, 254]) {
+      const r = analyzeArtwork(image(100, 100, () => [100, 20, 30, alpha]))
+      expect(r.flags, String(alpha)).toContain('partly_transparent')
+      expect(r.estimatedInkColors, String(alpha)).toBeNull()
+      expect(r.needsManualReview, String(alpha)).toBe(true)
+    }
   })
   test('mostly semi-transparent artwork has no count', () => {
     expect(analyzeArtwork(image(100, 100, (x) => (x < 30 ? NAVY : [240, 180, 30, 120]))).needsManualReview).toBe(true)
@@ -132,6 +134,15 @@ describe('artwork that has no honest ink count', () => {
     expect(r.flags).toContain('thin_details')
     expect(r.estimatedInkColors).toBeNull()
     expect(r.needsManualReview).toBe(true)
+  })
+  test('a separate gray line is its own ink, not a black-and-white edge, even though its color lies between them', () => {
+    const r = analyzeArtwork(image(200, 200, (x, y) => (x > 20 && x < 100 && y > 20 && y < 180 ? [0, 0, 0, 255] : x === 150 && y > 20 && y < 180 ? [120, 120, 120, 255] : WHITE)))
+    expect(r.flags).toContain('thin_details')
+    expect(r.estimatedInkColors).toBeNull()
+  })
+  test('thin parts of an ink already counted are fine: a thin black line beside a black shape', () => {
+    const r = analyzeArtwork(image(200, 200, (x, y) => (x > 20 && x < 100 && y > 20 && y < 180 ? [0, 0, 0, 255] : x === 150 && y > 20 && y < 180 ? [0, 0, 0, 255] : WHITE)))
+    expect(r.estimatedInkColors).toBe(1)
   })
   test('line art with no solid ink at all goes to manual review, not "one color: white"', () => {
     const r = analyzeArtwork(image(200, 200, (x, y) => ((x % 40 === 0 || y % 40 === 0) ? [0, 0, 0, 255] : WHITE)))
