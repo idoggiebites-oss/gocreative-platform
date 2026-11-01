@@ -104,6 +104,26 @@ details, hours, prices or guaranteed turnaround times.**
    - audit entries carry no submitted personal data;
    - **Decline** (with an optional internal reason) and owner deletion are added to S3's work list.
 
+## 0c. Products only offer methods that fit them (Arturo, 2026-11-01: "you can't laser engrave or cut a shirt or cap")
+
+- A **product → allowed methods** map lives in the business configuration (`shared/business.ts`, storefront
+  section), never in components. The form shows only the methods that fit the chosen product, and changing the
+  product clears a method that no longer fits.
+- The **public inquiry schema rejects** a product/method pair outside the map, and the dashboard's item editor
+  warns on one.
+- The **size grid** appears only for sized apparel. Hats, bags, engraved items and "something else" ask for a
+  single quantity, and engraved items ask for material or item instead of colour.
+- **Draft map, for GoCreative to confirm** (shown in the phone mockup):
+
+  | Product | Methods |
+  |---|---|
+  | T-shirts, hoodies, polos, bags | screen print, embroidery, DTG |
+  | Hats | embroidery |
+  | Engraved or cut items (drinkware, plaques, wood, acrylic) | laser engraving, laser cutting |
+  | Something else | all |
+
+  "Help me choose" is always offered.
+
 ## 1. Goal and scope
 
 A customer can, from a phone:

@@ -453,3 +453,7 @@ Migration 0006 (additive), `worker/db/{pickups,payments}.ts`, `worker/routes/{pi
 - Approved: one codebase; separate deployment, D1, R2 and auth config per business; GoCreative first client; no workflow engine or shared multi-tenant DB; Phase 2 preserved.
 - Required: backups implemented and tested before public launch; public routes separate from the dashboard; a Declined inquiry status with optional internal reason; optional district PO uploads at inquiry, unverified until staff approval; spam kept up to 30 days and unconverted up to 12 months, deletable earlier; offboarding 30-day export then deletion, backups gone by day 60, technical and legal constraints verified before promising; short-lived per-inquiry sessions with server-enforced count/size/type/aggregate limits; the kill switch also blocks already-issued sessions; atomic, idempotent conversion; domain and content settled during development.
 - No public deployment or irreversible DB change until S1 is approved. The Declined status needs the (0-row) inquiries table rebuilt, listed for S1 approval.
+
+## 2026-11-01 — Storefront mockups approved with one correction (Arturo)
+- Taste Skill (design-taste-frontend) is the design skill Arturo wanted; the mockups are fine.
+- Correction: only offer methods that fit the product ("you can't laser engrave or cut a shirt or cap"). A product → methods map goes in business config, enforced by the public schema; the size grid shows only for sized apparel. Draft map in STOREFRONT_PLAN §0c, to confirm with GoCreative.
