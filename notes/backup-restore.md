@@ -16,8 +16,10 @@
 ## Offsite copy (Arturo, 2026-11-01: a Windows machine offsite, carried by USB)
 
 1. `npm run backup` for a current snapshot (pauses writes about 75 s).
-2. Plug in the drive, then in a terminal: `npm run backup:bundle -- /Volumes/<drive>`. It asks for the passphrase, encrypts the newest backup with its files and deletion journal, reads the drive's copy back and checks every table and file. Use one passphrase, kept in a password manager and **never on the drive**.
-3. At the Windows machine, follow `RECOVERY-README.txt` on the drive: copy the newest bundle over, and delete any whose delete-after date has passed. The drive keeps the newest two.
+2. Plug in the drive, then in a terminal: `npm run backup:bundle -- /Volumes/<drive>`. It asks for the passphrase, encrypts the newest backup with its files and deletion journal, flushes it to the drive, reads that copy back and checks every table and file. Only then does it take a bundle's name, so an existing good copy is never at risk. It keeps the new bundle and the newest other one that opens; one that won't open is left in place with a warning. Use one passphrase, kept in a password manager and **never on the drive**.
+3. Eject safely. At the Windows machine, follow `RECOVERY-README.txt` on the drive: copy the newest bundle over, run `node unbundle.mjs --check` on that copy, and delete any whose delete-after date has passed.
+
+**Known limit:** while a bundle is being made or opened, plaintext sits briefly in the OS temp folder. Errors and Ctrl-C remove it; after a power loss the next run sweeps it. FileVault on the Mac and BitLocker on Windows cover that gap.
 
 The offsite copy is only as recent as the last trip, so that trip sets how much could be lost if the Mac and the account were both gone. **Schedule (proposal, Arturo's call):** at least monthly, and before any Access cut-over. Bundles expire after 8 weeks, so less often than that leaves nothing valid offsite.
 

@@ -2,16 +2,15 @@
 // prove it opens and matches, and leaves only the newest two bundles on the drive. Read-only towards production. Plan: notes/backup-restore.md.
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statfsSync, statSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statfsSync, statSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join, relative, resolve } from 'node:path'
 import { checksum, type Row } from './backup-lib.ts'
-import { askPassphrase, decryptFile, encryptFile } from './unbundle.mjs'
+import { askPassphrase, decryptFile, encryptFile, sweepStale } from './unbundle.mjs'
 
 const ROOT = process.env.BUNDLE_ROOT ?? join(homedir(), 'gocreative-backups')
 const REPO = resolve(new URL('..', import.meta.url).pathname)
 const KEEP_DAYS = 56 // the 8 weeks the backup plan promises
-const KEEP_ON_DRIVE = 2
 const MIN_PASSPHRASE = 16
 
 const sha256 = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex')
@@ -59,7 +58,10 @@ const journalDir = join(ROOT, 'journal')
 const journal = existsSync(journalDir) ? readdirSync(journalDir).filter((f) => f.endsWith('.json')) : []
 const members = [dir, ...filesHeld.map((h) => join('files', h)), ...journal.map((j) => join('journal', j))]
 
+sweepStale('gocreative-bundle-') // plaintext from a run that lost power
 const scratch = mkdtempSync(join(tmpdir(), 'gocreative-bundle-'))
+let candidate = ''
+for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) process.on(signal, () => { rmSync(scratch, { recursive: true, force: true }); process.exit(1) })
 try {
   const list = join(scratch, 'members.txt')
   writeFileSync(list, members.join('\n') + '\n', { mode: 0o600 })
@@ -69,28 +71,49 @@ try {
   const free = statfsSync(dest).bavail * statfsSync(dest).bsize
   if (free < needed) throw new Error(`The drive has too little free space: ${Math.ceil(needed / 2 ** 20)} MB needed.`)
 
-  const made = createdAt.slice(0, 10)
+  const stamp = createdAt.replace(/[:.]/g, '-')
   const expires = new Date(Date.parse(createdAt) + KEEP_DAYS * 86_400_000).toISOString().slice(0, 10)
-  const name = `gocreative-backup-${made}-delete-after-${expires}.gcbk`
+  const name = `gocreative-backup-${stamp}-delete-after-${expires}.gcbk`
   const target = join(dest, name)
-  await encryptFile(tar, target, passphrase)
+  candidate = `${target}.candidate`
+  await encryptFile(tar, candidate, passphrase)
 
-  // Read the drive's copy back, not the one in memory: this is what will be carried offsite.
+  // Read the drive's copy back. Only a copy that opens and matches takes a bundle's name; an existing good copy is untouched until then.
   const check = join(scratch, 'check')
-  execFileSync('mkdir', ['-p', check])
-  await decryptFile(target, join(check, 'bundle.tar'), passphrase)
+  mkdirSync(check, { mode: 0o700 })
+  await decryptFile(candidate, join(check, 'bundle.tar'), passphrase)
   execFileSync('tar', ['-xf', 'bundle.tar'], { cwd: check })
   verifyExtracted(check, dir, { filesHeld, journal })
+  rmSync(join(check, 'bundle.tar'))
+  renameSync(candidate, target)
 
   copyFileSync(new URL('./unbundle.mjs', import.meta.url), join(dest, 'unbundle.mjs'))
   copyFileSync(new URL('./RECOVERY-README.txt', import.meta.url), join(dest, 'RECOVERY-README.txt'))
-  const older = readdirSync(dest).filter((f) => /^gocreative-backup-.*\.gcbk$/.test(f)).sort().reverse().slice(KEEP_ON_DRIVE)
-  for (const f of older) rmSync(join(dest, f))
+
+  // Keep the new bundle and the newest other one that really opens with this passphrase. Anything else goes only once a good pair exists.
+  const others = readdirSync(dest).filter((f) => /^gocreative-backup-.*\.gcbk$/.test(f) && f !== name).sort().reverse()
+  const older: string[] = []
+  let kept = false
+  for (const f of others) {
+    const probe = join(scratch, 'probe.tar')
+    const opens = await decryptFile(join(dest, f), probe, passphrase).then(() => true, () => false)
+    rmSync(probe, { force: true })
+    if (opens && !kept) {
+      kept = true
+    } else if (opens) {
+      rmSync(join(dest, f))
+      older.push(f)
+    } else {
+      console.warn(`!! ${f} does not open with this passphrase. It was left in place: check or remove it yourself.`)
+    }
+  }
 
   console.log(`Written and verified: ${name}`)
   console.log(`${members.length} items, ${Math.ceil(statSync(target).size / 1024)} KB. Backup taken ${createdAt}.`)
-  console.log(`On the offsite machine: copy it over, then delete any bundle whose delete-after date has passed.`)
+  console.log(`Eject the drive safely. To re-check it after reconnecting, or on the offsite machine: node unbundle.mjs --check "${name}"`)
+  console.log(`On the offsite machine: copy it over, check it, then delete any bundle whose delete-after date has passed.`)
   if (older.length > 0) console.log(`Removed from the drive: ${older.join(', ')}`)
 } finally {
   rmSync(scratch, { recursive: true, force: true })
+  if (candidate) { rmSync(candidate, { force: true }); rmSync(`${candidate}.part`, { force: true }) } // a refused copy never stays on the drive
 }

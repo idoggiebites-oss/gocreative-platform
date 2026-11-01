@@ -1,11 +1,14 @@
 // Opens an encrypted backup bundle. Plain JavaScript with no dependencies, so it also runs from the USB drive on any machine with Node.
 //   node unbundle.mjs <bundle.gcbk> <folder to extract into>
+//   node unbundle.mjs --check <bundle.gcbk>      proves it opens, and writes nothing that stays
 // The file is AES-256-GCM with a key from the passphrase (scrypt). Nothing is extracted unless the whole file proves authentic.
 import { execFileSync } from 'node:child_process'
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto'
-import { closeSync, createReadStream, createWriteStream, fstatSync, mkdirSync, openSync, readSync, renameSync, rmSync } from 'node:fs'
+import { closeSync, createReadStream, createWriteStream, fstatSync, fsyncSync, mkdirSync, openSync, readdirSync, readSync, renameSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { basename, join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
-import { fileURLToPath } from 'node:url'
+import { StringDecoder } from 'node:string_decoder'
 
 const MAGIC = Buffer.from('GCBK1\n')
 const SCRYPT = { N: 2 ** 17, r: 8, p: 1, maxmem: 2 ** 28 + 2 ** 20 }
@@ -21,6 +24,9 @@ export async function encryptFile(source, target, passphrase) {
   out.write(Buffer.concat([MAGIC, salt, nonce]))
   await pipeline(createReadStream(source), cipher, out, { end: false })
   await new Promise((resolve, reject) => out.end(cipher.getAuthTag(), (e) => (e ? reject(e) : resolve())))
+  const fd = openSync(part, 'r+')
+  fsyncSync(fd) // on the drive, not just in the cache
+  closeSync(fd)
   renameSync(part, target) // a drive pulled mid-write leaves a .part, never a bundle that looks complete
 }
 
@@ -52,6 +58,23 @@ export async function decryptFile(source, target, passphrase) {
   }
 }
 
+/** Turns terminal input into a passphrase: a character split across chunks stays whole, and arrow keys never become part of the key. */
+export function passphraseInput() {
+  const decoder = new StringDecoder('utf8')
+  let text = ''
+  return (chunk) => {
+    // oxlint-disable-next-line no-control-regex -- escape sequences are what this removes
+    const clean = decoder.write(chunk).replace(/\u001b(\[[0-9;]*[A-Za-z~]|O[A-Za-z])?/g, '')
+    for (const ch of clean) {
+      if (ch === '\u0003') return { cancelled: true }
+      if (ch === '\r' || ch === '\n') return { done: true, text }
+      if (ch === '\u007f' || ch === '\b') text = [...text].slice(0, -1).join('')
+      else text += ch
+    }
+    return { done: false }
+  }
+}
+
 export function askPassphrase(prompt) {
   return new Promise((resolve, reject) => {
     if (process.env.BUNDLE_PASSPHRASE) return resolve(process.env.BUNDLE_PASSPHRASE)
@@ -59,41 +82,71 @@ export function askPassphrase(prompt) {
     process.stdout.write(prompt)
     process.stdin.setRawMode(true)
     process.stdin.resume()
-    let text = ''
+    const feed = passphraseInput()
     const onData = (chunk) => {
-      for (const ch of chunk.toString('utf8')) {
-        if (ch === '\u0003') { process.stdin.setRawMode(false); process.exit(130) }
-        if (ch === '\r' || ch === '\n') {
-          process.stdin.setRawMode(false)
-          process.stdin.pause()
-          process.stdin.off('data', onData)
-          process.stdout.write('\n')
-          return resolve(text)
-        }
-        if (ch === '\u007f' || ch === '\b') text = text.slice(0, -1)
-        else text += ch
+      const r = feed(chunk)
+      if (r.cancelled) { process.stdin.setRawMode(false); process.exit(130) }
+      if (r.done) {
+        process.stdin.setRawMode(false)
+        process.stdin.pause()
+        process.stdin.off('data', onData)
+        process.stdout.write('\n')
+        resolve(r.text)
       }
     }
     process.stdin.on('data', onData)
   })
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  const [source, folder] = process.argv.slice(2)
-  if (!source || !folder) {
-    console.error('Usage: node unbundle.mjs <bundle.gcbk> <folder to extract into>')
+const TEMP = 'gocreative-open-'
+/** Plaintext left by a machine that lost power last time goes first. A normal failure or Ctrl-C cleans up after itself. */
+export function sweepStale(prefix) {
+  for (const name of readdirSync(tmpdir())) if (name.startsWith(prefix)) rmSync(join(tmpdir(), name), { recursive: true, force: true })
+}
+
+if (process.argv[1] && basename(process.argv[1]) === 'unbundle.mjs') {
+  const args = process.argv.slice(2)
+  const check = args[0] === '--check'
+  const [source, folder] = check ? args.slice(1) : args
+  if (!source || (!check && !folder)) {
+    console.error('Usage: node unbundle.mjs <bundle.gcbk> <folder to extract into>\n       node unbundle.mjs --check <bundle.gcbk>')
     process.exit(2)
   }
+  sweepStale(TEMP)
+  const work = join(tmpdir(), `${TEMP}${process.pid}`)
+  const extracting = folder ? join(folder, '.extracting') : null
+  const clean = () => {
+    rmSync(work, { recursive: true, force: true })
+    if (extracting) rmSync(extracting, { recursive: true, force: true })
+  }
+  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => { clean(); process.exit(1) })
   try {
     const passphrase = await askPassphrase('Passphrase: ')
-    mkdirSync(folder, { recursive: true })
-    const tar = `${folder}/.bundle.tar`
+    mkdirSync(work, { recursive: true, mode: 0o700 })
+    const tar = join(work, 'bundle.tar')
     await decryptFile(source, tar, passphrase)
-    execFileSync('tar', ['-xf', '.bundle.tar'], { cwd: folder, stdio: 'inherit' })
-    rmSync(tar)
-    console.log(`Extracted to ${folder}. It holds customer data: keep it private and delete it when finished.`)
+    if (check) {
+      console.log(`OK: ${basename(source)} opens and is undamaged.`)
+    } else {
+      mkdirSync(extracting, { recursive: true })
+      try {
+        execFileSync('tar', ['-xf', tar, '-C', extracting], { stdio: 'inherit' })
+      } catch {
+        throw new Error('Could not unpack the bundle. Check that tar is available (it is built into Windows 10 and later) and that the disk has room. Nothing was kept.')
+      }
+      for (const name of readdirSync(extracting)) {
+        const to = join(folder, name)
+        if (name === 'files' || name === 'journal') {
+          mkdirSync(to, { recursive: true })
+          for (const f of readdirSync(join(extracting, name))) renameSync(join(extracting, name, f), join(to, f))
+        } else renameSync(join(extracting, name), to)
+      }
+      console.log(`Extracted to ${folder}. It holds customer data: keep it private and delete it when finished.`)
+    }
   } catch (e) {
     console.error(e instanceof Error ? e.message : String(e))
-    process.exit(1)
+    process.exitCode = 1
+  } finally {
+    clean()
   }
 }
