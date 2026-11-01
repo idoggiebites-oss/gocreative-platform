@@ -18,6 +18,7 @@
     "db:migrate:remote": "wrangler d1 migrations apply gocreative --remote",
     "backup": "node scripts/backup.ts",
     "restore": "node scripts/restore.ts",
+    "backup:bundle": "node scripts/bundle.ts",
     "check:launch": "node scripts/launch-check.ts",
     "cf-typegen": "wrangler types worker/env.d.ts"
   },

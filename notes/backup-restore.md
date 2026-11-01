@@ -13,6 +13,14 @@
 
 - **Deletion journal (S3):** every inquiry deletion first writes `_journal/deletions/<time>-inquiry-<id>.json` to R2, holding ids, keys and hashes, no personal data. Backup copies new entries to `~/gocreative-backups/journal/` (listing through Cloudflare's API with wrangler's login, read-only). Restore replays every entry newer than the backup into the isolated database, so a deleted request stays deleted, and never puts those objects back. If the journal can't be refreshed, restore **stops**; `--accept-local-journal` overrides it, for when the account itself is lost. Newer migrations apply before the replay, so an older backup works.
 
+## Offsite copy (Arturo, 2026-11-01: a Windows machine offsite, carried by USB)
+
+1. `npm run backup` for a current snapshot (pauses writes about 75 s).
+2. Plug in the drive, then in a terminal: `npm run backup:bundle -- /Volumes/<drive>`. It asks for the passphrase, encrypts the newest backup with its files and deletion journal, reads the drive's copy back and checks every table and file. Use one passphrase, kept in a password manager and **never on the drive**.
+3. At the Windows machine, follow `RECOVERY-README.txt` on the drive: copy the newest bundle over, and delete any whose delete-after date has passed. The drive keeps the newest two.
+
+The offsite copy is only as recent as the last trip, so that trip sets how much could be lost if the Mac and the account were both gone. **Schedule (proposal, Arturo's call):** at least monthly, and before any Access cut-over. Bundles expire after 8 weeks, so less often than that leaves nothing valid offsite.
+
 ## Restoring for real: the procedure
 
 1. `npx wrangler d1 create gocreative-restore-<date>`, then `npm run restore -- ~/gocreative-backups/<backup> --database-id <id> --database-name gocreative-restore-<date>`. It refuses the database bound in `wrangler.jsonc` and any non-empty target.
@@ -26,7 +34,6 @@
 - **R2 orphan check in the backup:** the daily cron reconciles objects under `inquiries/`; other prefixes are only ever written with their rows.
 - **Restoring files to a cloud bucket:** manual, per the runbook below.
 - **Weekly schedule:** run by hand until the off-machine location is chosen.
-- **Off-machine copy:** Arturo's choice is open. Until then, losing this Mac loses the backups.
 
 ## Drill record
 

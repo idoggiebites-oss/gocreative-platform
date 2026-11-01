@@ -9,7 +9,7 @@ Update this whenever something deploys. History is in git and ROADMAP.md; this i
 - **Public intake API:** deployed, but closed twice over: the Worker is still all behind Access, and the `intake_closed` row in `settings` refuses every public write. `TURNSTILE_SECRET` and `IP_HASH_SALT` aren't set; without them no session can open.
 - **Storefront UI:** approved by Arturo, deployed behind Access; not public.
 - **S3 (inquiry review and conversion):** live for signed-in staff. Retention and abandoned-upload cleanup run in the daily cron.
-- **Backups:** `~/gocreative-backups/` on Arturo's Mac only. No off-machine copy yet. Latest: 2026-11-01T17-42-50-757Z (pre-migration). Run weekly by hand and before every remote migration.
+- **Backups:** `~/gocreative-backups/` on Arturo's Mac only. Offsite: encrypted bundles by USB to Arturo's Windows machine (`npm run backup:bundle`); first copy not made yet. Latest: 2026-11-01T17-42-50-757Z (pre-migration). Run weekly by hand and before every remote migration.
 
 - **Throwaway:** Worker `gocreative-access-drill` (no data), public until the S0c rehearsal finishes, then delete it.
 

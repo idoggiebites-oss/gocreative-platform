@@ -509,3 +509,7 @@ Migration 0006 (additive), `worker/db/{pickups,payments}.ts`, `worker/routes/{pi
 - **The requested deadline prefills the due date,** editable, with a note that it is not a commitment.
 - **Added beyond the plan:** "Move back to new", so a mistaken decline or spam mark is not final until retention or delete.
 - **Deletion order:** claim, journal, objects, rows. Retention runs in the daily cron; spam from receipt after 30 days, unconverted after 12 months, converted never.
+
+## 2026-11-01 — Offsite backups by USB to a Windows machine (Arturo)
+- Arturo chose carrying encrypted bundles by hand over Tailscale or a cloud folder. Expiry on that machine is manual, helped by a delete-after date in each file name (56 days, the plan's 8 weeks).
+- AES-256-GCM with scrypt, in plain Node with no dependencies, so recovery needs only Node and the passphrase. The passphrase is Arturo's and is never stored by the project or on the drive.
