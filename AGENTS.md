@@ -12,6 +12,7 @@ builds; Codex reviews and tests. Both read this file first.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — stack, layering, schema, security, testing, cost.
 - [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md) — tokens, type, the two layouts, motion.
 - [ROADMAP.md](ROADMAP.md) — phases, the current phase's tasks, and who runs each one.
+- [SPEC-post-phase2.md](SPEC-post-phase2.md) — the post-Phase 2 brief; [PLATFORM_VISION.md](PLATFORM_VISION.md) (the unnamed platform vs GoCreative, its first client), [PLATFORM_ARCHITECTURE_REVIEW.md](PLATFORM_ARCHITECTURE_REVIEW.md), [SAAS_READINESS.md](SAAS_READINESS.md), [STOREFRONT_PLAN.md](STOREFRONT_PLAN.md).
 - [DECISIONS.md](DECISIONS.md) — append-only, dated: what was decided, why, and who decided it.
 - [LEARNINGS.md](LEARNINGS.md) — append-only, dated: what cost time, and the rule that prevents it.
 - `notes/` — durable how-tos, one topic per file, named for the topic.
@@ -43,6 +44,7 @@ the files don't say, say "not in the notes".
 - Uploaded files are write-once. A new upload is a new version.
 - Money is integer cents. Timestamps are UTC ISO text.
 - Nothing outside `shared/business.ts` and `src/brand.css` may name GoCreative.
+- One deployment (Worker + D1 + R2 + Access app) per business. Never point this app at a database holding more than one business (SAAS_READINESS.md §1).
 - Claude and Codex work on separate branches and never edit the same files at the same time.
 - Never push or deploy unasked. Commit messages go in a file (`git commit -F`), and say why.
 - Schema change: run `npm run db:migrate:remote` BEFORE `npm run deploy`.

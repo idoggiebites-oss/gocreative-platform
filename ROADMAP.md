@@ -1,5 +1,26 @@
 # Roadmap
 
+## Current order of work (2026-11-01, post-Phase 2 brief)
+
+Source: [SPEC-post-phase2.md](SPEC-post-phase2.md). The platform is not yet named; GoCreative is its first client
+([PLATFORM_VISION.md](PLATFORM_VISION.md)). The older phase table further down is kept for history.
+
+| # | Stage | State | Done when |
+|---|---|---|---|
+| 1 | **Phase 2 — GoCreative internal operations** | **Completed 2026-11-01** (M0–M6 live, Worker 52951268; [PHASE2_PLAN.md](PHASE2_PLAN.md)) | Acceptance 1–17 pass end to end; Codex "Phase 2 security: ready" |
+| 2 | **Architecture readiness review** | Documents written, awaiting Arturo's approval ([PLATFORM_ARCHITECTURE_REVIEW.md](PLATFORM_ARCHITECTURE_REVIEW.md), [SAAS_READINESS.md](SAAS_READINESS.md)) | Arturo approves; fix-now items scheduled |
+| 3 | **GoCreative storefront** | Planned ([STOREFRONT_PLAN.md](STOREFRONT_PLAN.md)): S0 mockups → S0b backups → S1 public intake → S2 UI → S3 convert-to-order → S4 launch | A customer submits from a phone; staff convert it into an order without retyping |
+| 4 | **End-to-end operational testing** | Not started | The family runs real orders through intake → pickup → payment for a few weeks; issues triaged |
+| 5 | **Modular platform development** | Not started; defer until a second client defines what varies | Printing capabilities behind module switches; readiness items per module; business configuration beyond name/brand |
+| 6 | **Multi-tenant security and infrastructure** | Not started (model chosen: one deployment per business, SAAS_READINESS §1) | Business id + deployment registry, migration rollout script, admin-access and audit policies, backups/restore proven per business |
+| 7 | **Second-industry pilot** | Not started | One non-printing business runs on the platform with modules and configuration, no fork |
+| 8 | **Commercial onboarding and offboarding** | Not started | Setup checklist, export + restore demonstrated, offboarding procedure with retention periods, pricing incl. hosting costs |
+
+Earlier plans folded into this order: the estimator (old Phase 6 / "Phase 4") becomes an optional printing-module
+feature after the storefront; nothing about it is scheduled yet.
+
+## Original phase plan (2026-10-30, kept for history)
+
 
 The spec's phases stay, with one change: **Phase 1 ends with your three screens**,
 so the family has something real to judge early.

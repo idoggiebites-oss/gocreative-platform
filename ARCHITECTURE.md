@@ -199,15 +199,19 @@ Writes from the browser send the `expectedVersion` they read; a stale one is a 4
 - The Worker re-verifies the Access JWT (signature and audience), so even if
   Access were misconfigured, the API would refuse.
 - zod on every input. Upload limits: 50MB, type allowlist, magic-byte check.
-- Rate limiting: Workers rate-limit binding on public routes, plus Turnstile.
+- Public routes (storefront, not built yet): Turnstile once per submission session, session caps and an
+  admission budget, an off switch. See STOREFRONT_PLAN.md §4. *(Corrected 2026-11-01: the rate limiting
+  and Turnstile were planned, not built.)*
 - Secrets live in wrangler secrets only.
-- CSP, no inline scripts. The service worker never caches `/api` or `/files`.
+- Planned, not built yet: an app-wide CSP and security headers (today only file downloads carry a CSP), and a
+  service worker (no PWA yet). When one is added, it must never cache `/api` or `/files`.
 
-**Backups**
-- D1 Time Travel gives point-in-time restore. Free-plan retention is 7 days.
-- `npm run backup` does `wrangler d1 export` to a dated file. Run it monthly
-  alongside the Wave import. A restore drill is documented in `notes/`.
-- R2 originals are write-once; deleting them is an owner-only action and is logged.
+**Backups** *(corrected 2026-11-01: there is no backup script yet; the architecture review lists it as a fix-now item)*
+- D1 Time Travel gives point-in-time restore. Its retention depends on the plan; check it in the dashboard.
+- To build (STOREFRONT_PLAN S0b): a scripted per-table JSON export of the live D1 (`wrangler d1 export --remote`
+  failed with auth error 10000 on this account), plus a restore drill into a scratch local D1, documented in `notes/`.
+- R2 originals are write-once and are never deleted by the app (the storefront's cleanup of expired,
+  unsubmitted uploads will be the one exception).
 
 **Cost**
 - Free tier covers this load comfortably: Workers 100k requests/day, D1 5GB,
