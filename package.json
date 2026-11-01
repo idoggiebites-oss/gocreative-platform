@@ -16,6 +16,8 @@
     "db:migrate": "wrangler d1 migrations apply gocreative --local",
     "db:seed": "wrangler d1 execute gocreative --local --file scripts/seed.sql",
     "db:migrate:remote": "wrangler d1 migrations apply gocreative --remote",
+    "backup": "node scripts/backup.ts",
+    "restore": "node scripts/restore.ts",
     "cf-typegen": "wrangler types worker/env.d.ts"
   },
   "dependencies": {
