@@ -32,6 +32,7 @@ function StepHeading({ children, focus }: { children: ReactNode; focus: boolean 
 }
 
 function ProductStep({ f, set, errors, focus }: { f: Form; set: (fn: (f: Form) => Form) => void; errors: Errors; focus: boolean }) {
+  const full = f.items.length >= MAX_ITEMS
   return (
     <>
       <StepHeading focus={focus}>What would you like made?</StepHeading>
@@ -40,13 +41,14 @@ function ProductStep({ f, set, errors, focus }: { f: Form; set: (fn: (f: Form) =
         <div className="s-tiles">
           {PRODUCTS.map((p) => (
             <label key={p.slug} className="s-tile-choice">
-              <input type="checkbox" className="s-visually-hidden" checked={f.items.some((i) => i.product === p.slug)} onChange={() => set((x) => toggleProduct(x, p.slug))} />
+              <input type="checkbox" className="s-visually-hidden" disabled={full && !f.items.some((i) => i.product === p.slug)} checked={f.items.some((i) => i.product === p.slug)} onChange={() => set((x) => toggleProduct(x, p.slug))} />
               <span className="s-tile-name">{p.name}</span><small>{p.hint}</small>
               <Check aria-hidden size={18} strokeWidth={2.4} className="s-tile-check" />
             </label>
           ))}
         </div>
         {errors.product && <p id="s-product-error" className="s-error">{errors.product}</p>}
+        {full && <p className="s-meta s-full-note">One request can hold {MAX_ITEMS} items. To add more, describe them in your project details.</p>}
       </fieldset>
       {f.items.map((item) => {
         const name = productOf(item)?.name
@@ -111,7 +113,10 @@ function ItemCard({ item, f, set, error, canRemove }: { item: Item; f: Form; set
       </Field>
       <div className="s-item-actions">
         {f.items.length < MAX_ITEMS && <button type="button" className="s-link-button" onClick={() => set((x) => duplicateItem(x, item.key))}>Add another {productOf(item)?.name}, such as a second color</button>}
-        {canRemove && <button type="button" className="s-link-button" aria-label={`Remove ${itemTitle(item)}`} onClick={() => set((x) => ({ ...x, items: x.items.filter((i) => i.key !== item.key) }))}>Remove</button>}
+        {canRemove && <button type="button" className="s-link-button" aria-label={`Remove ${itemTitle(item)}`} onClick={() => {
+          set((x) => ({ ...x, items: x.items.filter((i) => i.key !== item.key) }))
+          document.querySelector<HTMLElement>('.s-step h1')?.focus({ preventScroll: true }) // the button is about to go; focus must not fall to the page
+        }}>Remove</button>}
       </div>
     </section>
   )
@@ -280,7 +285,9 @@ function OrderForm({ status, onClosed }: { status: Status; onClosed: () => void 
   useEffect(() => { void reconcile().catch(() => {}) }, [reconcile])
 
   const requested = Number(params.get('step')) || 1
-  const step = validateStep(1, form).product || form.items.some((i) => !i.method) ? 1 : Math.min(Math.max(requested, 1), STEP_COUNT)
+  // A later step is only reachable with the earlier ones complete, whatever the history or address says.
+  const furthest = Object.keys(validateStep(1, form)).length > 0 ? 1 : Object.keys(validateStep(2, form)).length > 0 ? 2 : STEP_COUNT
+  const step = Math.min(Math.max(requested, 1), furthest)
   const lastStep = useRef(step)
   const dir = step >= lastStep.current ? 1 : -1
   const moved = lastStep.current !== step

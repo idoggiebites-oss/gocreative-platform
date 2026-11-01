@@ -41,9 +41,8 @@ function newItem(slug: string, preferMethod: string): Item {
 
 /** Ticking a product adds a line; unticking removes every line of it. A method that doesn't fit is never carried over (you can't laser a shirt). */
 export function toggleProduct(f: Form, slug: string): Form {
-  return f.items.some((i) => i.product === slug)
-    ? { ...f, items: f.items.filter((i) => i.product !== slug) }
-    : { ...f, items: [...f.items, newItem(slug, f.preferMethod)] }
+  if (f.items.some((i) => i.product === slug)) return { ...f, items: f.items.filter((i) => i.product !== slug) }
+  return f.items.length >= MAX_ITEMS ? f : { ...f, items: [...f.items, newItem(slug, f.preferMethod)] }
 }
 /** Another line of the same product, such as the same shirt in a second color. */
 export function duplicateItem(f: Form, key: string): Form {

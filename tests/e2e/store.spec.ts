@@ -177,6 +177,31 @@ test('several products in one request: each gets the right fields, can repeat, a
   await expect(page.getByRole('region', { name: 'What you sent' })).toContainText('Hats, embroidery: 6')
 })
 
+test('the 10-line limit holds everywhere and says why; removing a line keeps keyboard focus', async ({ page }) => {
+  await toStep2(page)
+  await page.getByLabel('M', { exact: true }).fill('1')
+  for (let i = 0; i < 9; i++) await page.getByRole('button', { name: /Add another T-shirts/ }).first().click()
+  await expect(page.getByRole('button', { name: /Add another T-shirts/ })).toHaveCount(0)
+  await page.getByRole('button', { name: /^Remove/ }).first().click()
+  await expect(page.getByRole('heading', { level: 1 })).toBeFocused()
+  await expect(page.getByRole('button', { name: /Add another T-shirts/ }).first()).toBeVisible()
+  await page.getByRole('button', { name: /Add another T-shirts/ }).first().click()
+  await page.goBack()
+  await expect(page.getByRole('checkbox', { name: /^Hats/ })).toBeDisabled()
+  await expect(page.getByText('One request can hold 10 items.')).toBeVisible()
+})
+
+test('a later step cannot be reached with a line unfinished, by history or address', async ({ page }) => {
+  await toStep3(page)
+  await toStep4(page)
+  await page.getByRole('button', { name: 'Edit what you would like made' }).click()
+  await page.getByRole('checkbox', { name: /^Hats/ }).check({ force: true })
+  await page.goBack()
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('How many of each?')
+  await page.goto('/order?step=4')
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('How many of each?')
+})
+
 test('review and correct: Edit returns to the step with everything kept, including uploaded files, and back and forward lose nothing', async ({ page }) => {
   await toStep3(page)
   await artworkInput(page).setInputFiles([png('kept-file.png')])

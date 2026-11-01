@@ -215,6 +215,8 @@ body:has(.store) { background: #f7f7f4; }
 .s-tile-check { position: absolute; top: 12px; right: 12px; color: var(--accent); opacity: 0; transition: opacity 150ms ease; }
 .s-tile-choice:has(input:checked) .s-tile-check { opacity: 1; }
 .s-tile-name { padding-right: 18px; }
+.s-tile-choice:has(input:disabled) { opacity: 0.55; cursor: not-allowed; }
+.s-full-note { margin-top: 10px !important; }
 .s-item { display: flex; flex-direction: column; gap: 18px; padding: 18px; border-radius: 16px; background: #fff; border: 1px solid var(--line); opacity: 1; transform: none; transition: opacity 200ms var(--ease-out), transform 200ms var(--ease-out); }
 @starting-style { .s-item { opacity: 0; transform: translateY(6px); } }
 .s-item-title { font-size: 20px; font-weight: 700; line-height: 1.2; }
