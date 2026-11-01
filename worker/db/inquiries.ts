@@ -146,8 +146,9 @@ export type ClaimedInquiry = { id: number; ref: string | null; submission_id: st
 export const listClaimed = async (db: D1Database, limit: number) =>
   (await db.prepare(`SELECT id, ref, submission_id, deleting_at, status FROM inquiries WHERE deleting_at IS NOT NULL ORDER BY deleting_at LIMIT ?`).bind(limit).all<ClaimedInquiry>()).results
 
-export const claimedFiles = async (db: D1Database, inquiryId: number) =>
-  (await db.prepare(`SELECT i.id, i.r2_key, i.file_id, f.sha256 FROM inquiry_files i LEFT JOIN files f ON f.id = i.file_id WHERE i.inquiry_id = ?`).bind(inquiryId)
+/** Everything the request's session uploaded, including attempts that failed or were removed: they belong to the session, and it goes too. */
+export const claimedFiles = async (db: D1Database, inquiryId: number, submissionId: string | null) =>
+  (await db.prepare(`SELECT i.id, i.r2_key, i.file_id, f.sha256 FROM inquiry_files i LEFT JOIN files f ON f.id = i.file_id WHERE i.inquiry_id = ? OR i.submission_id = ?`).bind(inquiryId, submissionId)
     .all<{ id: string; r2_key: string; file_id: number | null; sha256: string | null }>()).results
 
 export const markClaimedFilesDeleting = (db: D1Database, inquiryId: number) =>
@@ -157,7 +158,7 @@ export const markClaimedFilesDeleting = (db: D1Database, inquiryId: number) =>
 export const removeClaimedRows = (db: D1Database, c: ClaimedInquiry, fileIds: number[], reason: string, actorId: number | null) => db.batch([
   db.prepare(`INSERT INTO activity_log (actor_kind, actor_id, entity_type, entity_id, action, after) SELECT ?, ?, 'inquiry', ?, 'inquiry_deleted', ? WHERE EXISTS (SELECT 1 FROM inquiries WHERE id = ?)`)
     .bind(actorId === null ? 'system' : 'user', actorId, c.id, JSON.stringify({ reason, files: fileIds.length }), c.id),
-  db.prepare(`DELETE FROM inquiry_files WHERE inquiry_id = ?`).bind(c.id),
+  db.prepare(`DELETE FROM inquiry_files WHERE inquiry_id = ? OR submission_id = ?`).bind(c.id, c.submission_id),
   ...fileIds.map((f) => db.prepare(`DELETE FROM files WHERE id = ? AND r2_key LIKE 'inquiries/%'`).bind(f)),
   db.prepare(`DELETE FROM inquiries WHERE id = ? AND deleting_at IS NOT NULL`).bind(c.id),
   ...(c.submission_id ? [db.prepare(`DELETE FROM inquiry_submissions WHERE id = ?`).bind(c.submission_id)] : []),

@@ -6,7 +6,7 @@ export const JOURNAL_PREFIX = '_journal/deletions/'
 const JOURNAL_BATCH = 100
 
 async function deleteClaimed(env: Pick<Env, 'DB' | 'FILES'>, c: db.ClaimedInquiry, reason: string, actorId: number | null) {
-  const files = await db.claimedFiles(env.DB, c.id)
+  const files = await db.claimedFiles(env.DB, c.id, c.submission_id)
   // Two runs can overlap (an owner's delete and the cron). The key is fixed by the claim and the write is create-only, so the first
   // entry, the one with the full file list, is the one that stays. Later runs find the rows gone and change nothing.
   const key = `${JOURNAL_PREFIX}${c.deleting_at.replace(/[:.]/g, '-')}-inquiry-${c.id}.json`

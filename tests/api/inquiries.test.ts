@@ -278,6 +278,33 @@ test('owner delete: journal first, then objects, then rows; no personal data in 
   expect(() => t.sqlite.exec(`DELETE FROM inquiries WHERE id = ${kept.id}`)).toThrow(/claimed_only/)
 })
 
+test('a request with failed and removed upload attempts deletes cleanly, live and on replay', async () => {
+  const t = setup()
+  const { id } = await t.submit(FORM, [ART])
+  const sid = (t.sqlite.prepare('SELECT submission_id AS s FROM inquiries WHERE id = ?').get(id) as { s: string }).s
+  t.sqlite.exec(`INSERT INTO inquiry_files (id, submission_id, r2_key, kind, status, bytes) VALUES ('tried', '${sid}', 'inquiries/${sid}/tried', 'artwork', 'failed', 5), ('stuck', '${sid}', 'inquiries/${sid}/stuck', 'artwork', 'deleting', 5)`)
+  await t.r2.bucket.put(`inquiries/${sid}/stuck`, PNG)
+  const exec: Exec = (sql) => t.sqlite.prepare(sql).all() as Row[]
+  const order = await foreignKeyOrder(exec, await listTables(exec))
+  const snapshot = await Promise.all(order.map(async (name) => ({ name, rows: await dumpTable(exec, name) })))
+
+  expect((await t.staff('DELETE', `/inquiries/${id}`, { expectedVersion: 1 })).status).toBe(200)
+  expect(t.n(`inquiries WHERE id = ${id}`)).toBe(0)
+  expect(t.n(`inquiry_files WHERE submission_id = '${sid}'`)).toBe(0)
+  expect(t.n(`inquiry_submissions WHERE id = '${sid}'`)).toBe(0)
+  expect(t.r2.objects.has(`inquiries/${sid}/stuck`)).toBe(false)
+  const entry = JSON.parse(new TextDecoder().decode([...t.r2.objects.entries()].find(([k]) => k.startsWith('_journal/'))![1].bytes))
+
+  const target = createTestD1()
+  const texec: Exec = (sql) => target.sqlite.prepare(sql).all() as Row[]
+  const triggers = texec("SELECT name, sql FROM sqlite_schema WHERE type = 'trigger' ORDER BY name") as { name: string; sql: string }[]
+  target.sqlite.exec('BEGIN'); target.sqlite.exec(restoreSql(snapshot, triggers)); target.sqlite.exec('COMMIT')
+  target.sqlite.exec('BEGIN'); target.sqlite.exec(replaySql([entry], triggers)); target.sqlite.exec('COMMIT')
+  expect(texec(`SELECT id FROM inquiries WHERE id = ${id}`)).toEqual([])
+  expect(texec(`SELECT id FROM inquiry_files WHERE submission_id = '${sid}'`)).toEqual([])
+  expect(texec('PRAGMA foreign_key_check')).toEqual([])
+})
+
 test('a failed delete keeps the claim and finishes on the next run; a claimed inquiry cannot be converted', async () => {
   const t = setup()
   const { id } = await t.submit(FORM, [ART])

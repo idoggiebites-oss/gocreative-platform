@@ -95,7 +95,7 @@ export function replaySql(entries: JournalEntry[], triggers: { name: string; sql
   const lines = ['PRAGMA defer_foreign_keys = ON;']
   for (const t of triggers) lines.push(`DROP TRIGGER ${id(t.name)};`)
   for (const e of entries) {
-    lines.push(`DELETE FROM "inquiry_files" WHERE inquiry_id = ${sqlValue(e.inquiryId)};`)
+    lines.push(`DELETE FROM "inquiry_files" WHERE inquiry_id = ${sqlValue(e.inquiryId)}${e.submissionId ? ` OR submission_id = ${sqlValue(e.submissionId)}` : ''};`)
     for (const f of e.files) if (f.fileId !== null) lines.push(`DELETE FROM "files" WHERE id = ${sqlValue(f.fileId)} AND r2_key = ${sqlValue(f.r2Key)};`)
     lines.push(`DELETE FROM "inquiries" WHERE id = ${sqlValue(e.inquiryId)} AND status <> 'converted';`)
     if (e.submissionId) lines.push(`DELETE FROM "inquiry_submissions" WHERE id = ${sqlValue(e.submissionId)};`)
