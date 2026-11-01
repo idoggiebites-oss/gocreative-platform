@@ -111,14 +111,19 @@ details, hours, prices or guaranteed turnaround times.**
   product clears a method that no longer fits.
 - The **public inquiry schema rejects** a product/method pair outside the map, and the dashboard's item editor
   warns on one.
+- **Trophies and awards** are a product line: the shop orders the parts, builds the award and personalizes it.
+  This fits the existing internal workflow without new code: purchases from a trophy supplier (not JDS),
+  assembly as production prep, personalization in production. The inquiry asks for the names or wording to
+  engrave, or for the list to follow.
 - The **size grid** appears only for sized apparel. Hats, bags, engraved items and "something else" ask for a
   single quantity, and engraved items ask for material or item instead of colour.
-- **Draft map, for GoCreative to confirm** (shown in the phone mockup):
+- **Map confirmed by Arturo 2026-11-01**, plus trophies and awards (shown in the mockups):
 
   | Product | Methods |
   |---|---|
   | T-shirts, hoodies, polos, bags | screen print, embroidery, DTG |
   | Hats | embroidery |
+  | **Trophies and awards** (ordered in, assembled and personalized by the shop) | laser engraving (personalization) |
   | Engraved or cut items (drinkware, plaques, wood, acrylic) | laser engraving, laser cutting |
   | Something else | all |
 
