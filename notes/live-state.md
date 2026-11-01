@@ -3,15 +3,17 @@
 Update this whenever something deploys. History is in git and ROADMAP.md; this is only the present.
 
 - **Dashboard:** gocreative.idoggiebites.workers.dev, behind Cloudflare Access (reusable policy "GoCreative staff").
-- **Worker version:** d0679714 (S3 plus stored-request fix; includes the S2 storefront UI, still behind Access).
-- **Remote migrations applied:** 0001–0010. Never edit these.
+- **Worker version:** db7ef6f5 (E2; includes S2 and S3, all behind Access).
+- **Remote migrations applied:** 0001–0011. Never edit these.
 - **Test data left in live on purpose:** customer "TEST – ignore" and cancelled order 2026-0001, so the next real order is 2026-0002.
 - **Public intake API:** deployed, but closed twice over: the Worker is still all behind Access, and the `intake_closed` row in `settings` refuses every public write. `TURNSTILE_SECRET` and `IP_HASH_SALT` aren't set; without them no session can open.
 - **Storefront UI:** approved by Arturo, deployed behind Access; not public.
 - **S3 (inquiry review and conversion):** live for signed-in staff. Retention and abandoned-upload cleanup run in the daily cron.
-- **Backups:** `~/gocreative-backups/` on Arturo's Mac only. Offsite: encrypted bundles by USB to Arturo's Windows machine (`npm run backup:bundle`); first copy not made yet. Latest: 2026-11-01T17-42-50-757Z (pre-migration). Run weekly by hand and before every remote migration.
+- **Backups:** `~/gocreative-backups/` on Arturo's Mac only. Offsite: encrypted bundles by USB to Arturo's Windows machine (`npm run backup:bundle`); first copy not made yet. Latest: 2026-11-01T23-03-57-560Z (pre-migration). Run weekly by hand and before every remote migration.
 
 - **Throwaway:** Worker `gocreative-access-drill` (no data), public until the S0c rehearsal finishes, then delete it.
+
+- **Pricing Management:** live for owners at Settings → Pricing Management. **No prices are published**, and customers can't see anything from it yet (E3).
 
 ## Needed before opening intake (S4)
 
