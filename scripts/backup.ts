@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { checksum, dumpTable, expiredBackups, listTables, sqlValue, type BackupInfo, type Row } from './backup-lib.ts'
+import { checksum, dumpTable, expiredBackups, listTables, mirrorJournal, sqlValue, type BackupInfo, type Row } from './backup-lib.ts'
 
 const ROOT = join(homedir(), 'gocreative-backups')
 const DB = 'gocreative'
@@ -49,6 +49,7 @@ function mirrorFiles(files: { key: string; sha256: string; bytes: number }[]) {
 function prune() {
   const backups: (BackupInfo & { files: string })[] = []
   for (const dir of readdirSync(ROOT)) {
+    if (dir === 'files' || dir === 'journal') continue
     const manifest = join(ROOT, dir, 'manifest.json')
     if (!existsSync(manifest)) continue // incomplete, or older than this script: left for a person to judge
     const m = JSON.parse(readFileSync(manifest, 'utf8')) as BackupInfo
@@ -94,6 +95,9 @@ try {
   const fileRows = JSON.parse(readFileSync(join(dir, 'files.json'), 'utf8')) as { r2_key: string; sha256: string; bytes: number; mime: string }[]
   const files = fileRows.map((f) => ({ key: f.r2_key, sha256: f.sha256, bytes: f.bytes, mime: f.mime }))
   mirrorFiles(files)
+  // Off the database on purpose: a restore replays these so deleted requests stay deleted. A backup without them can't promise that.
+  const journalCopied = await mirrorJournal(join(ROOT, 'journal'), BUCKET)
+  console.log(`journal: ${journalCopied} new`)
   if (writeCounts() !== before) throw new Error('Rows were written during the backup: this snapshot is not consistent')
   const commit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
   // Written last: no manifest means an incomplete backup.

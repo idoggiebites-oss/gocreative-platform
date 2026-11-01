@@ -1,13 +1,17 @@
-// Daily cleanup of abandoned public uploads. Besides the rollback cleanup in files.ts, this is the only place a public
-// file is deleted, and it can't reach a submitted one: claimExpired only takes open sessions and a trigger freezes linked files.
+// Daily cleanup of abandoned public uploads. Abandoned uploads go through here; a submitted request's files go only through a claimed deletion (inquiryDeletion.ts), never if it was converted.
+import { claimExpiredInquiries } from './db/inquiries'
 import * as db from './db/intake'
 import { isMaintenance } from './db/settings'
+import { RETENTION_SPAM_DAYS, RETENTION_UNCONVERTED_MONTHS } from './domain/inquiryConversion'
+import { processClaimed } from './inquiryDeletion'
 import { CLEANUP_BATCH, ORPHAN_GRACE_HOURS, ORPHAN_PAGES_PER_RUN } from './domain/intake'
 
 export async function cleanupIntake(env: Pick<Env, 'DB' | 'FILES'>, now: Date) {
   if (await isMaintenance(env.DB)) return { skipped: true } // a backup is taking its snapshot; tomorrow is soon enough
 
   await db.claimExpired(env.DB)
+  await claimExpiredInquiries(env.DB, RETENTION_SPAM_DAYS, RETENTION_UNCONVERTED_MONTHS)
+  const inquiriesDeleted = await processClaimed(env, 'retention')
   const queued = await db.filesToDelete(env.DB, CLEANUP_BATCH)
   let deleted = 0
   if (queued.length > 0) {
@@ -40,6 +44,6 @@ export async function cleanupIntake(env: Pick<Env, 'DB' | 'FILES'>, now: Date) {
   }
   await db.saveOrphanCursor(env.DB, cursor) // past the last page it clears, and the next run starts over
 
-  console.log(`Intake cleanup: ${deleted} files, ${orphans} orphans`) // counts only
-  return { deleted, orphans }
+  console.log(`Intake cleanup: ${deleted} files, ${orphans} orphans, ${inquiriesDeleted} inquiries`) // counts only
+  return { deleted, orphans, inquiriesDeleted }
 }

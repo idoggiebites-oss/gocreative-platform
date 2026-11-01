@@ -193,7 +193,8 @@ export async function listPurchaseOrders(db: D1Database, orderId: number): Promi
 export const getLinkedFile = (db: D1Database, fileId: number) =>
   db.prepare(`SELECT f.id, f.r2_key, f.mime, f.filename FROM files f WHERE f.id = ?1
       AND (EXISTS (SELECT 1 FROM artwork a WHERE a.file_id = f.id AND a.order_id IS NOT NULL)
-        OR EXISTS (SELECT 1 FROM po_documents d JOIN purchase_orders p ON p.id = d.po_id WHERE d.file_id = f.id))`).bind(fileId)
+        OR EXISTS (SELECT 1 FROM po_documents d JOIN purchase_orders p ON p.id = d.po_id WHERE d.file_id = f.id)
+        OR EXISTS (SELECT 1 FROM inquiry_files i WHERE i.file_id = f.id AND i.status = 'linked'))`).bind(fileId)
     .first<{ id: number; r2_key: string; mime: string; filename: string | null }>()
 
 export const customerExists = async (db: D1Database, id: number) =>

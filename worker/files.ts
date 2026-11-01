@@ -226,7 +226,7 @@ const SERVABLE = new Set<string>(Object.values(FILE_KINDS))
 // No script, no plugin, no network: a file opened directly can only show itself.
 export const FILE_CSP = "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'"
 
-/** GET /files/:id — authenticated (both roles), and only files an artwork version or PO document links to an order. */
+/** GET /files/:id — authenticated (both roles), and only files linked to an order or a submitted inquiry. An unsubmitted upload has no files row at all. */
 export function fileRoutes() {
   return new Hono<AppEnv>().get('/files/:id', async (c) => {
     const id = z.string().regex(/^[1-9]\d{0,14}$/).transform(Number).safeParse(c.req.param('id'))

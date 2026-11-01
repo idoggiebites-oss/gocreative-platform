@@ -499,3 +499,13 @@ Migration 0006 (additive), `worker/db/{pickups,payments}.ts`, `worker/routes/{pi
 - **No reply-time promise.** The response-time placeholder is gone from the confirmation and from `business.ts`.
 - **"Needed by" became "Requested deadline",** stated as a request, not a guarantee.
 - **Launch gate:** `npm run check:launch` fails while contact details, photos, privacy review or the shop's confirmation of services are missing. S4 must run it before the Access cut-over.
+
+## 2026-11-01 — S2 approved; S3 as built (Arturo approved S2 and asked for S3 without production deployment)
+- **Migration 0010 is additive.** New nullable columns, one unique index, new triggers and two replaced triggers. No table rebuilt, no row changed.
+- **No `orders.inquiry_id`,** unlike the plan: with the existing `inquiries.order_id` it would make a foreign-key cycle, which restore refuses. `one_inquiry_per_order` on `inquiries.order_id` plus the batch guard give one order per inquiry.
+- **Each inquiry line becomes one order item,** priced 0 until quoted. "Help me choose" becomes method `other` with a note. Personalization and material go in the item description. The project description becomes a note on the order; the original inquiry is frozen as sent.
+- **A customer's PO arrives `received`, artwork `under_review`.** Each artwork file is its own design. Approval stays a staff action; artwork approval defaults to required.
+- **Customer matching only suggests,** by email or phone. Existing customers keep their own PO and payment defaults; new ones take their kind's defaults, so no owner-only terms can be set this way.
+- **The requested deadline prefills the due date,** editable, with a note that it is not a commitment.
+- **Added beyond the plan:** "Move back to new", so a mistaken decline or spam mark is not final until retention or delete.
+- **Deletion order:** claim, journal, objects, rows. Retention runs in the daily cron; spam from receipt after 30 days, unconverted after 12 months, converted never.

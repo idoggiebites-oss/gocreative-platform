@@ -4,7 +4,7 @@ import { z } from 'zod'
 import type { AppEnv } from '../auth'
 import { ORDER_VIEWS } from '../../shared/api'
 import type { ApiErrorCode, DashboardResponse, OrderDetailResponse, OrdersListResponse, PoChangeResponse } from '../../shared/api'
-import { PO_STATUSES, PRODUCTION_STATUSES } from '../../shared/enums'
+import { INQUIRY_STATUSES, PO_STATUSES, PRODUCTION_STATUSES } from '../../shared/enums'
 import { buildActionRequired, buildDashboard } from '../domain/dashboard'
 import { parseOrderNumber } from '../domain/orderNumber'
 import { checkOrderProductionMove, chooseSlot } from '../domain/productionFlow'
@@ -51,7 +51,8 @@ export function orderRoutes() {
       if (!parsed.success) return bad(c, parsed.error)
       const { view, q, limit } = parsed.data
       const counts = await db.orderCounts(c.env.DB)
-      if (view === 'inquiries') return c.json<OrdersListResponse>({ view, rows: await db.listInquiries(c.env.DB, q, limit), counts })
+      const inquiryStatus = INQUIRY_STATUSES.find((x) => x === c.req.query('inquiryStatus')) ?? 'new'
+      if (view === 'inquiries') return c.json<OrdersListResponse>({ view, rows: await db.listInquiries(c.env.DB, q, limit, inquiryStatus), counts })
       return c.json<OrdersListResponse>({ view, rows: await db.listOrders(c.env.DB, view, q, limit), counts })
     })
     .get('/orders/:number', async (c) => {

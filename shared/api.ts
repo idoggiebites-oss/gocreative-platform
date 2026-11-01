@@ -1,6 +1,6 @@
 // Request/response types for /api/app order screens. Dates are returned as stored
 // (due_date YYYY-MM-DD, timestamps ISO UTC text); money is integer cents.
-import type {
+import type { InquiryStatus,
   ArtworkApproval, AuthorizationMethod, CheckStatus, CustomerKind, FinancialStatus, FulfilmentStatus, ItemKind, Method, NotificationMethod,
   OrderArtworkStatus, OrderSource, OrderState, PaymentMethod, PaymentNextAction, PaymentTerms, PoStatus, PrepStatus,
   ProductionStatus, PurchaseStatus, QuoteStatus,
@@ -245,7 +245,7 @@ export type OrderListRow = {
   /** The current (highest-version) quote. Its total is the agreed total only when it is accepted. */
   quote: { status: QuoteStatus; totalCents: number } | null
 }
-export type InquiryListRow = { id: number; contactName: string | null; contactEmail: string | null; contactPhone: string | null; createdAt: string }
+export type InquiryListRow = { id: number; ref: string | null; status: InquiryStatus; organization: string | null; contactName: string | null; contactEmail: string | null; contactPhone: string | null; createdAt: string }
 export type OrderCounts = Record<OrderView, number>
 export type OrdersListResponse =
   | { view: 'inquiries'; rows: InquiryListRow[]; counts: OrderCounts }
@@ -461,6 +461,7 @@ export type PrepRequest = { prepStatus: PrepStatus; expectedVersion: number }
 
 // `error` is English text for logs; the UI shows a translation of `code` (and of each gate reason code in `reasons`).
 export const API_ERROR_CODES = [
+  'inquiry_not_new', 'inquiry_not_convertible',
   'transition_not_allowed', 'gate_failed', 'conflict_retry', 'po_transition_not_allowed', 'not_found', 'invalid_request',
   'contact_archived', 'contact_not_for_customer', 'confirmation_required', 'order_not_active', 'production_started', 'quote_stale',
   'quote_frozen', 'quote_not_draft', 'invalid_quote_transition', 'no_product_line', 'discount_exceeds_total', 'po_required',
@@ -566,3 +567,21 @@ export type ContactRequest = { name: string; email?: string | null; phone?: stri
 export type ContactPatchRequest = Partial<Omit<ContactRequest, 'isPrimary'>> & { isPrimary?: boolean; expectedVersion: number }
 export type ContactResponse = { contact: CustomerContact }
 export type NoteResponse = { note: CustomerNote }
+
+export type InquiryDetailResponse = {
+  id: number; ref: string | null; status: InquiryStatus; version: number; receivedAt: string
+  customerKind: CustomerKind | null; organization: string | null
+  contactName: string | null; contactEmail: string | null; contactPhone: string | null; preferredContact: string | null
+  /** What the customer asked for. A request, never a commitment. */
+  dueDate: string | null
+  declineReason: string | null; convertedAt: string | null; orderNumber: string | null
+  lines: { product: string; method: string; quantity: number; sizes: Record<string, number> | null; color: string | null; material: string | null; personalization: string | null; notes: string | null }[]
+  description: string | null; designHelp: boolean; convertible: boolean
+  files: { id: number; kind: 'artwork' | 'po'; filename: string | null; mime: string; bytes: number }[]
+  matches: { id: number; name: string; kind: CustomerKind; contacts: { id: number; name: string; email: string | null; phone: string | null }[] }[]
+}
+export type InquiryConvertRequest = {
+  expectedVersion: number; title: string; dueDate: string | null; artworkRequired: boolean
+  customer: { existingId: number; contactId: number | null } | { new: { name: string; kind: CustomerKind; organization: string | null } }
+}
+export type InquiryConvertResponse = { number: string; alreadyConverted: boolean }

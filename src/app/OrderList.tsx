@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { Search } from 'lucide-react'
 import { ORDER_VIEWS, type InquiryListRow, type OrderListRow, type OrderView } from '@shared/api'
+import { INQUIRY_STATUSES } from '@shared/enums'
 import { useI18n } from '@/i18n'
 import { cn } from '@/lib/utils'
 import { useOrders } from '@/lib/api'
@@ -81,16 +82,18 @@ function OrdersTable({ rows }: { rows: OrderListRow[] }) {
 function InquiriesTable({ rows }: { rows: InquiryListRow[] }) {
   const { m, fmt } = useI18n()
   const c = m.orders.inquiryCols
+  const t = m.inquiries.cols
   return (
     <table className="w-full border-collapse text-[13px]">
       <thead><tr className="bg-header">
-        <th className={TH}>{c.id}</th><th className={TH}>{c.name}</th><th className={TH}>{c.email}</th><th className={TH}>{c.phone}</th><th className={TH}>{c.received}</th>
+        <th className={TH}>{t.ref}</th><th className={TH}>{c.name}</th><th className={TH}>{t.org}</th><th className={TH}>{c.email}</th><th className={TH}>{c.phone}</th><th className={TH}>{c.received}</th>
       </tr></thead>
       <tbody>
         {rows.map((r) => (
           <tr key={r.id}>
-            <td className={`${TD} num font-medium`}>#{r.id}</td>
+            <td className={`${TD} num font-medium`}><Link to={`/app/inquiries/${r.id}`} className="text-foreground no-underline hover:text-primary hover:underline">{r.ref ?? `#${r.id}`}</Link></td>
             <td className={TD}>{r.contactName ?? m.common.dash}</td>
+            <td className={TD}>{r.organization ?? m.common.dash}</td>
             <td className={TD}>{r.contactEmail ?? m.common.dash}</td>
             <td className={`${TD} num`}>{r.contactPhone ?? m.common.dash}</td>
             <td className={`${TD} num`}>{fmt.date(r.createdAt)}</td>
@@ -107,7 +110,8 @@ export default function OrderList() {
   const view: OrderView = isView(params.get('view')) ? (params.get('view') as OrderView) : 'active'
   const q = params.get('q') ?? ''
   const [text, setText] = useState(q)
-  const query = useOrders(view, q)
+  const inquiryStatus = INQUIRY_STATUSES.find((x) => x === params.get('status')) ?? 'new'
+  const query = useOrders(view, q, view === 'inquiries' ? inquiryStatus : undefined)
 
   // The URL is the source of truth (reload and back keep view and q); typing is debounced into it.
   useEffect(() => { setText(q) }, [q])
@@ -168,7 +172,7 @@ export default function OrderList() {
             <section className={`${CARD} overflow-x-auto`}>
               {d.rows.length === 0 ? (
                 <p className="px-4 py-10 text-center text-[13px] text-muted-foreground">{q ? m.orders.emptyFiltered : m.orders.empty}</p>
-              ) : d.view === 'inquiries' ? <InquiriesTable rows={d.rows} /> : <OrdersTable rows={d.rows} />}
+              ) : d.view === 'inquiries' ? <><nav aria-label={m.inquiries.statusLabel} className="flex flex-wrap gap-3 px-4 py-2 text-[13px]">{INQUIRY_STATUSES.map((st) => <Link key={st} aria-current={st === inquiryStatus ? 'true' : undefined} className={st === inquiryStatus ? 'font-semibold text-foreground no-underline' : 'text-primary no-underline'} to={`?view=inquiries&status=${st}`}>{m.inquiries.tabs[st]}</Link>)}</nav><InquiriesTable rows={d.rows} /></> : <OrdersTable rows={d.rows} />}
             </section>
             <span className={MUTED}>{m.orders.showing(d.rows.length)}</span>
           </>

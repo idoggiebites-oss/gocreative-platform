@@ -1,6 +1,6 @@
 // All SQL for the order screens. Every value is bound; the only interpolated
 // fragments are the constants below (VIEW_WHERE, the readiness SQL) and generated "?,?" placeholder lists.
-import { METHODS, PRODUCTION_STATUSES } from '../../shared/enums'
+import { METHODS, PRODUCTION_STATUSES, type InquiryStatus } from '../../shared/enums'
 import type {
   ArtworkApproval, AuthorizationMethod, CustomerKind, ItemKind, Method, OrderArtworkStatus, OrderSource, OrderState,
   PaymentTerms, PoStatus, PrepStatus, ProductionStatus, PurchaseStoredStatus, QuoteStatus,
@@ -146,23 +146,23 @@ export async function listOrders(db: D1Database, view: Exclude<OrderView, 'inqui
   return results.map(toListRow)
 }
 
-export async function listInquiries(db: D1Database, q: string | undefined, limit: number): Promise<InquiryListRow[]> {
+export async function listInquiries(db: D1Database, q: string | undefined, limit: number, status: InquiryStatus = 'new'): Promise<InquiryListRow[]> {
   const like = q ? `%${likeEscape(q)}%` : '%'
   const { results } = await db
     .prepare(
-      `SELECT id, contact_name, contact_email, contact_phone, created_at FROM inquiries
-       WHERE status = 'new' AND (contact_name LIKE ?1 ESCAPE '\\' OR contact_email LIKE ?1 ESCAPE '\\')
+      `SELECT id, ref, status, organization, contact_name, contact_email, contact_phone, created_at FROM inquiries
+       WHERE status = ?3 AND deleting_at IS NULL AND (contact_name LIKE ?1 ESCAPE '\\' OR contact_email LIKE ?1 ESCAPE '\\' OR organization LIKE ?1 ESCAPE '\\' OR ref LIKE ?1 ESCAPE '\\')
        ORDER BY created_at DESC, id DESC LIMIT ?2`,
     )
-    .bind(like, limit)
-    .all<{ id: number; contact_name: string | null; contact_email: string | null; contact_phone: string | null; created_at: string }>()
-  return results.map((r) => ({ id: r.id, contactName: r.contact_name, contactEmail: r.contact_email, contactPhone: r.contact_phone, createdAt: r.created_at }))
+    .bind(like, limit, status)
+    .all<{ id: number; ref: string | null; status: InquiryStatus; organization: string | null; contact_name: string | null; contact_email: string | null; contact_phone: string | null; created_at: string }>()
+  return results.map((r) => ({ id: r.id, ref: r.ref, status: r.status, organization: r.organization, contactName: r.contact_name, contactEmail: r.contact_email, contactPhone: r.contact_phone, createdAt: r.created_at }))
 }
 
 export async function orderCounts(db: D1Database): Promise<OrderCounts> {
   const sums = Object.entries(VIEW_WHERE).map(([k, w]) => `COALESCE(SUM(CASE WHEN ${w} THEN 1 ELSE 0 END), 0) AS ${k}`)
   const row = await db.prepare(`WITH base AS (${BASE}) SELECT ${sums.join(', ')} FROM base`).first<Omit<OrderCounts, 'inquiries'>>()
-  const inq = await db.prepare(`SELECT COUNT(*) AS n FROM inquiries WHERE status = 'new'`).first<{ n: number }>()
+  const inq = await db.prepare(`SELECT COUNT(*) AS n FROM inquiries WHERE status = 'new' AND deleting_at IS NULL`).first<{ n: number }>()
   return { ...(row as Omit<OrderCounts, 'inquiries'>), inquiries: inq?.n ?? 0 }
 }
 
@@ -208,7 +208,7 @@ export async function readyForPickupSince(db: D1Database) {
 
 export async function listNewInquiriesForDashboard(db: D1Database): Promise<DashInquiry[]> {
   const { results } = await db
-    .prepare(`SELECT id, contact_name FROM inquiries WHERE status = 'new' ORDER BY created_at DESC, id DESC LIMIT 10`)
+    .prepare(`SELECT id, contact_name FROM inquiries WHERE status = 'new' AND deleting_at IS NULL ORDER BY created_at DESC, id DESC LIMIT 10`)
     .all<{ id: number; contact_name: string | null }>()
   return results.map((r) => ({ id: r.id, contactName: r.contact_name }))
 }
@@ -521,8 +521,8 @@ export type ItemWrite = {
 }
 export type QuoteLineWrite = Omit<ItemWrite, 'id' | 'notes'> & { lineTotalCents: number }
 export type QuoteTotals = { subtotalCents: number; chargesCents: number; discountsCents: number; totalCents: number }
-const ITEM_COLS = 'kind, description, product, garment_color, method, sizes, quantity, unit_price_cents'
-const itemBinds = (i: Omit<ItemWrite, 'id' | 'notes'>): Value[] =>
+export const ITEM_COLS = 'kind, description, product, garment_color, method, sizes, quantity, unit_price_cents'
+export const itemBinds = (i: Omit<ItemWrite, 'id' | 'notes'>): Value[] =>
   [i.kind, i.description, i.product, i.garmentColor, i.method, i.sizes ? JSON.stringify(i.sizes) : null, i.quantity, i.unitPriceCents]
 
 // Removed lines are deleted and retained ones updated in place before any new line is inserted, so a new line can
@@ -670,11 +670,11 @@ export async function addNote(db: D1Database, p: { orderId: number; actorId: num
 // so when it fails nothing runs, NEW_NUMBER (which would then name the previous order) is never used, and the
 // function returns null. RAISE() is trigger-only in SQLite, hence a shared predicate rather than an abort.
 // The INSERT … SELECT has its WHERE before ON CONFLICT (SQLite's upsert parsing rule); tests/d1 runs it on workerd.
-const COUNTER_SQL = (ok: string) => `INSERT INTO counters (name, year, next) SELECT 'order', ?, 2 WHERE ${ok}
+export const COUNTER_SQL = (ok: string) => `INSERT INTO counters (name, year, next) SELECT 'order', ?, 2 WHERE ${ok}
   ON CONFLICT (name, year) DO UPDATE SET next = next + 1 RETURNING next - 1 AS n`
 /** The number just handed out, formatted like domain/orderNumber.formatOrderNumber (orders-write.test.ts checks they agree). */
 export const NEW_NUMBER = `(SELECT printf('%d-%04d', year, next - 1) FROM counters WHERE name = 'order' AND year = ?)`
-const counterN = (r: { results?: unknown[] } | undefined) => (r?.results?.[0] as { n: number } | undefined)?.n ?? null
+export const counterN = (r: { results?: unknown[] } | undefined) => (r?.results?.[0] as { n: number } | undefined)?.n ?? null
 
 export async function createOrder(db: D1Database, p: {
   year: number; actorId: number; customerId: number; contactId: number | null; source: OrderSource; title: string; dueDate: string | null

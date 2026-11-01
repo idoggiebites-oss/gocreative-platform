@@ -58,7 +58,7 @@ function Attention({ rows }: { rows: NeedsAttentionRow[] }) {
         <>
           <StackedRows rows={rows.map((r) => ({
             key: r.number ?? `inq-${r.inquiryId}`,
-            to: r.number ? `/app/orders/${r.number}` : '/app/orders?view=inquiries',
+            to: r.number ? `/app/orders/${r.number}` : `/app/inquiries/${r.inquiryId}`,
             number: r.number ?? m.dash.inquiry,
             who: r.customerName || m.common.dash,
             sub: r.itemsSummary || r.title,
@@ -72,7 +72,7 @@ function Attention({ rows }: { rows: NeedsAttentionRow[] }) {
             </tr></thead>
             <tbody>
               {rows.map((r) => {
-                const to = r.number ? `/app/orders/${r.number}` : '/app/orders?view=inquiries'
+                const to = r.number ? `/app/orders/${r.number}` : `/app/inquiries/${r.inquiryId}`
                 const overdue = r.dueDate !== null && r.dueDate < today
                 return (
                   <tr key={r.number ?? `inq-${r.inquiryId}`} {...rowLink(to)}>

@@ -7,8 +7,9 @@ const NOW = `strftime('%Y-%m-%dT%H:%M:%fZ','now')`
 const OPEN = `status = 'open' AND expires_at > ${NOW}`
 // A reservation is live for the upload deadline. Past it, it counts for nothing, can't settle and blocks nobody; cron collects it.
 const LIVE = `status = 'reserved' AND created_at > strftime('%Y-%m-%dT%H:%M:%fZ','now','-${limits.UPLOAD_DEADLINE_MINUTES} minutes')`
-// Held against the storage cap until a deletion is confirmed; a linked file counts until conversion moves it on (S3).
-const OUTSTANDING = `COALESCE((SELECT SUM(bytes) FROM inquiry_files WHERE status IN ('stored','linked','deleting') OR (${LIVE})), 0)`
+// Held against the storage cap until a deletion is confirmed. A file that became part of an order is the shop's and no longer counts.
+const OUTSTANDING = `COALESCE((SELECT SUM(bytes) FROM inquiry_files WHERE status IN ('stored','deleting') OR (${LIVE})
+  OR (status = 'linked' AND NOT EXISTS (SELECT 1 FROM inquiries i WHERE i.id = inquiry_id AND i.status = 'converted'))), 0)`
 const IN_FLIGHT = `COALESCE((SELECT SUM(bytes) FROM inquiry_files WHERE ${LIVE}), 0)`
 const usage = (column: 'sessions' | 'bytes') => `COALESCE((SELECT ${column} FROM intake_usage WHERE day = ?), 0)`
 
@@ -134,7 +135,7 @@ export async function claimExpired(db: D1Database) {
 }
 
 export const filesToDelete = async (db: D1Database, limit: number) =>
-  (await db.prepare(`SELECT id, r2_key FROM inquiry_files WHERE status = 'deleting' LIMIT ?`).bind(limit).all<{ id: string; r2_key: string }>()).results
+  (await db.prepare(`SELECT id, r2_key FROM inquiry_files WHERE status = 'deleting' AND inquiry_id IS NULL LIMIT ?`).bind(limit).all<{ id: string; r2_key: string }>()).results
 
 export const forgetFiles = (db: D1Database, ids: string[]) =>
   db.batch(ids.map((id) => db.prepare(`DELETE FROM inquiry_files WHERE id = ? AND status = 'deleting'`).bind(id)))
@@ -148,6 +149,7 @@ export async function sweepFinished(db: D1Database) {
   ])
 }
 
+/** Files of a claimed inquiry go with it (db/inquiries.ts), not through the abandoned-upload queue above. */
 /** Every key a row still names, for orphan reconciliation. Bounded by the storage cap. */
 export const knownKeys = async (db: D1Database) =>
   new Set((await db.prepare(`SELECT r2_key FROM inquiry_files UNION SELECT r2_key FROM files WHERE r2_key LIKE 'inquiries/%'`).all<{ r2_key: string }>()).results.map((r) => r.r2_key))

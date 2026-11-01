@@ -485,7 +485,7 @@ test('cleanup deletes abandoned uploads only: never a submitted file, and an exp
   t.sqlite.exec(`DROP TRIGGER submissions_identity_fixed;
     UPDATE inquiry_submissions SET expires_at = '2000-01-01T00:00:00.000Z' WHERE ip_hash = (SELECT ip_hash FROM inquiry_submissions WHERE status = 'submitted');
     UPDATE inquiry_submissions SET expires_at = '2000-01-01T00:00:00.000Z' WHERE id IN (SELECT id FROM inquiry_submissions WHERE status = 'open' ORDER BY rowid LIMIT 1)`)
-  expect(await cleanupIntake(t.env, new Date())).toEqual({ deleted: 1, orphans: 0 })
+  expect(await cleanupIntake(t.env, new Date())).toMatchObject({ deleted: 1, orphans: 0 })
   expect(t.r2.objects.size).toBe(2)
   expect(t.n("inquiry_files WHERE status = 'linked'")).toBe(1) // the submitted one, though long past its expiry
   expect(t.n("inquiry_files WHERE status = 'stored'")).toBe(1) // the live session's
@@ -549,12 +549,14 @@ test('references avoid characters that get misread', () => {
   expect(newRef(new Uint8Array([0, 1, 8, 31, 32, 255]))).toBe('INQ-23AZ2Z')
 })
 
-test('staff file downloads still never serve an unsubmitted or inquiry-only file', async () => {
+test('staff can open a submitted file; nothing unsubmitted has a files row to open', async () => {
   const t = setup()
   const token = await t.open()
   await t.upload(token)
+  expect(t.n("files WHERE r2_key LIKE 'inquiries/%'")).toBe(0)
   await t.submit(token)
   const id = (t.sqlite.prepare("SELECT id FROM files WHERE r2_key LIKE 'inquiries/%'").get() as { id: number }).id
   const res = await app.request(`http://localhost/api/app/files/${id}`, {}, { ...t.env, DEV_AUTH_EMAIL: 'owner1@example.com' })
-  expect(res.status).toBe(404)
+  expect(res.status).toBe(200)
+  expect((await app.request(`https://${HOST}/api/app/files/${id}`, {}, t.env)).status).not.toBe(200) // no Access token, no file
 })

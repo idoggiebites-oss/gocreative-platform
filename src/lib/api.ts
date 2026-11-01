@@ -9,8 +9,8 @@ import type {
   SupplierCreateRequest, SupplierResponse, SuppliersResponse,
   ProductionChangeRequest, ProductionResponse, QueueReorderRequest, QueueReorderResponse, UnitsRequest,
 } from '@shared/api'
-import type { CustomerKind, PoStatus, ProductionStatus, Role } from '@shared/enums'
-import type { ApiError as ApiErrorBody } from '@shared/api'
+import type { CustomerKind, InquiryStatus, PoStatus, ProductionStatus, Role } from '@shared/enums'
+import type { ApiError as ApiErrorBody, InquiryDetailResponse } from '@shared/api'
 
 /** A non-2xx answer from /api/app. `body.error` is the server's message; 409 means a business rule refused it. */
 export class ApiError extends Error {
@@ -40,10 +40,11 @@ const retry = (n: number, e: Error) => !(e instanceof ApiError) && n < 2
 
 export const useDashboard = () => useQuery({ queryKey: ['dashboard'], queryFn: () => call<DashboardResponse>('/dashboard'), retry })
 
-export const useOrders = (view: OrderView, q: string) =>
+export const useInquiry = (id: string) => useQuery({ queryKey: ['inquiry', id], queryFn: () => call<InquiryDetailResponse>(`/inquiries/${id}`), retry })
+export const useOrders = (view: OrderView, q: string, inquiryStatus?: InquiryStatus) =>
   useQuery({
-    queryKey: ['orders', view, q],
-    queryFn: () => call<OrdersListResponse>(`/orders?${new URLSearchParams({ view, ...(q ? { q } : {}) })}`),
+    queryKey: ['orders', view, q, inquiryStatus],
+    queryFn: () => call<OrdersListResponse>(`/orders?${new URLSearchParams({ view, ...(q ? { q } : {}), ...(inquiryStatus ? { inquiryStatus } : {}) })}`),
     // Keep the previous rows on screen while the next search or view loads.
     placeholderData: (prev) => prev,
     retry,

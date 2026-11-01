@@ -12,9 +12,9 @@ export function createTestR2() {
   const uploaded = new Map<string, Date>() // tests backdate an object here
   const bucket = {
     // A stream is read to the end first: if it errors (a body shorter or longer than its declared length), nothing is stored.
-    put: async (key: string, value: ArrayBufferView | ReadableStream<Uint8Array>, opts?: { httpMetadata?: { contentType?: string } }) => {
+    put: async (key: string, value: string | ArrayBufferView | ReadableStream<Uint8Array>, opts?: { httpMetadata?: { contentType?: string } }) => {
       calls.push(['put', key])
-      const bytes = value instanceof ReadableStream
+      const bytes = typeof value === 'string' ? new TextEncoder().encode(value) : value instanceof ReadableStream
         ? new Uint8Array(await new Response(value).arrayBuffer())
         : new Uint8Array(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength))
       objects.set(key, { bytes, contentType: opts?.httpMetadata?.contentType })

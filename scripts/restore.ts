@@ -6,7 +6,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } fro
 import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
-import { checksum, dumpTable, foreignKeyOrder, restoreSql, type Row } from './backup-lib.ts'
+import { checksum, dumpTable, foreignKeyOrder, mirrorJournal, readJournal, replaySql, restoreSql, type Row } from './backup-lib.ts'
 
 // Read, not hard-coded: after a recovery cut-over the live database is whichever one wrangler.jsonc binds.
 const LIVE_ID = /"database_id":\s*"([^"]+)"/.exec(readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'))?.[1]
@@ -19,7 +19,7 @@ const remote = databaseId !== undefined
 if (remote && (databaseId === LIVE_ID || !values['database-name'] || values['database-name'] === 'gocreative')) throw new Error('A restore goes into a new, isolated database with its own name, never the live one')
 const name = values['database-name'] ?? 'gocreative'
 
-const manifest = JSON.parse(readFileSync(join(backup, 'manifest.json'), 'utf8')) as { migrations: string[]; tables: Record<string, { rows: number; sha256: string }> }
+const manifest = JSON.parse(readFileSync(join(backup, 'manifest.json'), 'utf8')) as { createdAt: string; migrations: string[]; tables: Record<string, { rows: number; sha256: string }> }
 const scratch = mkdtempSync(join(tmpdir(), 'gocreative-restore-'))
 const state = join(scratch, 'state')
 const where = remote ? ['--remote'] : ['--local', '--persist-to', state]
@@ -80,10 +80,26 @@ if (problems.length > 0) {
   process.exit(1)
 }
 
-// 6. Anything newer than the backup.
+// 6. Deletions made after this backup was taken: they stay deleted. If the account can't be reached, the local copy is used and we say so.
+const journalDir = join(homedir(), 'gocreative-backups', 'journal')
+await mirrorJournal(journalDir, BUCKET).catch((e: unknown) => console.warn(`!! Could not refresh the deletion journal (${String(e)}). Using the local copy; newer deletions may be missing.`))
+const replay = readJournal(journalDir, manifest.createdAt)
+const replayFile = join(scratch, 'replay.sql')
+const replayText = replaySql(replay, triggers)
+if (replayText) {
+  writeFileSync(replayFile, replayText, { mode: 0o600 })
+  wrangler('d1', 'execute', name, ...where, '--file', replayFile)
+  const after = d1('PRAGMA foreign_key_check')
+  if (after.length > 0) {
+    console.error(`RESTORE FAILED after replaying deletions, scratch kept at ${scratch}: ${JSON.stringify(after)}`)
+    process.exit(1)
+  }
+}
+
+// 7. Anything newer than the backup.
 config(resolve(new URL('../migrations', import.meta.url).pathname))
 wrangler('d1', 'migrations', 'apply', name, ...where)
 
 const rowCount = Object.values(manifest.tables).reduce((n, t) => n + t.rows, 0)
-console.log(`Restored and verified: ${present.length} tables, ${rowCount} rows, ${triggers.length} triggers, ${files.length} files.`)
+console.log(`Restored and verified: ${present.length} tables, ${rowCount} rows, ${triggers.length} triggers, ${files.length} files, ${replay.length} deletions replayed.`)
 if (!remote) console.log(`To boot on it: npx wrangler dev --persist-to ${state} --var DEV_AUTH_EMAIL:<an active user>\nDelete ${scratch} afterwards: it holds customer data.`)

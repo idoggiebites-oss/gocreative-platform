@@ -1,5 +1,8 @@
 // What scripts/backup.ts and scripts/restore.ts share. Plan and reasoning: notes/backup-restore.md.
+import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
+import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 export type Row = Record<string, unknown>
 export type Exec = (sql: string) => Row[] | Promise<Row[]>
@@ -79,3 +82,56 @@ export function expiredBackups(backups: BackupInfo[], now: Date): BackupInfo[] {
   const keepWeekly = new Set(backups.filter((b) => b.reason === 'weekly').sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 8))
   return backups.filter((b) => (b.reason === 'weekly' ? !keepWeekly.has(b) : Date.parse(b.createdAt) < cutoff))
 }
+
+export type JournalEntry = { kind: 'inquiry'; inquiryId: number; submissionId: string | null; at: string; reason: string; files: { fileId: number | null; r2Key: string; sha256: string | null }[] }
+
+/**
+ * Re-applies deletions made after a backup was taken, so restoring an older database can't bring deleted requests back.
+ * Runs in the isolated target with its triggers off, like the load, and restores them after. A converted inquiry is never
+ * journaled, so the only rows touched are ones already deleted from live.
+ */
+export function replaySql(entries: JournalEntry[], triggers: { name: string; sql: string }[]): string {
+  if (entries.length === 0) return ''
+  const lines = ['PRAGMA defer_foreign_keys = ON;']
+  for (const t of triggers) lines.push(`DROP TRIGGER ${id(t.name)};`)
+  for (const e of entries) {
+    lines.push(`DELETE FROM "inquiry_files" WHERE inquiry_id = ${sqlValue(e.inquiryId)};`)
+    for (const f of e.files) if (f.fileId !== null) lines.push(`DELETE FROM "files" WHERE id = ${sqlValue(f.fileId)} AND r2_key = ${sqlValue(f.r2Key)};`)
+    lines.push(`DELETE FROM "inquiries" WHERE id = ${sqlValue(e.inquiryId)} AND status <> 'converted';`)
+    if (e.submissionId) lines.push(`DELETE FROM "inquiry_submissions" WHERE id = ${sqlValue(e.submissionId)};`)
+  }
+  for (const t of triggers) lines.push(`${t.sql.trim().replace(/;$/, '')};`)
+  return lines.join('\n') + '\n'
+}
+
+const JOURNAL_PREFIX = '_journal/deletions/'
+
+/** Copies new deletion journal entries from R2 into dir. Wrangler has no object listing, so this asks Cloudflare's API with wrangler's own login. Read-only. */
+export async function mirrorJournal(dir: string, bucket: string) {
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
+  const run = (...args: string[]) => execFileSync('npx', ['wrangler', ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 1 << 26 })
+  const { token } = JSON.parse(run('auth', 'token', '--json')) as { token: string }
+  const account = (JSON.parse(run('whoami', '--json')) as { accounts: { id: string }[] }).accounts[0].id
+  let cursor = ''
+  let copied = 0
+  for (;;) {
+    const url = `https://api.cloudflare.com/client/v4/accounts/${account}/r2/buckets/${bucket}/objects?prefix=${encodeURIComponent(JOURNAL_PREFIX)}&per_page=1000${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+    if (!res.ok) throw new Error(`Listing the journal failed: HTTP ${res.status}`)
+    const body = await res.json() as { result: { key: string }[]; result_info?: { cursor?: string; is_truncated?: boolean } }
+    for (const { key } of body.result) {
+      const target = join(dir, key.slice(JOURNAL_PREFIX.length))
+      if (existsSync(target)) continue
+      execFileSync('npx', ['wrangler', 'r2', 'object', 'get', `${bucket}/${key}`, '--remote', '--file', target], { stdio: 'ignore' })
+      copied++
+    }
+    if (!body.result_info?.is_truncated || !body.result_info.cursor) return copied
+    cursor = body.result_info.cursor
+  }
+}
+
+export const readJournal = (dir: string, after: string): JournalEntry[] => (existsSync(dir) ? readdirSync(dir) : [])
+  .filter((f) => f.endsWith('.json'))
+  .map((f) => JSON.parse(readFileSync(join(dir, f), 'utf8')) as JournalEntry)
+  .filter((e) => e.at > after)
+  .sort((a, b) => a.at.localeCompare(b.at))

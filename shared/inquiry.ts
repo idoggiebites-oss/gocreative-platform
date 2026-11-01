@@ -9,7 +9,7 @@ const METHOD_CHOICES = ['screen', 'embroidery', 'dtg', 'laser_engrave', 'laser_c
 export const FILE_PURPOSES = ['artwork', 'po'] as const
 const products: readonly { slug: string; methods: readonly string[]; sized: boolean }[] = business.storefront.products
 
-const line = z.object({
+export const inquiryLineSchema = z.object({
   product: z.string().max(40),
   method: z.enum(METHOD_CHOICES), // 'help' = "help me choose", always allowed
   quantity: z.number().int().min(1).max(100_000),
@@ -39,7 +39,7 @@ export const inquirySubmitSchema = z.object({
   dueDate: z.iso.date().optional(),
   designHelp: z.boolean().optional(),
   description: text(4000).optional(), // placement, colors, special instructions, the event
-  lines: z.array(line).min(1).max(10),
+  lines: z.array(inquiryLineSchema).min(1).max(10),
   website: z.string().max(200).optional(), // honeypot: hidden from people
 }).strict().refine((d) => d.contactEmail || d.contactPhone, { message: 'email or phone required' })
   .refine((d) => !d.preferredContact || (d.preferredContact === 'email' ? d.contactEmail : d.contactPhone), { message: 'preferred contact missing' })

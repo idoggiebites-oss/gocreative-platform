@@ -11,9 +11,19 @@
 - **New cloud database:** `npx wrangler d1 create <name>`, then `npm run restore -- <dir> --database-id <id> --database-name <name>`. Local (no flags) also loads the files into local R2; to boot on it, use the command it prints, setting any flag before boot. Delete the scratch folder afterwards, including after a failed run: it holds customer data.
 - **Time Travel:** 30 days on Workers Paid, 7 on Free (Cloudflare docs, 2026-10-31). Which plan this account is on is unverified, so assume 7.
 
+- **Deletion journal (S3):** every inquiry deletion first writes `_journal/deletions/<time>-inquiry-<id>.json` to R2, holding ids, keys and hashes, no personal data. Backup copies new entries to `~/gocreative-backups/journal/` (listing through Cloudflare's API with wrangler's login, read-only). Restore replays every entry newer than the backup into the isolated database, so a deleted request stays deleted; it warns if the journal can't be refreshed.
+
+## Restoring for real: the procedure
+
+1. `npx wrangler d1 create gocreative-restore-<date>`, then `npm run restore -- ~/gocreative-backups/<backup> --database-id <id> --database-name gocreative-restore-<date>`. It refuses the database bound in `wrangler.jsonc` and any non-empty target.
+2. Read its last line: tables, rows, triggers, files, deletions replayed. Anything other than "Restored and verified" means stop.
+3. **Cut-over needs Arturo's go.** Set writes to maintenance, point `database_id` in `wrangler.jsonc` at the new database, `npm run deploy`, check the dashboard, then clear maintenance. Rollback is the old `database_id` and a deploy.
+4. Missing files: `npx wrangler r2 object put gocreative-files/<key> --file ~/gocreative-backups/files/<sha256> --remote`, taking key and hash from the backup's `files.json`.
+5. A bad deploy with no data damage needs none of this: `npx wrangler rollback`. Migration 0010 only adds, so the previous Worker keeps working on the migrated database.
+
 ## Not built, on purpose
 
-- **Orphan check and journal copy.** Wrangler has no `r2 object list`, so objects with no `files` row aren't detected. **Must be solved in S3 before the first deletion feature ships:** deletion journal writing, its off-machine copy and its replay in restore. Nothing deletes today, so nothing needs replaying yet.
+- **R2 orphan check in the backup:** the daily cron reconciles objects under `inquiries/`; other prefixes are only ever written with their rows.
 - **Restoring files to a cloud bucket:** manual, per the runbook below.
 - **Weekly schedule:** run by hand until the off-machine location is chosen.
 - **Off-machine copy:** Arturo's choice is open. Until then, losing this Mac loses the backups.
