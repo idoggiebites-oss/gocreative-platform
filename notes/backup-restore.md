@@ -69,9 +69,12 @@
      deleted, including the off-machine copy.
    - The file mirror is garbage-collected: an object referenced by no retained backup's `files.json` is
      deleted.
-   - Retention deletions in the app write a **deletion log** (record ids and file SHA-256 only, no personal
-     data). After any restore, the log entries newer than the backup are **replayed**, so deleted data doesn't
-     come back.
+   - Every retention or owner deletion writes a **deletion journal entry** (record ids, file SHA-256 and the
+     time; no personal data). The journal lives **outside D1**, so restoring an older database can't lose it.
+     Each event is its own write-once R2 object under `_journal/deletions/<UTC time>-<uuid>.json`, written
+     before the D1 rows are removed. The backup script copies the journal to the off-machine location too, so
+     it survives losing the account. **Restore replays every journal entry newer than the backup into the
+     isolated database before cut-over**, then re-validates.
    - The privacy text states active-system retention, plus "backup copies expire within [N] weeks". N is to
      be confirmed with the legal check (STOREFRONT_PLAN §0.7).
 4. **Recovery inventory.**

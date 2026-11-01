@@ -68,7 +68,8 @@ details, hours, prices or guaranteed turnaround times.**
      (rows stay `deleting` until each deletion is confirmed);
    - orphan reconciliation looks only at objects older than a **24 h grace period**;
    - every interleaving is tested: submit vs settle, settle vs cleanup, ambiguous R2 outcomes.
-4. **Retention vs backups:** see item 1. Active-system retention and backup expiry are stated separately in the
+4. **Retention vs backups:** see item 1. The deletion journal lives outside D1, as write-once R2 objects copied
+   off-machine, and is replayed before any restore cuts over. Active-system retention and backup expiry are stated separately in the
    privacy text.
 
 **Fix during S1–S4:**
