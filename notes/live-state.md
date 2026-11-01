@@ -3,13 +3,13 @@
 Update this whenever something deploys. History is in git and ROADMAP.md; this is only the present.
 
 - **Dashboard:** gocreative.idoggiebites.workers.dev, behind Cloudflare Access (reusable policy "GoCreative staff").
-- **Worker version:** be5b09c6 (S1).
-- **Remote migrations applied:** 0001–0009. Never edit these.
+- **Worker version:** 412d36de (S3; includes the S2 storefront UI, still behind Access).
+- **Remote migrations applied:** 0001–0010. Never edit these.
 - **Test data left in live on purpose:** customer "TEST – ignore" and cancelled order 2026-0001, so the next real order is 2026-0002.
 - **Public intake API:** deployed, but closed twice over: the Worker is still all behind Access, and the `intake_closed` row in `settings` refuses every public write. `TURNSTILE_SECRET` and `IP_HASH_SALT` aren't set; without them no session can open.
-- **Storefront UI:** approved by Arturo; **not deployed**.
-- **S3 (inquiry review and conversion):** built on local branch `s3-convert`, Codex "ready", migration 0010 **not applied**, **not deployed**. Rehearsed on a copy; see notes/backup-restore.md. Mockups: https://claude.ai/artifact/CV2TZQvJGPwzhCVK4EwT4X
-- **Backups:** `~/gocreative-backups/` on Arturo's Mac only. No off-machine copy yet. Latest: 2026-11-01T17-35-37-200Z (pre-migration). Run weekly by hand and before every remote migration.
+- **Storefront UI:** approved by Arturo, deployed behind Access; not public.
+- **S3 (inquiry review and conversion):** live for signed-in staff. Retention and abandoned-upload cleanup run in the daily cron.
+- **Backups:** `~/gocreative-backups/` on Arturo's Mac only. No off-machine copy yet. Latest: 2026-11-01T17-42-50-757Z (pre-migration). Run weekly by hand and before every remote migration.
 
 - **Throwaway:** Worker `gocreative-access-drill` (no data), public until the S0c rehearsal finishes, then delete it.
 
