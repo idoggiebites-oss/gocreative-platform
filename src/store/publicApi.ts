@@ -21,6 +21,7 @@ const FRIENDLY: Record<string, string> = {
   unsupported_file_type: 'That file type is not accepted. Use PNG, JPG, PDF or SVG (a purchase order can be PDF, PNG or JPG).',
   file_type_mismatch: 'That file does not match its type. Try saving it again as PNG, JPG or PDF.',
   invalid_request: 'Something in the form needs another look.',
+  upload_limit: 'We cannot take this file on this request. It may be over the limit, or there have been too many tries.',
 }
 
 function fromBody(status: number, body: { code?: string; error?: string }) {
@@ -82,6 +83,9 @@ export function uploadFile(p: { token: string; file: File; purpose: FilePurpose;
   })
   return { done, cancel: () => xhr.abort() }
 }
+
+export type StoredFile = { id: string; filename: string | null; bytes: number; purpose: FilePurpose }
+export const listFiles = (token: string) => json<{ files: StoredFile[] }>('/submissions/files', { headers: bearer(token) })
 
 export const removeFile = (token: string, id: string) => json<{ ok: true }>(`/submissions/files/${encodeURIComponent(id)}`, { method: 'DELETE', headers: bearer(token) })
 

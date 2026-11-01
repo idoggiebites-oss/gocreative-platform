@@ -62,6 +62,13 @@ export function UploadStep({ form, set, uploads }: { form: Form; set: (c: Partia
       </div>
       <p className="s-meta s-tight-top">PNG, JPG, PDF or SVG. Up to 5 files, 20 MB each. A rough sketch is fine.</p>
       {uploads.notice && <p role="alert" className="s-error-block">{uploads.notice}</p>}
+      <p role="status" className="s-visually-hidden">{uploads.announcement}</p>
+      {uploads.canRestart && (
+        <div className="s-error-block s-stack-8">
+          <span>If you have tried several times, start the uploads again. Your files go up once more.</span>
+          <button type="button" className="s-btn-ghost" onClick={uploads.restart}>Start the uploads again</button>
+        </div>
+      )}
 
       {featured && (
         <figure className="s-preview">

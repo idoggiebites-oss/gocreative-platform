@@ -15,13 +15,23 @@ let loading: Promise<Turnstile> | undefined
 function load() {
   loading ??= new Promise<Turnstile>((resolve, reject) => {
     if (window.turnstile) return resolve(window.turnstile)
+    const fail = () => {
+      loading = undefined // a blocked, failed or hung load can be retried
+      s.remove()
+      reject(refused())
+    }
     const s = document.createElement('script')
+    const deadline = setTimeout(fail, 20_000)
     s.src = SCRIPT
     s.async = true
-    s.onload = () => (window.turnstile ? resolve(window.turnstile) : reject(refused()))
+    s.onload = () => {
+      clearTimeout(deadline)
+      if (window.turnstile) resolve(window.turnstile)
+      else fail()
+    }
     s.onerror = () => {
-      loading = undefined // a blocked or failed load can be retried
-      reject(refused())
+      clearTimeout(deadline)
+      fail()
     }
     document.head.append(s)
   })

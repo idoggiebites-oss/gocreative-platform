@@ -97,6 +97,15 @@ export function publicRoutes() {
       return c.json({ token }, 201)
     })
 
+    .get('/submissions/files', async (c) => {
+      const s = await session(c)
+      if (!s) return badSession(c)
+      if (s.status !== 'open') return fail(c, 409, 'session_closed', 'This request has already been sent.')
+      if (s.expired) return fail(c, 410, 'session_expired', 'Your session has ended. Please start again.')
+      const files = await db.listStoredFiles(c.env.DB, s.id)
+      return c.json({ files: files.map((f) => ({ id: f.id, filename: f.filename, bytes: f.bytes, purpose: f.purpose })) })
+    })
+
     .post('/submissions/files', intakeOpen, async (c) => {
       const s = await session(c)
       if (!s) return badSession(c)

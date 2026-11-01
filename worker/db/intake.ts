@@ -73,6 +73,11 @@ export const claimStored = async (db: D1Database, id: string, submissionId: stri
   (await db.prepare(`UPDATE inquiry_files SET status = 'deleting' WHERE id = ? AND submission_id = ? AND status = 'stored'
     AND EXISTS (SELECT 1 FROM inquiry_submissions s WHERE s.id = ? AND s.status = 'open') RETURNING r2_key`).bind(id, submissionId, submissionId).first<{ r2_key: string }>())?.r2_key ?? null
 
+/** A session's own stored uploads, so a browser that lost an acknowledgement or reloaded can see what would be sent. Only what the customer sent. */
+export const listStoredFiles = async (db: D1Database, submissionId: string) =>
+  (await db.prepare(`SELECT id, filename, bytes, kind AS purpose FROM inquiry_files WHERE submission_id = ? AND status = 'stored' ORDER BY created_at`).bind(submissionId)
+    .all<{ id: string; filename: string | null; bytes: number; purpose: 'artwork' | 'po' }>()).results
+
 /** Where the orphan sweep got to, so a long bucket can't hide objects past its first pages. */
 export const orphanCursor = async (db: D1Database) =>
   (await db.prepare(`SELECT value FROM settings WHERE key = 'orphan_cursor'`).first<{ value: string }>())?.value

@@ -96,6 +96,7 @@ test('keyboard: arrow keys move through choices, errors land on the field, and e
   await page.goto('/order')
   await page.getByRole('button', { name: 'Continue', exact: true }).click()
   await expect(page.getByText('Choose what you would like made.')).toBeVisible()
+  await expect(page.getByRole('radio', { name: /^T-shirts/ })).toBeFocused() // focus lands on the group with the problem
   await expect(page.getByRole('alert')).toContainText('highlighted')
   await page.getByRole('radio', { name: /^T-shirts/ }).focus()
   await page.keyboard.press('Space')
@@ -105,6 +106,7 @@ test('keyboard: arrow keys move through choices, errors land on the field, and e
   await page.getByRole('radio', { name: 'Direct to garment' }).check({ force: true })
   await page.getByRole('button', { name: 'Continue', exact: true }).click()
   await expect(page.getByRole('heading', { level: 1 })).toBeFocused()
+  await expect(page.getByRole('status').filter({ hasText: 'Step 2 of 4: How many' })).toHaveCount(1)
   await page.getByRole('button', { name: 'Continue to artwork' }).click()
   await expect(page.getByText('Add a quantity to at least one size.')).toBeVisible()
   await expect(page.getByLabel('YS')).toBeFocused()
@@ -166,17 +168,88 @@ test('upload states: too many, wrong type and empty are refused here; a failure 
     return route.fallback()
   })
   await artworkInput(page).setInputFiles([png('flaky.png')])
-  await expect(page.getByText('We could not reach the shop. Check your connection and try again.')).toBeVisible()
+  await expect(page.getByRole('list', { name: 'Your files' }).getByText('We could not reach the shop.')).toBeVisible()
   await page.getByRole('button', { name: 'Continue to your details' }).click()
   await expect(page.getByRole('alert')).toContainText('Retry or remove')
   await page.getByRole('button', { name: 'Retry flaky.png' }).click()
   await expect(page.getByText(/^Artwork, .*Uploaded\.$/)).toBeVisible()
 
   await page.getByRole('button', { name: 'Remove flaky.png' }).click()
-  await expect(page.getByText('flaky.png')).toHaveCount(0)
+  await expect(page.getByRole('list', { name: 'Your files' })).toHaveCount(0)
   await artworkInput(page).setInputFiles(Array.from({ length: 6 }, (_, i) => png(`f${i}.png`)))
   await expect(page.getByRole('alert')).toContainText('f5.png: you can send up to 5 files')
   await expect(page.getByText(/^Artwork, .*Uploaded\.$/)).toHaveCount(5)
+})
+
+test('a lost upload reply: the file is recognised, not sent twice, and retry is never offered', async ({ page }) => {
+  await toStep3(page)
+  await page.route('**/api/public/submissions/files', async (route) => {
+    if (route.request().method() !== 'POST') return route.fallback()
+    await route.fetch() // stored on the server; only the acknowledgement is lost
+    return route.abort()
+  })
+  await artworkInput(page).setInputFiles([png('reached.png')])
+  await expect(page.getByText(/^Artwork, .*Uploaded\.$/)).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Retry reached.png' })).toHaveCount(0)
+  await expect(page.getByRole('status').filter({ hasText: 'reached.png uploaded.' })).toHaveCount(1)
+})
+
+test('cancelling while the session is still opening sends nothing', async ({ page }) => {
+  await toStep3(page)
+  let release!: () => void
+  const held = new Promise<void>((r) => { release = r })
+  await page.route('**/api/public/submissions', async (route) => { await held; return route.fallback() })
+  let posts = 0
+  page.on('request', (r) => { if (r.method() === 'POST' && r.url().endsWith('/submissions/files')) posts++ })
+  await artworkInput(page).setInputFiles([png('changed-my-mind.png')])
+  await page.getByRole('button', { name: 'Cancel changed-my-mind.png' }).click()
+  await expect(page.getByRole('list', { name: 'Your files' })).toHaveCount(0)
+  release()
+  await page.waitForResponse('**/api/public/submissions')
+  await page.waitForTimeout(300)
+  expect(posts).toBe(0)
+})
+
+test('a file cancelled after it reached the server is removed before sending, so it never goes out', async ({ page }) => {
+  await toStep3(page)
+  let release!: () => void
+  const held = new Promise<void>((r) => { release = r })
+  await page.route('**/api/public/submissions/files', async (route) => {
+    if (route.request().method() !== 'POST') return route.fallback()
+    const reply = await route.fetch()
+    await held
+    return route.fulfill({ response: reply })
+  })
+  await artworkInput(page).setInputFiles([png('sent-then-cancelled.png')])
+  await page.waitForTimeout(800)
+  await page.getByRole('button', { name: 'Cancel sent-then-cancelled.png' }).click()
+  release()
+  await toStep4(page)
+  await page.getByRole('button', { name: 'Send my request' }).click()
+  await expect(page).toHaveURL(/order\/sent\//)
+  await expect(page.getByLabel('What you sent')).not.toContainText('sent-then-cancelled.png')
+})
+
+test('reloading while the reply was lost still shows the file that would be sent', async ({ page }) => {
+  await toStep3(page)
+  await artworkInput(page).setInputFiles([png('first.png')])
+  await expect(page.getByText(/^Artwork, .*Uploaded\.$/)).toBeVisible()
+  // Stored on the server, but the browser never recorded it.
+  await page.evaluate(`(() => { const d = JSON.parse(sessionStorage.getItem('inquiry-draft')); d.files = []; sessionStorage.setItem('inquiry-draft', JSON.stringify(d)) })()`)
+  await page.reload()
+  await expect(page.getByRole('list', { name: 'Your files' }).getByText('first.png')).toBeVisible()
+})
+
+test('past the attempt limit, the customer can start the uploads again', async ({ page }) => {
+  await toStep3(page)
+  let limited = true
+  await page.route('**/api/public/submissions/files', (route) => {
+    if (limited && route.request().method() === 'POST') { limited = false; return route.fulfill({ status: 429, json: { code: 'upload_limit', error: 'x' } }) }
+    return route.fallback()
+  })
+  await artworkInput(page).setInputFiles([png('again.png')])
+  await page.getByRole('button', { name: 'Start the uploads again' }).click()
+  await expect(page.getByText(/^Artwork, .*Uploaded\.$/)).toBeVisible()
 })
 
 test('a file is sent once, even under StrictMode', async ({ page }) => {
@@ -234,7 +307,7 @@ test('a reload, as a phone does when the camera opens, keeps the form and the up
   await artworkInput(page).setInputFiles([png('survives.png')])
   await expect(page.getByText(/^Artwork, .*Uploaded\.$/)).toBeVisible()
   await page.reload()
-  await expect(page.getByText('survives.png')).toBeVisible()
+  await expect(page.getByRole('list', { name: 'Your files' }).getByText('survives.png')).toBeVisible()
   await toStep4(page)
   await page.getByRole('button', { name: 'Send my request' }).click()
   await expect(page.getByLabel('What you sent')).toContainText('survives.png')

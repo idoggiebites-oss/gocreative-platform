@@ -36,7 +36,7 @@ function ProductStep({ f, set, errors, focus }: { f: Form; set: (fn: (f: Form) =
   return (
     <>
       <StepHeading focus={focus}>What would you like made?</StepHeading>
-      <fieldset aria-describedby={errors.product ? 's-product-error' : undefined}>
+      <fieldset role="radiogroup" aria-invalid={errors.product ? true : undefined} aria-describedby={errors.product ? 's-product-error' : undefined}>
         <legend className="s-visually-hidden">Product</legend>
         <div className="s-tiles">
           {PRODUCTS.map((p) => (
@@ -49,7 +49,7 @@ function ProductStep({ f, set, errors, focus }: { f: Form; set: (fn: (f: Form) =
         {errors.product && <p id="s-product-error" className="s-error">{errors.product}</p>}
       </fieldset>
       {f.product && (
-        <fieldset aria-describedby={errors.method ? 's-method-error' : undefined}>
+        <fieldset role="radiogroup" aria-invalid={errors.method ? true : undefined} aria-describedby={errors.method ? 's-method-error' : undefined}>
           <legend className="s-label">How should we decorate it?</legend>
           <p className="s-meta s-legend-help">Showing the options that work for this item.</p>
           <div className="s-options" key={f.product}>
@@ -225,8 +225,12 @@ function OrderForm({ status, onClosed }: { status: Status; onClosed: () => void 
     return opening.current
   }, [status.turnstileSiteKey])
 
-  const uploadsConfig = useMemo(() => ({ initial: draft?.files ?? [], ensureToken, dropToken, onClosed }), [draft, ensureToken, dropToken, onClosed])
+  const currentToken = useCallback(() => token.current, [])
+  const uploadsConfig = useMemo(() => ({ initial: draft?.files ?? [], ensureToken, currentToken, dropToken, onClosed }), [draft, ensureToken, currentToken, dropToken, onClosed])
   const uploads = useUploads(uploadsConfig)
+  // After a reload, the server knows what got through: an upload whose reply never arrived, or a session that ended.
+  const { reconcile } = uploads
+  useEffect(() => { void reconcile().catch(() => {}) }, [reconcile])
 
   const requested = Number(params.get('step')) || 1
   const step = !form.product || !form.method ? 1 : Math.min(Math.max(requested, 1), STEP_COUNT)
@@ -248,7 +252,7 @@ function OrderForm({ status, onClosed }: { status: Status; onClosed: () => void 
 
   const failErrors = (e: Errors) => {
     setErrors(e)
-    requestAnimationFrame(() => document.querySelector<HTMLElement>('.s-step [aria-invalid="true"], .s-step .s-error')?.focus())
+    requestAnimationFrame(() => document.querySelector<HTMLElement>('.s-step [role="radiogroup"][aria-invalid="true"] input, .s-step input[aria-invalid="true"], .s-step textarea[aria-invalid="true"], .s-step select[aria-invalid="true"]')?.focus())
     if (Object.keys(e).length > 0) setFormError('Please check the highlighted fields.')
   }
 
@@ -256,7 +260,7 @@ function OrderForm({ status, onClosed }: { status: Status; onClosed: () => void 
   const failed = uploads.rows.some((r) => r.state === 'failed')
 
   useEffect(() => {
-    if (!uploading && !failed) setFormError((m) => (/did not upload|still uploading|go up again/.test(m) ? '' : m)) // a message about a problem now fixed
+    if (!uploading && !failed) setFormError((m) => (/did not upload|still uploading|go up again|difference in your files/.test(m) ? '' : m)) // a message about a problem now fixed
   }, [uploading, failed])
 
   const next = () => {
@@ -277,6 +281,21 @@ function OrderForm({ status, onClosed }: { status: Status; onClosed: () => void 
     setSending(true)
     setFormError('')
     try {
+      // What the session holds is what gets sent, so the customer must have seen it first.
+      const had = uploads.current().filter((r) => r.state === 'done').length
+      if (!(await uploads.reconcile()) && had > 0) {
+        go(3)
+        return setFormError('Your session ended, so your files need to go up again. Nothing else was lost.')
+      }
+      const rows = uploads.current()
+      if (rows.some((r) => r.state === 'failed')) {
+        go(3)
+        return setFormError('Some files did not upload. Retry or remove them to continue.')
+      }
+      if (rows.filter((r) => r.state === 'done').length !== had) {
+        go(3)
+        return setFormError('We found a difference in your files. Please check them, then continue.')
+      }
       const { ref } = await submitInquiry(await ensureToken(), parsed.data)
       clearDraft()
       const sent: SentState = {
@@ -313,6 +332,7 @@ function OrderForm({ status, onClosed }: { status: Status; onClosed: () => void 
           <div style={{ transform: `scaleX(${step / STEP_COUNT})` }} />
         </div>
       </header>
+      <p role="status" className="s-visually-hidden">Step {step} of {STEP_COUNT}: {TITLES[step - 1]}</p>
       <div className="s-order-body">
         <form noValidate onSubmit={(e) => { e.preventDefault(); if (step === STEP_COUNT) void send(); else next() }}>
           {step > 1 && <button type="button" className="s-back" onClick={() => go(step - 1)}>Back</button>}

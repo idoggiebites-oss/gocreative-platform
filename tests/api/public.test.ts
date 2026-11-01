@@ -309,6 +309,24 @@ test('an R2 cursor that has gone stale resets instead of failing every future ru
   expect(t.n("settings WHERE key = 'orphan_cursor'")).toBe(0)
 })
 
+test('a session can list its own stored files and nothing else: no keys, no hashes, no other session, nothing in flight', async () => {
+  const t = setup()
+  const list = async (token: string) => t.call('/submissions/files', { headers: t.auth(token) })
+  const token = await t.open()
+  const ack = await (await t.upload(token, PNG, { filename: 'mine.png' })).json() as { id: string }
+  const other = await t.open('203.0.113.8')
+  await t.upload(other, PNG, { filename: 'theirs.png' })
+  const sid = (t.sqlite.prepare('SELECT submission_id AS s FROM inquiry_files WHERE id = ?').get(ack.id) as { s: string }).s
+  t.sqlite.exec(`INSERT INTO inquiry_files (id, submission_id, r2_key, kind, bytes) VALUES ('flying', '${sid}', 'inquiries/x/flying', 'artwork', 5)`)
+  expect(await (await list(token)).json()).toEqual({ files: [{ id: ack.id, filename: 'mine.png', bytes: PNG.byteLength, purpose: 'artwork' }] })
+  expect(await code(await t.call('/submissions/files'))).toEqual([401, 'session_invalid'])
+  t.sqlite.exec("DELETE FROM inquiry_files WHERE id = 'flying'")
+  await t.submit(token)
+  expect(await code(await list(token))).toEqual([409, 'session_closed'])
+  t.expire()
+  expect(await code(await list(other))).toEqual([410, 'session_expired'])
+})
+
 test('only schools and organizations may attach a PO', async () => {
   const t = setup()
   const token = await t.open()
