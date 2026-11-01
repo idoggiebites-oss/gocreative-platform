@@ -8,8 +8,8 @@ Update this whenever something deploys. History is in git and ROADMAP.md; this i
 - **Test data left in live on purpose:** customer "TEST – ignore" and cancelled order 2026-0001, so the next real order is 2026-0002.
 - **Public intake API:** deployed, but closed twice over: the Worker is still all behind Access, and the `intake_closed` row in `settings` refuses every public write. `TURNSTILE_SECRET` and `IP_HASH_SALT` aren't set; without them no session can open.
 - **Storefront UI:** approved by Arturo; **not deployed**.
-- **S3 (inquiry review and conversion):** built, migration 0010 **not applied**, **not deployed**. Mockups: https://claude.ai/artifact/CV2TZQvJGPwzhCVK4EwT4X
-- **Backups:** `~/gocreative-backups/` on Arturo's Mac only. No off-machine copy yet. Latest: 2026-11-01T13-27-48-870Z. Run weekly by hand and before every remote migration.
+- **S3 (inquiry review and conversion):** built on local branch `s3-convert`, Codex "ready", migration 0010 **not applied**, **not deployed**. Rehearsed on a copy; see notes/backup-restore.md. Mockups: https://claude.ai/artifact/CV2TZQvJGPwzhCVK4EwT4X
+- **Backups:** `~/gocreative-backups/` on Arturo's Mac only. No off-machine copy yet. Latest: 2026-11-01T17-35-37-200Z (pre-migration). Run weekly by hand and before every remote migration.
 
 - **Throwaway:** Worker `gocreative-access-drill` (no data), public until the S0c rehearsal finishes, then delete it.
 

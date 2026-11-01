@@ -43,6 +43,14 @@
 
 **2026-11-01**, after migration 0009: backup `2026-11-01T13-27-48-870Z` restored into local D1 and verified (26 tables, 17 rows, 62 triggers, 1 file).
 
+**2026-11-01**, pre-migration rehearsal for S3: backup `2026-11-01T17-35-37-200Z` (at 0009, 79 s, journal empty).
+
+| Drill | Result |
+|---|---|
+| Restore into a throwaway cloud D1, then 0010 applied | Verified: 26 tables, 17 rows, 65 triggers after 0010, no foreign key problems. Deleted afterwards |
+| S3 code booted on a local restore | Dashboard, orders, customers, production and payments answer; artwork bytes match their SHA-256 |
+| The deployed Worker's code (fa375e1) on the schema with 0010 | Its 315 API tests pass, so rolling the Worker back is safe |
+
 **Limits of this evidence:** live data is one test order, so the historical states the plan lists (voided payments, superseded quotes, deposited checks) were proven only against seed data through `restoreSql` in `tests/api/backup.test.ts`, not through a real D1. That test's control shows the load fails with triggers on. Repeat the drill once real orders exist. The live 503 itself couldn't be exercised from outside, because Access answers first.
 
 ## What must be recoverable

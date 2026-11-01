@@ -121,3 +121,11 @@ inside its card in Spanish.
 ### 2026-11-01 — An upload failure that may have reached the server is not a failure
 - **Cost:** three Codex rounds on S2 were about this: a retry after a lost reply duplicates, a removed row can leave an unseen file attached.
 - **Rule:** the server's list is the truth. Reconcile with it after anything ambiguous, and before anything irreversible.
+
+### 2026-11-01 — A planned column can break a tool three layers away
+- **Cost:** the plan's `orders.inquiry_id` plus the existing `inquiries.order_id` would have made a foreign-key cycle, and restore refuses cycles. It would have surfaced at the worst moment.
+- **Rule:** when adding a foreign key, check it against restore's ordering. `tests/api/inquiries.test.ts` now runs that order on the migrated schema.
+
+### 2026-11-01 — The Cloudflare API can refuse a read once, then work
+- **Cost:** a D1 query returned code 7403 (not authorized) with no change in access; the next call worked. It happened twice this session.
+- **Rule:** retry once before treating 7403 as an access problem, and never let a check that errored count as a pass.
