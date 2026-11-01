@@ -1,8 +1,10 @@
 import { Hono } from 'hono'
 import { isMaintenance } from './db/settings'
+import { cleanupIntake } from './cron'
 import { appRoutes } from './routes/app'
+import { publicRoutes } from './routes/public'
 
-const app = new Hono<{ Bindings: Env }>().basePath('/api')
+export const app = new Hono<{ Bindings: Env }>().basePath('/api')
 
 // Mounted above every route, so public routes added later are paused too (scripts/backup.ts switches this on). Before auth: the answer reveals nothing.
 app.use(async (c, next) => {
@@ -18,5 +20,9 @@ app.get('/health', async (c) => {
 })
 
 app.route('/app', appRoutes())
+app.route('/public', publicRoutes())
 
-export default app
+export default {
+  fetch: app.fetch,
+  scheduled: (_: unknown, env: Env, ctx: { waitUntil(p: Promise<unknown>): void }) => ctx.waitUntil(cleanupIntake(env, new Date())),
+}

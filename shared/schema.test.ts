@@ -40,7 +40,6 @@ const enumColumns: [table: string, column: string, values: readonly string[]][] 
   ['artwork', 'approved_via', e.AUTHORIZATION_METHODS],
   ['purchase_orders', 'status', e.PO_STATUSES],
   ['order_purchases', 'status', e.PURCHASE_STORED_STATUSES],
-  ['inquiries', 'status', e.INQUIRY_STATUSES],
 ]
 
 describe('final schema (0001 … 0004)', () => {

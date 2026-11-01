@@ -39,7 +39,7 @@ export const NOTIFICATION_METHODS = ['phone', 'email', 'text', 'in_person', 'oth
 export const CHECK_STATUSES = ['awaiting_payment', 'ready_for_collection', 'collected', 'deposited', 'cleared'] as const
 // The Payments page's suggested next step for an order that still owes money (domain/payments.ts nextPaymentAction).
 export const PAYMENT_NEXT_ACTIONS = ['collect_check', 'await_check', 'collect_at_pickup', 'record_payment', 'request_check'] as const
-export const INQUIRY_STATUSES = ['new', 'converted', 'spam'] as const
+export const INQUIRY_STATUSES = ['new', 'converted', 'declined', 'spam'] as const
 
 export type Role = (typeof ROLES)[number]
 export type CustomerKind = (typeof CUSTOMER_KINDS)[number]

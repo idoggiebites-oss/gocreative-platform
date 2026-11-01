@@ -692,7 +692,7 @@ export const es: Messages = {
       awaiting_materials: 'Esperando materiales', awaiting_preparation: 'Esperando preparación', ready: 'Listo para producción',
       in_production: 'En producción', quality_control: 'Control de calidad', production_complete: 'Producción terminada',
     },
-    inquiryStatus: { new: 'Nueva', converted: 'Convertida', spam: 'Spam' },
+    inquiryStatus: { new: 'Nueva', converted: 'Convertida', declined: 'Rechazada', spam: 'Spam' },
     notificationMethod: { phone: 'Teléfono', email: 'Correo electrónico', text: 'Mensaje de texto', in_person: 'En persona', other: 'Otro' },
     paymentMethod: { check: 'Cheque', ach: 'ACH', cash: 'Efectivo', card: 'Tarjeta', other: 'Otro' },
     checkStatus: {

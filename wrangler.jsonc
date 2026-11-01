@@ -19,5 +19,7 @@
   "r2_buckets": [{ "binding": "FILES", "bucket_name": "gocreative-files" }],
   // Version preview hostnames would sit outside the Access app on the workers.dev host.
   "preview_urls": false,
+  // Daily, in the shop's small hours: clears abandoned public upload sessions (worker/cron.ts).
+  "triggers": { "crons": ["0 9 * * *"] },
   "observability": { "enabled": true }
 }

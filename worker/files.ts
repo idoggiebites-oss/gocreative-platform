@@ -112,12 +112,13 @@ export const isDefiniteRollback = (e: unknown) => /constraint failed|SQLITE_CONS
  * (stale order version), and the R2 object has been deleted. A batch that throws deletes it only on a definite
  * rollback (see the header), then rethrows.
  */
-export async function storeUpload<T>(c: Context<AppEnv>, orderId: number, kinds: readonly FileKind[], write: (file: NewFile) => Promise<T | null>):
+export async function storeUpload<T>(c: Context<AppEnv>, target: number | { key: string; maxBytes: number }, kinds: readonly FileKind[], write: (file: NewFile) => Promise<T | null>):
   Promise<{ response: Response } | { result: T | null }> {
   const lengthHeader = c.req.header('content-length')
   const length = lengthHeader && /^\d{1,16}$/.test(lengthHeader) ? Number(lengthHeader) : NaN
   if (!Number.isSafeInteger(length)) return { response: refuse(c, 411, 'length_required', 'Content-Length is required') }
-  if (length > MAX_UPLOAD_BYTES) return { response: refuse(c, 413, 'file_too_large', `File is larger than ${MAX_UPLOAD_BYTES / 2 ** 20} MB`) }
+  const maxBytes = typeof target === 'number' ? MAX_UPLOAD_BYTES : target.maxBytes
+  if (length > maxBytes) return { response: refuse(c, 413, 'file_too_large', `File is larger than ${maxBytes / 2 ** 20} MB`) }
   const body = c.req.raw.body
   if (length === 0 || !body) return { response: refuse(c, 400, 'invalid_request', 'Empty upload') }
   const incomplete = () => refuse(c, 400, 'invalid_request', 'The body is not Content-Length bytes long')
@@ -192,7 +193,7 @@ export async function storeUpload<T>(c: Context<AppEnv>, orderId: number, kinds:
   const fixed = new FixedLengthStream(length)
   const pumped = source.pipeTo(fixed.writable).then(() => true, () => false)
   // A random key, never derived from the file name or (unknown until the end) its hash.
-  const r2Key = `orders/${orderId}/${crypto.randomUUID()}`
+  const r2Key = typeof target === 'number' ? `orders/${target}/${crypto.randomUUID()}` : target.key
   const cleanup = () => c.env.FILES.delete(r2Key).catch((e: unknown) => console.error('R2 cleanup failed', r2Key, e))
   try {
     await c.env.FILES.put(r2Key, fixed.readable, { httpMetadata: { contentType: mime } })

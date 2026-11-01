@@ -9,6 +9,7 @@ import { createTestD1 } from './d1'
 export function createTestR2() {
   const objects = new Map<string, { bytes: Uint8Array; contentType?: string }>()
   const calls: [op: 'put' | 'get' | 'delete', key: string][] = []
+  const uploaded = new Map<string, Date>() // tests backdate an object here
   const bucket = {
     // A stream is read to the end first: if it errors (a body shorter or longer than its declared length), nothing is stored.
     put: async (key: string, value: ArrayBufferView | ReadableStream<Uint8Array>, opts?: { httpMetadata?: { contentType?: string } }) => {
@@ -25,13 +26,19 @@ export function createTestR2() {
       if (!o) return null
       return { key, size: o.bytes.byteLength, body: new Blob([o.bytes as Uint8Array<ArrayBuffer>]).stream(), httpMetadata: { contentType: o.contentType } }
     },
-    delete: async (key: string) => {
-      calls.push(['delete', key])
-      objects.delete(key)
+    delete: async (keys: string | string[]) => {
+      for (const key of [keys].flat()) {
+        calls.push(['delete', key])
+        objects.delete(key)
+      }
     },
+    list: async (o: { prefix?: string } = {}) => ({
+      objects: [...objects.keys()].filter((k) => k.startsWith(o.prefix ?? '')).map((key) => ({ key, uploaded: uploaded.get(key) ?? new Date() })),
+      truncated: false,
+    }),
   }
   // Cast: the real R2Bucket type comes from workers-types; this covers the three methods the Worker calls.
-  return { bucket: bucket as unknown as Env['FILES'], objects, calls }
+  return { bucket: bucket as unknown as Env['FILES'], objects, calls, uploaded }
 }
 
 const seed = readFileSync(new URL('../../scripts/seed.sql', import.meta.url), 'utf8')

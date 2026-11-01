@@ -709,7 +709,7 @@ export const en = {
       awaiting_materials: 'Awaiting materials', awaiting_preparation: 'Awaiting preparation', ready: 'Ready for production',
       in_production: 'In production', quality_control: 'Quality control', production_complete: 'Production complete',
     } satisfies Record<ProductionStatus, string>,
-    inquiryStatus: { new: 'New', converted: 'Converted', spam: 'Spam' } satisfies Record<InquiryStatus, string>,
+    inquiryStatus: { new: 'New', converted: 'Converted', declined: 'Declined', spam: 'Spam' } satisfies Record<InquiryStatus, string>,
     notificationMethod: { phone: 'Phone', email: 'Email', text: 'Text message', in_person: 'In person', other: 'Other' } satisfies Record<NotificationMethod, string>,
     paymentMethod: { check: 'Check', ach: 'ACH', cash: 'Cash', card: 'Card', other: 'Other' } satisfies Record<PaymentMethod, string>,
     checkStatus: {

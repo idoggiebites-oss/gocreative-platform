@@ -3,7 +3,7 @@ import { Hono } from 'hono'
 import { sign } from 'hono/jwt'
 import { appRoutes } from '../../worker/routes/app'
 import { makeKeyFetcher, type AppEnv, type Jwk } from '../../worker/auth'
-import realApp from '../../worker/index'
+import { app as realApp } from '../../worker/index'
 import { createTestD1 } from './d1'
 
 const TEAM = 'testteam.cloudflareaccess.com'

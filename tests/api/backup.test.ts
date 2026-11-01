@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs'
 import { expect, test } from 'vitest'
 import { checksum, dumpTable, expiredBackups, foreignKeyOrder, listTables, restoreSql, sqlValue, type Exec, type Row } from '../../scripts/backup-lib.ts'
-import app from '../../worker/index'
+import { app } from '../../worker/index'
 import { createTestD1 } from './d1'
 
 const seed = readFileSync(new URL('../../scripts/seed.sql', import.meta.url), 'utf8')
@@ -46,7 +46,7 @@ test('control: the same rows do not load with the triggers left on, so dropping 
 test('a snapshot taken under maintenance restores with writes open', async () => {
   const { sqlite } = createTestD1()
   sqlite.exec("INSERT INTO settings (key, value) VALUES ('maintenance', 'backup'), ('other', 'kept')")
-  expect((await dumpTable(execOn(sqlite), 'settings')).map((r) => r.key)).toEqual(['other'])
+  expect((await dumpTable(execOn(sqlite), 'settings')).map((r) => r.key)).toEqual(['intake_closed', 'other'])
 })
 
 test('values are quoted so text cannot break out, and anything unrestorable stops the load', () => {
