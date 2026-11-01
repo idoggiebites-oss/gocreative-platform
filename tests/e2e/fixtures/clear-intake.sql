@@ -3,6 +3,10 @@ DROP TRIGGER IF EXISTS inquiry_files_linked_no_delete;
 DROP TRIGGER IF EXISTS submissions_no_delete;
 DROP TRIGGER IF EXISTS inquiries_claimed_only_delete;
 DROP TRIGGER IF EXISTS inquiries_converted_frozen;
+DROP TRIGGER IF EXISTS estimates_only_with_claim;
+DROP TRIGGER IF EXISTS estimate_overrides_only_with_claim;
+DELETE FROM estimate_overrides;
+DELETE FROM inquiry_estimates;
 DELETE FROM inquiry_files;
 UPDATE inquiries SET converted_customer_id = NULL, converted_contact_id = NULL;
 DELETE FROM inquiries;
@@ -21,3 +25,9 @@ BEGIN SELECT RAISE(ABORT, 'inquiries_converted_frozen'); END;
 CREATE TRIGGER inquiries_claimed_only_delete BEFORE DELETE ON inquiries
 WHEN OLD.deleting_at IS NULL OR OLD.status = 'converted'
 BEGIN SELECT RAISE(ABORT, 'inquiries_claimed_only_delete'); END;
+CREATE TRIGGER estimates_only_with_claim BEFORE DELETE ON inquiry_estimates
+WHEN NOT EXISTS (SELECT 1 FROM inquiries i WHERE i.id = OLD.inquiry_id AND i.deleting_at IS NOT NULL)
+BEGIN SELECT RAISE(ABORT, 'estimates_only_with_claim'); END;
+CREATE TRIGGER estimate_overrides_only_with_claim BEFORE DELETE ON estimate_overrides
+WHEN NOT EXISTS (SELECT 1 FROM inquiry_estimates e JOIN inquiries i ON i.id = e.inquiry_id WHERE e.id = OLD.estimate_id AND i.deleting_at IS NOT NULL)
+BEGIN SELECT RAISE(ABORT, 'estimate_overrides_only_with_claim'); END;

@@ -94,3 +94,17 @@ test('real owner delete and the real cron: journal, objects and rows go, a conve
   expect(sql("SELECT status FROM inquiries WHERE submission_id = 'alpha'")).toEqual([{ status: 'converted' }])
   expect(sql('PRAGMA foreign_key_check')).toEqual([])
 }, 90_000)
+
+test('pricing on real D1: parallel publishes leave one active version; estimates are append-only', async () => {
+  const actor = sql("SELECT id FROM users LIMIT 1")[0].id
+  sql(`INSERT INTO pricing_versions (config, config_hash, created_by) VALUES ('{}', 'h1', ${actor})`)
+  const [{ id }] = sql("SELECT id FROM pricing_versions WHERE status = 'draft'")
+  sql(`UPDATE pricing_versions SET status = 'active', published_by = ${actor}, published_at = '2026-01-01' WHERE id = ${id}`)
+  expect(() => sql(`UPDATE pricing_versions SET config = '{"x":1}' WHERE id = ${id}`)).toThrow()
+  expect(() => sql(`INSERT INTO pricing_versions (status, config, config_hash, created_by, published_by, published_at) VALUES ('active', '{}', 'h2', ${actor}, ${actor}, '2026-01-02')`)).toThrow()
+  const [{ id: inq }] = sql("SELECT id FROM inquiries WHERE submission_id = 'alpha'")
+  sql(`INSERT INTO inquiry_estimates (inquiry_id, engine_version, status, facts_source, inputs, customer_result, internal_result) VALUES (${inq}, 1, 'manual_review_required', 'none', '{}', '{}', '{}')`)
+  expect(() => sql("UPDATE inquiry_estimates SET status = 'available'")).toThrow()
+  expect(() => sql('DELETE FROM inquiry_estimates')).toThrow()
+  expect(sql('PRAGMA foreign_key_check')).toEqual([])
+}, 60_000)

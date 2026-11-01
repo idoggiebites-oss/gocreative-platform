@@ -158,6 +158,8 @@ export const markClaimedFilesDeleting = (db: D1Database, inquiryId: number) =>
 export const removeClaimedRows = (db: D1Database, c: ClaimedInquiry, fileIds: number[], reason: string, actorId: number | null) => db.batch([
   db.prepare(`INSERT INTO activity_log (actor_kind, actor_id, entity_type, entity_id, action, after) SELECT ?, ?, 'inquiry', ?, 'inquiry_deleted', ? WHERE EXISTS (SELECT 1 FROM inquiries WHERE id = ?)`)
     .bind(actorId === null ? 'system' : 'user', actorId, c.id, JSON.stringify({ reason, files: fileIds.length }), c.id),
+  db.prepare(`DELETE FROM estimate_overrides WHERE estimate_id IN (SELECT id FROM inquiry_estimates WHERE inquiry_id = ?)`).bind(c.id),
+  db.prepare(`DELETE FROM inquiry_estimates WHERE inquiry_id = ?`).bind(c.id),
   db.prepare(`DELETE FROM inquiry_files WHERE inquiry_id = ? OR submission_id = ?`).bind(c.id, c.submission_id),
   ...fileIds.map((f) => db.prepare(`DELETE FROM files WHERE id = ? AND r2_key LIKE 'inquiries/%'`).bind(f)),
   db.prepare(`DELETE FROM inquiries WHERE id = ? AND deleting_at IS NOT NULL`).bind(c.id),

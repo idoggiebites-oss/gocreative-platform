@@ -15,6 +15,8 @@
 
 ## Offsite copy (Arturo, 2026-11-01: a Windows machine offsite, carried by USB)
 
+> **Deferred by Arturo, 2026-11-01, as a documented operational risk: no offsite copy exists, so losing this Mac loses every backup. Revisit before S4.** The tool below is ready.
+
 1. `npm run backup` for a current snapshot (pauses writes about 75 s).
 2. Plug in the drive, then in a terminal: `npm run backup:bundle -- /Volumes/<drive>`. It asks for the passphrase, encrypts the newest backup with its files and deletion journal, flushes it to the drive, reads that copy back and checks every table and file. Only then does it take a bundle's name, so an existing good copy is never at risk. It keeps the new bundle and the newest other one that opens; one that won't open is left in place with a warning. Use one passphrase, kept in a password manager and **never on the drive**.
 3. Eject safely. At the Windows machine, follow `RECOVERY-README.txt` on the drive: copy the newest bundle over, run `node unbundle.mjs --check` on that copy, and delete any whose delete-after date has passed.

@@ -1,6 +1,6 @@
 # Automated estimating and pricing management: plan
 
-> Status 2026-11-01: **proposal, awaiting Arturo's approval. Nothing here is built.** Source: his "Automated Estimating and Pricing Management" brief. E1 to E3 do not start without his go. Production pricing, migrations and public intake are unchanged.
+> Status 2026-11-01: **approved by Arturo.** His decisions: S4 waits for E1 to E3; browser analysis with required staff verification; owners alone configure and publish pricing and see costs and margins; staff may adjust individual draft quote prices; customers see one figure with his exact wording; validate on at least 30 real jobs before customers see automatic prices. Offsite backups are deferred as a documented risk, revisited before S4.
 
 ## 1. Confirmed decisions (Arturo)
 
@@ -175,7 +175,7 @@ S3 (done) → one compatibility fix → E1 → E2 → validation gate → E3 →
 | Scope grows into a general pricing system | Per-service models only; second client decides what generalizes |
 | Workers plan unverified | Browser analysis avoids it; pricing arithmetic is far below any limit |
 
-## 11. Decisions for Arturo
+## 11. Decisions Arturo was asked (all answered in the status above)
 
 1. **Launch order:** finish E1 to E3 before S4 as proposed, or launch S4 first with manual quotes?
 2. **Analysis location:** browser with required staff re-analysis (recommended), or benchmark a server analyser?
