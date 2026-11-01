@@ -31,6 +31,8 @@
 | Refusals | Live database id refused; non-empty target refused |
 | Time Travel on the throwaway | Row changed, restored to bookmark, value back |
 
+**2026-11-01**, after migration 0009: backup `2026-11-01T13-27-48-870Z` restored into local D1 and verified (26 tables, 17 rows, 62 triggers, 1 file).
+
 **Limits of this evidence:** live data is one test order, so the historical states the plan lists (voided payments, superseded quotes, deposited checks) were proven only against seed data through `restoreSql` in `tests/api/backup.test.ts`, not through a real D1. That test's control shows the load fails with triggers on. Repeat the drill once real orders exist. The live 503 itself couldn't be exercised from outside, because Access answers first.
 
 ## What must be recoverable

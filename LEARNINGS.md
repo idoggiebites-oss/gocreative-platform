@@ -105,3 +105,11 @@ inside its card in Spanish.
 ### 2026-11-01 — A flaky afterAll looks like a failing test
 - **Cost:** `npm run verify` failed 2 of 6 runs on `review.spec.ts:109` in 169 ms. The test itself was fine: the failure came from `reseed()` in `afterAll`, where a second process hits the dev server's SQLite files and workerd sometimes answers "internal error".
 - **Rule:** read the failing stack before the test name. `reseed()` now retries only that error.
+
+### 2026-11-01 — `wrangler dev` here runs the last build, not your source
+- **Cost:** new routes answered 404 under `wrangler dev` with all tests green. The Vite plugin's redirected config points wrangler at the built Worker in `dist/`.
+- **Rule:** `npm run build` first, or test through `unstable_dev` with an explicit `main` (`tests/d1/`).
+
+### 2026-11-01 — Security review keeps paying on public surfaces
+- **Cost:** three Codex passes on S1 found six real defects after 500 passing tests, including one session spending the whole daily budget on refused uploads. Tests prove what you thought of.
+- **Rule:** for anything internet-facing, re-review after each fix round until a pass finds nothing new, and turn every finding into a test.
