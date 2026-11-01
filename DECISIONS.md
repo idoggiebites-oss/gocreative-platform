@@ -489,3 +489,6 @@ Migration 0006 (additive), `worker/db/{pickups,payments}.ts`, `worker/routes/{pi
 - **`GET /status` is open only when a session could open,** so missing secrets show the closed message, not a form that fails.
 - **`DEV_TURNSTILE_PASS`** skips Turnstile on localhost only, the same pattern as `DEV_AUTH_EMAIL`, with a test that a real hostname still verifies.
 - **The Worker is not deployed with S2.** Arturo asked to review the UI first.
+
+## 2026-11-01 — S2 UI approved, without "Take a photo" (Arturo)
+- Arturo reviewed the screens: everything looks good, and he does not want the Take a photo button. It is removed, and the mockup is superseded on that point. "Choose files" stays; a phone's own file picker can still offer its camera or photo library.

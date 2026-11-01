@@ -1,5 +1,5 @@
 import { useState, type DragEvent } from 'react'
-import { Camera, FileText, RotateCcw, Upload, X } from 'lucide-react'
+import { FileText, RotateCcw, Upload, X } from 'lucide-react'
 import type { Form } from './orderForm'
 import type { Row, useUploads } from './useUploads'
 
@@ -50,10 +50,6 @@ export function UploadStep({ form, set, uploads }: { form: Form; set: (c: Partia
   return (
     <div className="s-stack-20">
       <div className={`s-dropzone${dragging ? ' s-dropzone-on' : ''}`} onDragOver={(e) => { e.preventDefault(); setDragging(true) }} onDragLeave={() => setDragging(false)} onDrop={drop}>
-        <label className="s-big-choice s-big-accent s-phone-first">
-          <Camera aria-hidden size={28} strokeWidth={1.8} />Take a photo
-          <input className="s-visually-hidden" type="file" accept="image/*" capture="environment" onChange={pick('artwork')} />
-        </label>
         <label className="s-big-choice">
           <Upload aria-hidden size={28} strokeWidth={1.8} /><span>Choose files<span className="s-desktop-inline"> or drop them here</span></span>
           {/* Listing JPEG makes iOS hand over a photo as JPEG instead of HEIC. */}
