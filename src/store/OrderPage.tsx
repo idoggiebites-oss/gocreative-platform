@@ -3,7 +3,7 @@ import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { Check } from 'lucide-react'
 import { Link, useNavigate, useSearchParams } from 'react-router'
 import { business } from '@shared/business'
-import { EMPTY_FORM, MAX_ITEMS, METHOD_NAMES, PRODUCTS, SIZES, buildPayload, clearDraft, describeItem, duplicateItem, itemTitle, loadDraft, methodsFor, patchItem, productOf, saveDraft, sizeTotal, toggleProduct, validateStep, type Errors, type Form, type Item } from './orderForm'
+import { EMPTY_FORM, MAX_ITEMS, METHOD_NAMES, PRODUCTS, SIZES, buildPayload, clearDraft, describeItem, duplicateItem, itemTitle, loadDraft, methodsFor, patchItem, productOf, readableDate, saveDraft, sizeTotal, toggleProduct, validateStep, type Errors, type Form, type Item } from './orderForm'
 import { PublicError, SESSION_ENDED, fetchStatus, openSession, submitInquiry, type Status } from './publicApi'
 import type { SentState } from './SentPage'
 import { Contact, usePageTitle } from './StoreLayout'
@@ -112,7 +112,7 @@ function ItemCard({ item, f, set, error, canRemove }: { item: Item; f: Form; set
           : <input {...a} className="s-input" maxLength={100} value={item[extra.key]} onChange={(e) => change({ [extra.key]: e.target.value })} />}
       </Field>
       <div className="s-item-actions">
-        {f.items.length < MAX_ITEMS && <button type="button" className="s-link-button" onClick={() => set((x) => duplicateItem(x, item.key))}>Add another {productOf(item)?.name}, such as a second color</button>}
+        {f.items.length < MAX_ITEMS && <button type="button" className="s-link-button" onClick={() => set((x) => duplicateItem(x, item.key))}>Add more {productOf(item)?.name}, such as a second color</button>}
         {canRemove && <button type="button" className="s-link-button" aria-label={`Remove ${itemTitle(item)}`} onClick={() => {
           set((x) => ({ ...x, items: x.items.filter((i) => i.key !== item.key) }))
           document.querySelector<HTMLElement>('.s-step h1')?.focus({ preventScroll: true }) // the button is about to go; focus must not fall to the page
@@ -207,7 +207,7 @@ function DetailsStep({ f, patch, errors, focus, files, go }: { f: Form; patch: (
         </ReviewRow>
         <ReviewRow title="Your project" onEdit={() => go(2)}>
           {f.description ? <p className="s-pre">{f.description}</p> : <p>No description added.</p>}
-          <p>{f.dueDate ? `Requested deadline: ${f.dueDate}. We will confirm what is possible.` : 'No deadline requested.'}</p>
+          <p>{f.dueDate ? `Requested deadline: ${readableDate(f.dueDate)}. We will confirm what is possible.` : 'No deadline requested.'}</p>
         </ReviewRow>
         <ReviewRow title="Artwork" onEdit={() => go(3)}>
           {files.length > 0 ? <ul className="s-review-list">{files.map((n, i) => <li key={`${n}-${i}`}>{n}</li>)}</ul> : <p>No files attached. That is fine, artwork is optional.</p>}
@@ -353,7 +353,7 @@ function OrderForm({ status, onClosed }: { status: Status; onClosed: () => void 
       const { ref } = await submitInquiry(await ensureToken(), parsed.data)
       clearDraft()
       const sent: SentState = {
-        lines: form.items.map(describeItem), description: form.description.trim(), dueDate: form.dueDate,
+        lines: form.items.map(describeItem), description: form.description.trim(), dueDate: form.dueDate ? readableDate(form.dueDate) : '',
         poAttached: uploads.rows.some((r) => r.purpose === 'po'),
         previews: uploads.rows.map((r) => ({ name: r.name, url: r.preview ?? null })),
       }

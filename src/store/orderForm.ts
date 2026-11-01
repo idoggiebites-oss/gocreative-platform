@@ -104,6 +104,8 @@ export function buildPayload(f: Form) {
   })
 }
 
+/** A date for people to read. Noon keeps it on the same day in every time zone. */
+export const readableDate = (iso: string) => new Date(`${iso}T12:00:00`).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
 export const describeItem = (i: Item) => `${itemTitle(i)}: ${totalQuantity(i)}`
 export const summarize = (f: Form) => f.items.map(describeItem).join('. ') + '.'
 
