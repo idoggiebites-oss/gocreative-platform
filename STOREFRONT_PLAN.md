@@ -42,6 +42,67 @@ mobile-first inquiry. Responsive mockups of the home page, services, the order i
 upload experience and the submission confirmation. Temporary content is clearly labelled. **No invented contact
 details, hours, prices or guaranteed turnaround times.**
 
+## 0b. Revisions after Codex's security review (2026-11-01). These override §4–§10 where they differ.
+
+**Fix before S1:**
+1. **Backups:** a consistent snapshot in a maintenance window, a trigger-aware restore into an isolated
+   database, backup expiry with deletion replay. See `notes/backup-restore.md`, "Revisions".
+2. **Access re-scope verified before S1, cut over at S4.** New step **S0c**:
+   - inventory every hostname (workers.dev; preview URLs stay disabled; the custom domain when there is one);
+   - document the exact configuration method from current Cloudflare docs: path-scoped Access applications
+     per hostname for `/app`, `/app/*`, `/api/app`, `/api/app/*` (wildcard children don't include the parent),
+     plus removing the Worker-wide "All traffic" protection;
+   - **rehearse it on a throwaway Worker** with the same layout, and prove from outside that the public paths
+     are open and every protected path challenges.
+
+   The JWT audience stays compatible, or the Worker accepts the new application's audience explicitly. Note:
+   `/app` is a static SPA shell (`run_worker_first` covers only `/api/*`), so only Access protects it. It must
+   contain no records, credentials or embedded responses, which is true today. Unknown `/api/*` paths stay
+   Worker errors, never SPA HTML.
+3. **Upload protocol with explicit states:**
+   - each upload goes `reserved` → `stored` → `linked`, or ends `failed` or `expired`;
+   - **submit is refused** ("uploads still in progress", 409) while any upload in the session is `reserved`;
+   - an upload that settles after its session closed is marked `failed` and queued for deletion, never linked;
+   - **cleanup first claims a session atomically** (`open` → `expiring`, only if unsubmitted and expired), so
+     submit and settlement can't win afterwards. It then deletes the R2 objects through a retryable queue
+     (rows stay `deleting` until each deletion is confirmed);
+   - orphan reconciliation looks only at objects older than a **24 h grace period**;
+   - every interleaving is tested: submit vs settle, settle vs cleanup, ambiguous R2 outcomes.
+4. **Retention vs backups:** see item 1. Active-system retention and backup expiry are stated separately in the
+   privacy text.
+
+**Fix during S1–S4:**
+5. **A separate public router** (`worker/routes/public.ts`), with:
+   - its own streamed 64 KB JSON limit, the public upload cap, admission checks and the kill-switch check;
+   - an explicit browser-origin policy.
+
+   It reuses the low-level streaming and sniffing primitives only, never staff handlers or internal
+   serializers. Responses are explicit objects (upload acknowledgements, `{ref}`), and validation errors are
+   sanitized. Boundary tests cover every endpoint, its errors and retries, files from another session, and
+   attacker-supplied internal fields.
+6. **Storage is bounded, not just daily intake.**
+   - A hard **outstanding-storage cap** for public inquiry files (proposal: 2 GB across all unconverted
+     inquiries) and a cap on open sessions, alongside the daily admission budget.
+   - Reservations are accounted atomically. Budget comes back only after a **confirmed** deletion, never for an
+     uncertain one.
+   - The kill switch is persisted in D1 and checked on every public write. A request already streaming when
+     it flips is allowed to finish, but its submit is refused.
+7. **Conversion and POs:**
+   - conversion runs only on an eligible inquiry (`new`), unchanged since staff opened it (a version guard),
+     and **not claimed for deletion**;
+   - a duplicate conversion rolls back and returns the existing order;
+   - customer/contact relationships and the owner-only payment-terms rules are validated server-side;
+   - file purpose is enforced with **purpose-specific allowlists**: artwork accepts PNG, JPEG, PDF and SVG,
+     **a PO accepts PDF, PNG and JPEG only (no SVG)**, matching the staff PO rule;
+   - POs arrive `received` and artwork arrives under review.
+8. **Deletion path:**
+   - **spam retention counts from receipt** (`created_at`), so reclassifying can't extend it;
+   - eligible records are claimed atomically before any R2 deletion, failures are retried, and dependent rows
+     are removed in a documented order;
+   - converted and order-linked files are never deleted by retention;
+   - audit entries carry no submitted personal data;
+   - **Decline** (with an optional internal reason) and owner deletion are added to S3's work list.
+
 ## 1. Goal and scope
 
 A customer can, from a phone:
@@ -276,10 +337,11 @@ standing approval (additive changes only). The Access re-scope is the exception 
 | # | Work | Who |
 |---|---|---|
 | S0 | **Design mockups** (home, services, the inquiry form, the artwork and PO upload experience, confirmation; phone and desktop) on the design canvas, using the design skills. **Approved to start 2026-11-01. Review gate: Arturo approves before S1.** | Claude |
+| S0c | **Access re-scope rehearsal** on a throwaway Worker: hostname inventory, exact config method, outside-in proof (§0b.2). Before S1. | Claude, with Arturo in the dashboard |
 | S0b | **Fix-now items:** a backup script (per-table JSON export of the live D1, plus a restore drill into a scratch local D1), with ARCHITECTURE.md corrected. | Claude |
 | S1 | Migration 0008; the submission, upload and submit endpoints; Turnstile; throttling and the admission budget; the off switch; cron cleanup; boundary tests seeded with internal notes, other customers and supplier costs; abuse tests (oversize, wrong type, token reuse and expiry, Turnstile failure and replay, budget races, flood). | Opus agent; Codex reviews security |
 | S2 | Storefront UI to the approved mockups: layout, pages, the inquiry form with uploads and retries, confirmation, privacy page, e2e on phone and desktop. | Sonnet agent; Codex reviews |
-| S3 | Dashboard: inquiry detail, customer match, **Convert to order**, Mark as spam. Conversion e2e (storefront submit → convert → order has items and artwork → quote). | Opus (conversion batch), Sonnet (screens) |
+| S3 | Dashboard: inquiry detail, customer match, **Convert to order**, Mark as spam, **Decline with an optional reason**, **owner delete**. Conversion e2e (storefront submit → convert → order has items and artwork → quote). | Opus (conversion batch), Sonnet (screens) |
 | S4 | Launch: Access re-scope (with Arturo), domain if ready, PWA for the dashboard, signed-in smoke test, the family's dry run. | Claude + Arturo |
 
 ## 11. Needs from Arturo

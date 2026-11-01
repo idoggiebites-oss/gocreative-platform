@@ -41,6 +41,50 @@
      write-once, so the mirror only ever grows.
    - **Cost.** R2 egress is free, so there are no costs beyond the operations.
 
+## Revisions after Codex's review (2026-11-01). These override the sections above where they differ.
+
+1. **A consistent snapshot, not a moving read.** Backups run in a **maintenance window**. A `maintenance` setting
+   (checked by every write route, public and staff, plus the cron) makes writes return 503 "back in a few
+   minutes". The script switches it on, waits for in-flight requests to finish, exports, mirrors the files,
+   verifies, and switches it off. It runs after hours (a family shop with two staff can take a 2-minute pause).
+   Pagination is by **primary key (keyset), never OFFSET**. Each table file carries its row count and SHA-256,
+   and `manifest.json` is written last as the completion marker; no manifest means an incomplete backup. A Time
+   Travel restore rewinds the live database itself, so it is not a way to get a snapshot copy. (A point-in-time
+   copy to a separate database isn't a verified workflow on this account.)
+2. **Restores never fight the triggers, and never touch the live database.** Restore always goes into a **new,
+   isolated D1**:
+   1. apply migrations **up to the backup's recorded version**;
+   2. **drop the inventoried triggers in that target only** (`scripts/restore.ts` keeps the list: quotes and
+      quote items, payments, checks, production slots, pickups, artwork, activity, purchases);
+   3. load rows in foreign-key order;
+   4. recreate the triggers from the same migration text;
+   5. run `PRAGMA foreign_key_check` and `integrity_check`, and compare row counts and checksums and the audit
+      row count;
+   6. apply any newer migrations.
+
+   Live triggers are never weakened. The drill covers historical states: an inactive override owner, voided
+   payments, accepted and superseded quotes, cancelled orders, and collected, deposited and cleared checks.
+3. **Backups expire, so deletion promises hold.**
+   - Keep the last **8 weekly** backups plus the pre-migration ones from the last 90 days; older ones are
+     deleted, including the off-machine copy.
+   - The file mirror is garbage-collected: an object referenced by no retained backup's `files.json` is
+     deleted.
+   - Retention deletions in the app write a **deletion log** (record ids and file SHA-256 only, no personal
+     data). After any restore, the log entries newer than the backup are **replayed**, so deleted data doesn't
+     come back.
+   - The privacy text states active-system retention, plus "backup copies expire within [N] weeks". N is to
+     be confirmed with the legal check (STOREFRONT_PLAN §0.7).
+4. **Recovery inventory.**
+   - `files.json` holds key, size, SHA-256 and content type for every object. A backup is "complete" only
+     after every mirrored file's hash is verified.
+   - Restores go to the **original keys**, then a test confirms the bucket is still private.
+   - Secrets (Access AUD and team, the future Turnstile secret and IP-hash salt) are listed in a private
+     recovery sheet kept **outside the Cloudflare account**, with steps to recreate or rotate each one.
+   - Cut-over: restore into a replacement D1, validate, then switch the binding under maintenance. Rollback
+     means switching back.
+   - Targets to agree with Arturo: how much data could be lost (proposal: at most 1 week, or 1 day once
+     daily backups run) and how long recovery may take (proposal: same business day).
+
 ## Restore drill (S0b must pass it before launch)
 
 1. Take a backup of the live D1 and mirror R2.
