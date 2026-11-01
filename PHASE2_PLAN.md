@@ -293,7 +293,7 @@ logic it can test, Claude for design, integration and verification).
 - [x] UI: pickup panel (also from the dashboard), payments panel, Payments page with checks
       to collect, dashboard Outstanding payments + Ready for pickup. *(Sonnet)*
 
-### M6 — Polish and validation (brief Step 6)
+### M6 — Polish and validation (brief Step 6) — built, Codex-reviewed ("M6 ready", "Phase 2 security: ready") and LIVE 2026-11-01 (0007 applied remotely, Worker version 52951268)
 - [x] Two end-to-end lifecycle tests through the real UI (`tests/e2e/lifecycle.spec.ts`): a regular customer (direct
       authorization, pay at pickup, unpaid-release override) and a school district (PO,
       pickup before payment, check collected → deposited → cleared). Together they cover
@@ -302,7 +302,7 @@ logic it can test, Claude for design, integration and verification).
 - [x] Additive migration 0007: unconditional `BEFORE UPDATE` id guards on `quotes` (already covered by quotes_frozen) and `artwork` (their `UPDATE OF` triggers miss `rowid` aliases; direct-DB edits only — Codex, M3 review).
 - [ ] Whole-phase Codex security review *(ran separately; its fixes are 0007 and the request guards)*. Done in M6: [x] accessibility pass, [x] README setup,
       [x] ARCHITECTURE schema section, [x] realistic seed for every new state. Still open: DECISIONS and notes entries.
-- [ ] Deploy, migrate remote, signed-in smoke test; then the family starts entering real orders.
+- [x] Deploy, migrate remote (anonymous/forged checks done; signed-in smoke test waits on Arturo signing in again); then the family starts entering real orders.
 
 ## 6. How Codex reviews each milestone
 
