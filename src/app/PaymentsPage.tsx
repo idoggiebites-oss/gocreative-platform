@@ -75,16 +75,16 @@ function Outstanding({ rows }: { rows: OutstandingRow[] }) {
               <tbody>
                 {rows.map((r) => (
                   <tr key={r.number} data-order={r.number}>
-                    <td className={TD}>{r.customerName}</td>
+                    <td className={`${TD} whitespace-normal!`}>{r.customerName}</td>
                     <td className={`${TD} num font-medium`}><Link to={`/app/orders/${r.number}`} className="text-foreground no-underline hover:text-primary hover:underline">{r.number}</Link></td>
                     <td className={`${TD} num`}>{money(r.agreedCents)}</td>
                     <td className={`${TD} num`}>{fmt.money(r.receivedCents)}</td>
                     <td className={`${TD} num font-semibold`}>{money(r.outstandingCents)}</td>
-                    <td className={TD}>{m.labels.paymentTerms[r.paymentTerms]}</td>
+                    <td className={`${TD} whitespace-normal!`}>{m.labels.paymentTerms[r.paymentTerms]}</td>
                     <td className={`${TD} num`}>{r.paymentDueOn ? fmt.date(r.paymentDueOn) : t.notSet}</td>
                     <td className={`${TD} num`}>{r.daysOutstanding ?? m.common.dash}</td>
                     <td className={TD}>{r.collectionStatus ? <Chip tone={CHECK_TONE[r.collectionStatus]}>{m.labels.checkStatus[r.collectionStatus]}</Chip> : <span className="text-muted-foreground">{t.noCollection}</span>}</td>
-                    <td className={TD}>{m.labels.paymentNextAction[r.nextAction]}</td>
+                    <td className={`${TD} whitespace-normal!`}>{m.labels.paymentNextAction[r.nextAction]}</td>
                     <td className={TD}>{record(r)}</td>
                   </tr>
                 ))}

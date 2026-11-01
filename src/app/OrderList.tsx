@@ -45,7 +45,7 @@ function OrdersTable({ rows }: { rows: OrderListRow[] }) {
                 <Link to={to} className="text-foreground no-underline hover:text-primary hover:underline">{r.number}</Link>
               </td>
               <td className={TD}>
-                <div className="flex max-w-[150px] flex-col leading-tight"><span className="truncate" title={r.customerName}>{r.customerName}</span><span className={`${MUTED} truncate`}>{r.title}</span></div>
+                <div className="flex max-w-[130px] flex-col leading-tight"><span className="truncate" title={r.customerName}>{r.customerName}</span><span className={`${MUTED} truncate`}>{r.title}</span></div>
               </td>
               <td className={TD}>{r.methods.slice(0, 1).map((x) => <MethodTag key={x}>{m.labels.method[x]}</MethodTag>)}{r.methods.length > 1 && <MethodTag>+{r.methods.length - 1}</MethodTag>}<span title={m.common.items(r.totalQty)}>{r.totalQty}</span></td>
               <td className={TD}>
@@ -64,7 +64,7 @@ function OrdersTable({ rows }: { rows: OrderListRow[] }) {
                   : overdue ? `${fmt.date(r.dueDate)} · ${m.orders.overdue}`
                   : r.dueDate === today ? m.common.today : fmt.date(r.dueDate)}
               </td>
-              <td className={cn(TD, 'num text-right', r.quote?.status !== 'accepted' && 'text-muted-foreground')}>
+              <td className={cn(TD, 'num text-right whitespace-normal!', r.quote?.status !== 'accepted' && 'text-muted-foreground')}>
                 {r.quote === null ? m.common.dash
                   : r.quote.status === 'accepted' ? fmt.money(r.quote.totalCents)
                   : m.orders.quoteTotal(fmt.money(r.quote.totalCents), m.labels.quoteStatus[r.quote.status])}

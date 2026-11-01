@@ -7,6 +7,7 @@ import AccountBlock from './AccountBlock'
 import CommandPalette from './CommandPalette'
 import ShopIdentity from './ShopIdentity'
 import SideNav from './SideNav'
+import { useKeepFocus } from './useKeepFocus'
 
 const isMac = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform)
 
@@ -16,6 +17,7 @@ export default function AppShell() {
   const { m } = useI18n()
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  useKeepFocus()
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
