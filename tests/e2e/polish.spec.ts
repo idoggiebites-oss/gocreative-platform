@@ -203,7 +203,7 @@ test('a slow reorder the user just waits on still returns focus to the moved row
   await page.waitForTimeout(400) // well past the focus-recovery check
   release()
   await expect.poll(async () => (await production(page)).readyToStart.map((j) => j.number).indexOf(first)).toBeGreaterThan(0)
-  await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute('aria-label'))).toMatch(new RegExp(`^Move (up|down): ${first}$`))
+  await expect.poll(() => focusedLabel(page)).toMatch(new RegExp(`^Move (up|down): ${first}$`))
   await page.unroute('**/api/app/production/queue')
 })
 
