@@ -189,21 +189,39 @@ test('a slow reorder response does not steal focus from an input the user moved 
   await clearRunning(page)
 })
 
+test('a slow reorder the user just waits on still returns focus to the moved row (Codex review of eb85479)', async ({ page }, info) => {
+  desktopOnly(info)
+  await clearRunning(page)
+  const first = await readyOrder(page, 'Wait first')
+  await readyOrder(page, 'Wait second')
+  let release = () => {}
+  const held = new Promise<void>((r) => { release = r })
+  await page.route('**/api/app/production/queue', async (route) => { await held; await route.continue() })
+  await page.goto('/app/production')
+  await btn(page, 'Move down', first).focus()
+  await page.keyboard.press('Enter') // held: the arrows disable and focus is parked on their container
+  await page.waitForTimeout(400) // well past the focus-recovery check
+  release()
+  await expect.poll(async () => (await production(page)).readyToStart.map((j) => j.number).indexOf(first)).toBeGreaterThan(0)
+  await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute('aria-label'))).toMatch(new RegExp(`^Move (up|down): ${first}$`))
+  await page.unroute('**/api/app/production/queue')
+})
+
 test('typing keeps focus while unrelated parts of the page change underneath', async ({ page }, info) => {
   desktopOnly(info)
   await page.goto('/app/orders/2026-0020')
   const note = page.getByLabel('Add a note')
   const other = page.getByRole('tab', { name: 'Artwork', exact: true })
-  // Focus a control, remove it and enable/disable/replace other controls (focus loss elsewhere), while the user is already typing in the note.
-  await other.focus()
+  // The note stays focused throughout (never re-focused by the test) while other controls appear, disable and vanish.
+  await expect(other).toBeVisible()
   await note.focus()
   await page.keyboard.type('abc')
   await inPage(page, `
     const dom = document.createElement('div'); document.body.appendChild(dom)
-    for (let i = 0; i < 6; i++) setTimeout(() => { const b = document.createElement('button'); b.textContent = 'x' + i; dom.appendChild(b); b.focus(); b.disabled = true; b.remove() }, i * 40)
+    for (let i = 0; i < 6; i++) setTimeout(() => { const b = document.createElement('button'); b.textContent = 'x' + i; dom.appendChild(b); b.disabled = true; b.remove() }, i * 40)
     return null`)
   await page.waitForTimeout(500)
-  await note.focus()
+  await expect(note).toBeFocused()
   await page.keyboard.type('def')
   await page.waitForTimeout(400)
   await expect(note).toBeFocused()

@@ -68,6 +68,8 @@ function ReadyRow({ job, index, last, running, move, busy }: { job: ProductionJo
   )
 }
 
+const INTERACTIVE = 'a[href], button, input, select, textarea, [contenteditable="true"], [role="tab"], [role="menuitem"]'
+
 function ReadyList({ jobs, running }: { jobs: ProductionJob[]; running: ProductionJob[] }) {
   const { m } = useI18n()
   const reorder = useReorderQueue()
@@ -75,8 +77,10 @@ function ReadyList({ jobs, running }: { jobs: ProductionJob[]; running: Producti
   // put it back on that job's move button, or on its other one.
   const refocus = useRef<{ number: string; dir: -1 | 1; from: Element | null } | null>(null)
   // Only while the user has not moved on: a focus move to anything but the control they pressed cancels the restore.
+  // A container useKeepFocus parks focus on while the arrows are disabled isn't the user moving on (Codex review of eb85479).
+  const userTarget = (el: EventTarget | Element | null) => el instanceof Element && el.matches(INTERACTIVE)
   useEffect(() => {
-    const onIn = (e: FocusEvent) => { if (refocus.current && e.target !== refocus.current.from) refocus.current = null }
+    const onIn = (e: FocusEvent) => { if (refocus.current && e.target !== refocus.current.from && userTarget(e.target)) refocus.current = null }
     document.addEventListener('focusin', onIn)
     return () => document.removeEventListener('focusin', onIn)
   }, [])
@@ -85,7 +89,7 @@ function ReadyList({ jobs, running }: { jobs: ProductionJob[]; running: Producti
     if (!r || reorder.isPending) return
     refocus.current = null
     const a = document.activeElement
-    if (a && a !== document.body && a !== r.from) return
+    if (a && a !== document.body && a !== r.from && userTarget(a)) return
     const label = (d: -1 | 1) => m.production.ariaFor(d === -1 ? m.production.moveUp : m.production.moveDown, r.number)
     const find = (d: -1 | 1) => document.querySelector<HTMLButtonElement>(`button[aria-label="${label(d)}"]:not(:disabled)`)
     ;(find(r.dir) ?? find(r.dir === -1 ? 1 : -1))?.focus()
