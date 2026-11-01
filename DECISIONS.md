@@ -513,3 +513,7 @@ Migration 0006 (additive), `worker/db/{pickups,payments}.ts`, `worker/routes/{pi
 ## 2026-11-01 — Offsite backups by USB to a Windows machine (Arturo)
 - Arturo chose carrying encrypted bundles by hand over Tailscale or a cloud folder. Expiry on that machine is manual, helped by a delete-after date in each file name (56 days, the plan's 8 weeks).
 - AES-256-GCM with scrypt, in plain Node with no dependencies, so recovery needs only Node and the passphrase. The passphrase is Arturo's and is never stored by the project or on the drive.
+
+## 2026-11-01 — Automated estimating: confirmed requirements (Arturo); plan awaiting approval
+- No LLMs or paid AI. Deterministic analysis and rules. Estimates are never binding; staff issue every final quote. Versioned pricing with Draft → Preview → Publish → Active. Full list: AUTOMATED_ESTIMATING_PLAN.md §1.
+- E1 to E3 do not start without his go. Phase 3's S4 install work stays paused on branch `s4-install`.

@@ -13,6 +13,7 @@ builds; Codex reviews and tests. Both read this file first.
 - [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md) — tokens, type, the two layouts, motion.
 - [ROADMAP.md](ROADMAP.md) — phases, the current phase's tasks, and who runs each one.
 - [SPEC-post-phase2.md](SPEC-post-phase2.md) — the post-Phase 2 brief; [PLATFORM_VISION.md](PLATFORM_VISION.md) (the unnamed platform vs GoCreative, its first client), [PLATFORM_ARCHITECTURE_REVIEW.md](PLATFORM_ARCHITECTURE_REVIEW.md), [SAAS_READINESS.md](SAAS_READINESS.md), [STOREFRONT_PLAN.md](STOREFRONT_PLAN.md).
+- [AUTOMATED_ESTIMATING_PLAN.md](AUTOMATED_ESTIMATING_PLAN.md): proposed estimating and pricing management (E1 to E3); not started.
 - [DECISIONS.md](DECISIONS.md) — append-only, dated: what was decided, why, and who decided it.
 - [LEARNINGS.md](LEARNINGS.md) — append-only, dated: what cost time, and the rule that prevents it.
 - `notes/` — durable how-tos, one topic per file, named for the topic.

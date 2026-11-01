@@ -16,6 +16,18 @@ Source: [SPEC-post-phase2.md](SPEC-post-phase2.md). The platform is not yet name
 | 7 | **Second-industry pilot** | Not started | One non-printing business runs on the platform with modules and configuration, no fork |
 | 8 | **Commercial onboarding and offboarding** | Not started | Setup checklist, export + restore demonstrated, offboarding procedure with retention periods, pricing incl. hosting costs |
 
+### Automated estimating (proposed 2026-11-01, awaiting Arturo's approval; [AUTOMATED_ESTIMATING_PLAN.md](AUTOMATED_ESTIMATING_PLAN.md))
+
+S3 is done and live behind Access. Proposed order: compatibility fix → E1 → E2 → real-artwork validation → E3 → S4. S4 can technically go first (plan §11).
+
+| # | Milestone | State | Done when |
+|---|---|---|---|
+| Fix | Read stored requests leniently, so product-map changes can't strand old inquiries | Proposed; defect proven in shipped code, no live rows affected | Regression test covers retired products and methods |
+| E1 | Automated estimating foundation: deterministic artwork analysis, per-service pricing engine, estimate persistence | Not started; needs his go, and a separate go for the production migration | Stored estimates recalculate exactly; fixtures cover the brief's artwork types |
+| E2 | Settings → Pricing Management: simple and Advanced, simulator, versions, permissions, overrides | Not started; needs the family's real rates | Draft rules provably can't reach the storefront |
+| Gate | Validate colour counts against at least 30 real past jobs | Not started; needs the family's artwork | Accuracy measured and thresholds set |
+| E3 | Storefront estimates, uncertainty, staff review | Not started | Customer sees only preliminary totals; server recalculates at submit |
+
 Earlier plans folded into this order: the estimator (old Phase 6 / "Phase 4") becomes an optional printing-module
 feature after the storefront; nothing about it is scheduled yet.
 
