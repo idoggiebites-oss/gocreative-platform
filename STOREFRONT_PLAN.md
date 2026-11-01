@@ -38,7 +38,7 @@ its routes, API and dashboard review queue sit behind one switch in the business
 | Dashboard Inquiries view + "new inquiry" on Needs attention | Lists and counts `status = 'new'` | Becomes the review queue; gains a detail page and Convert. |
 | `src/store/Store.tsx` at `/*` | Placeholder | Replaced by the storefront. |
 | Upload pipeline (`worker/files.ts`) | Content-Length required, 4 KB magic-byte sniff, streamed into R2 with SHA-256, 50 MB cap, write-once | Reused for public uploads, with a lower cap (§6). |
-| Order creation, items with size grid, artwork versions | All live and tested | Conversion calls the same `worker/db` writers; no second write path. |
+| Order creation, items with size grid, artwork versions | All live and tested | Conversion is one dedicated `worker/db` writer that reuses their SQL and rules in a single atomic batch (§6). |
 | Cloudflare Access | Guards **all traffic** on the Worker today | Must be re-scoped to `/app*` and `/api/app/*` at launch (§7). |
 | Design system | Tokens, Inter, warm greys, ink-blue accent; storefront direction written in DESIGN_SYSTEM.md | Shared foundations; the storefront gets its own layout and display face. |
 
@@ -104,8 +104,8 @@ submission session**, not once per upload:
    each guarded on the session still being open:
    - inserts the inquiry (`status 'new'`);
    - links the session's files that are `stored` (pending or failed ones are excluded);
-   - closes the session, so later uploads are refused;
-   - writes `inquiry_received`.
+   - writes `inquiry_received`;
+   - closes the session last, so later uploads are refused.
 
    It returns `{ ref }`, a short human-friendly reference such as `INQ-7K3Q`.
 4. Retries: submitting a closed session returns the same `ref`, so a double-tap or a lost response never creates
