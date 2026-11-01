@@ -1,4 +1,4 @@
--- Deterministic, fictional dev data for the Phase 2 schema (migrations 0001 … 0006). Re-runnable: wipes
+-- Deterministic, fictional dev data for the Phase 2 schema (migrations 0001 … 0007). Re-runnable: wipes
 -- child tables first. activity_log, purchase receipts, pickups, check collections and payments are never deleted and
 -- frozen quotes can't be deleted, so those delete
 -- triggers are dropped around the wipe and recreated identically to the migrations
@@ -47,7 +47,10 @@ BEGIN SELECT RAISE(ABORT, 'purchase_receipts are write-once'); END;
 CREATE TRIGGER order_purchases_no_delete BEFORE DELETE ON order_purchases
 BEGIN SELECT RAISE(ABORT, 'order_purchases are never deleted'); END;
 DELETE FROM notes;
+DROP TRIGGER IF EXISTS artwork_no_delete;
 DELETE FROM artwork;
+CREATE TRIGGER artwork_no_delete BEFORE DELETE ON artwork
+BEGIN SELECT RAISE(ABORT, 'artwork versions are never deleted'); END;
 DELETE FROM po_documents;
 DELETE FROM files;
 DELETE FROM purchase_orders;

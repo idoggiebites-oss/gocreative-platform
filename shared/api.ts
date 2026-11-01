@@ -470,6 +470,7 @@ export const API_ERROR_CODES = [
   'production_busy', 'no_slot_available', 'override_requires_owner', 'override_requires_reason', 'invalid_units_completed', 'units_not_editable',
   'pickup_not_ready', 'pickup_recorded', 'payment_required', 'request_id_conflict', 'payment_voided', 'void_requires_owner',
   'check_not_allowed', 'invalid_check_transition', 'check_collect_conflict',
+  'payment_terms_owner_only', 'payment_terms_locked', 'cross_site_request', 'body_too_large',
 ] as const
 export type ApiErrorCode = (typeof API_ERROR_CODES)[number]
 export type ApiError = { error: string; code?: ApiErrorCode; reasons?: string[]; /** production_busy: the order running in slot 1. */ runningJob?: string }

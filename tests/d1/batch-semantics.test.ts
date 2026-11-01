@@ -109,7 +109,7 @@ test('a refused create or repeat uses no number: the conditional counter upsert 
   const [c0, o0, a0] = [await counters(), await orders(), await count('SELECT COUNT(*) AS n FROM activity_log')]
   expect(await dbo.createOrder(db, { ...base, year: 2032, customerId: 1, contactId: 2 })).toBeNull() // existing year row
   expect(await dbo.createOrder(db, { ...base, year: 2033, customerId: 1, contactId: 2 })).toBeNull() // no year row yet
-  expect(await dbo.repeatOrder(db, { year: 2032, actorId: 1, sourceId: 15, source: 'phone', dueDate: null, productionStatus: 'awaiting_quote' })).toBeNull() // contact 7
+  expect(await dbo.repeatOrder(db, { year: 2032, actorId: 1, sourceId: 15, source: 'phone', dueDate: null, productionStatus: 'awaiting_quote', paymentTerms: 'due_at_pickup' })).toBeNull() // contact 7
   expect([await counters(), await orders(), await count('SELECT COUNT(*) AS n FROM activity_log')]).toEqual([c0, o0, a0])
 })
 

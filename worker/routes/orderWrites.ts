@@ -54,7 +54,7 @@ const STARTED: readonly ProductionStatus[] = ['in_production', 'quality_control'
 // Trigger messages from migration 0002 that are the database restating a rule the route checks first.
 const DB_ERROR_CODES = ['quote_frozen', 'quote_not_draft', 'invalid_quote_transition', 'no_product_line'] as const
 
-const refuse = (c: C, code: ApiErrorCode, error: string, status: 400 | 404 | 409 = 409) => c.json({ error, code }, status)
+const refuse = (c: C, code: ApiErrorCode, error: string, status: 400 | 403 | 404 | 409 = 409) => c.json({ error, code }, status)
 const conflict = (c: C) => refuse(c, 'conflict_retry', 'Order changed, reload and retry')
 const written = (c: C, state: db.OrderStateRow | null, extra: Partial<OrderWriteResponse> = {}) =>
   state ? c.json<OrderWriteResponse>({ ...state, ...extra }) : conflict(c)
@@ -131,6 +131,10 @@ export function orderWriteRoutes() {
         if (contact.archived) return refuse(c, 'contact_archived', 'Contact is archived', 409)
       }
       const poRequired = b.poRequired ?? customer.default_po_required === 1
+      // Staff can't hand an order pay-after-pickup terms its customer isn't on (Codex Phase 2 security review).
+      if (b.paymentTerms === 'due_after_pickup' && customer.default_payment_terms !== 'due_after_pickup' && c.get('user').role !== 'owner') {
+        return refuse(c, 'payment_terms_owner_only', 'Only an owner can give this order pay-after-pickup terms', 403)
+      }
       const y = year()
       const n = await db.createOrder(c.env.DB, {
         year: y, actorId: c.get('user').id, customerId: b.customerId, contactId: b.contactId ?? null, source: b.source, title: b.title,
@@ -159,6 +163,14 @@ export function orderWriteRoutes() {
         if (v === undefined) continue
         const value = typeof v === 'boolean' ? (v ? 1 : 0) : v
         if (value !== current[key]) changes[key] = value
+      }
+      // Relaxing to pay-after-pickup lets an unpaid order leave without the owner's release override, so only an owner
+      // may do it; once production is complete the terms are fixed for everyone (orders_payment_terms_fixed, 0007).
+      if (changes.paymentTerms === 'due_after_pickup' && c.get('user').role !== 'owner') {
+        return refuse(c, 'payment_terms_owner_only', 'Only an owner can change an order to pay after pickup', 403)
+      }
+      if (changes.paymentTerms !== undefined && o.production_status === 'production_complete') {
+        return refuse(c, 'payment_terms_locked', 'Payment terms are fixed once production is complete', 409)
       }
       const noPurchasing = changes.materialsRequired === 0
       if (noPurchasing && b.confirmNoPurchasing !== true) return refuse(c, 'confirmation_required', 'No purchasing needed must be confirmed', 400)
@@ -264,9 +276,13 @@ export function orderWriteRoutes() {
         if (contact?.customer_id !== o.customer_id) return refuse(c, 'contact_not_for_customer', "The source order's contact is not this customer's")
         if (contact.archived) return refuse(c, 'contact_archived', "The source order's contact is archived")
       }
+      // A source order's owner-granted pay-after-pickup isn't copied by staff: the repeat takes the customer's own terms.
+      const customer = await db.getCustomerDefaults(c.env.DB, o.customer_id)
+      const paymentTerms = o.payment_terms === 'due_after_pickup' && customer?.default_payment_terms !== 'due_after_pickup' && c.get('user').role !== 'owner'
+        ? 'due_at_pickup' : o.payment_terms
       const y = year()
       const n = await db.repeatOrder(c.env.DB, {
-        year: y, actorId: c.get('user').id, sourceId: o.id, source: b.source, dueDate: b.dueDate ?? null,
+        year: y, actorId: c.get('user').id, sourceId: o.id, source: b.source, dueDate: b.dueDate ?? null, paymentTerms,
         productionStatus: initialStatus(o.artwork_required === 1, o.po_required === 1),
       })
       if (n === null) return contactRefusal(c, o.contact_id) // nothing written, no number used

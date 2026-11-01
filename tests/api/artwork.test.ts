@@ -189,3 +189,18 @@ test('401 on every artwork endpoint, with nothing written', async () => {
   expect(t.footprint()).toEqual(before)
   expect(t.r2.calls).toEqual([])
 })
+
+describe('a version can\'t be re-keyed, replaced or deleted (migration 0007; Codex, M3 review)', () => {
+  test('id changes through every alias, REPLACE onto an existing version, and DELETE are refused; the stored version is unchanged', () => {
+    const t = setupUploads()
+    const a = t.sqlite.prepare('SELECT * FROM artwork ORDER BY id LIMIT 1').get() as { id: number; lineage_id: number; version: number; customer_id: number; file_id: number }
+    const before = t.sqlite.prepare('SELECT * FROM artwork ORDER BY id').all()
+    for (const alias of ['id', 'rowid', 'oid', '_rowid_']) {
+      expect(() => t.sqlite.exec(`UPDATE artwork SET ${alias} = 9999 WHERE id = ${a.id}`), alias).toThrow(/artwork_version_fixed/)
+    }
+    expect(() => t.sqlite.exec(`INSERT OR REPLACE INTO artwork (customer_id, lineage_id, version, file_id) VALUES (${a.customer_id}, ${a.lineage_id}, ${a.version}, ${a.file_id})`)).toThrow(/artwork_version_exists/)
+    expect(() => t.sqlite.exec(`INSERT OR REPLACE INTO artwork (id, customer_id, lineage_id, version, file_id) VALUES (${a.id}, ${a.customer_id}, 777, 1, ${a.file_id})`)).toThrow(/artwork_version_exists/)
+    expect(() => t.sqlite.exec(`DELETE FROM artwork WHERE id = ${a.id}`)).toThrow(/never deleted/)
+    expect(t.sqlite.prepare('SELECT * FROM artwork ORDER BY id').all()).toEqual(before)
+  })
+})

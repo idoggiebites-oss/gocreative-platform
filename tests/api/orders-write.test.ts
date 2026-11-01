@@ -480,7 +480,7 @@ describe('Codex review of cce1dc9', () => {
     await t.refused('POST', '/orders/2026-0015/repeat', { source: 'email' }, 409, 'contact_archived')
     expect(ledger(t)).toBe(before)
     // The SQL holds the same rule when the archive lands after the route's check.
-    expect(await dbo.repeatOrder(t.db, { year: 2026, actorId: 1, sourceId: 15, source: 'email', dueDate: null, productionStatus: 'awaiting_quote' })).toBeNull()
+    expect(await dbo.repeatOrder(t.db, { year: 2026, actorId: 1, sourceId: 15, source: 'email', dueDate: null, productionStatus: 'awaiting_quote', paymentTerms: 'due_at_pickup' })).toBeNull()
     expect(ledger(t)).toBe(before)
   })
 

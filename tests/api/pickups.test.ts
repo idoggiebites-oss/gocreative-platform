@@ -173,8 +173,8 @@ describe('the SQL guards', () => {
     t.sqlite.exec(`INSERT INTO payments (order_id, amount_cents, method, paid_on, recorded_by, request_id) VALUES (19, 156600, 'cash', '2026-10-30', 1, 'full')`)
     t.sqlite.exec(`INSERT INTO pickups (order_id, ready_on, picked_up_on, collected_by_name, completed_by) VALUES (19, '2026-10-30', '2026-10-31', 'X', 1)`)
     // …but a void (not counted) leaves it owing again: the same insert on an unpaid order is refused.
+    t.sqlite.exec(`UPDATE orders SET payment_terms = 'due_at_pickup' WHERE id = 4`) // terms first: they lock at production_complete (0007)
     t.sqlite.exec(`UPDATE orders SET production_status = 'production_complete' WHERE id = 4`)
-    t.sqlite.exec(`UPDATE orders SET payment_terms = 'due_at_pickup' WHERE id = 4`)
     t.sqlite.exec(`INSERT INTO payments (order_id, amount_cents, method, paid_on, recorded_by, request_id) VALUES (4, 73000, 'cash', '2026-10-30', 1, 'void-me')`)
     t.sqlite.exec(`UPDATE payments SET voided_at = 'now', voided_by = 1, void_reason = 'bounced' WHERE request_id = 'void-me'`)
     expect(() => t.sqlite.exec(`INSERT INTO pickups (order_id, ready_on, picked_up_on, collected_by_name, completed_by) VALUES (4, '2026-10-30', '2026-10-31', 'X', 1)`)).toThrow(/payment_required/)
@@ -189,3 +189,47 @@ describe('the SQL guards', () => {
     expect(() => t.sqlite.exec(`UPDATE pickups SET notification_method = 'pigeon' WHERE order_id = 20`)).toThrow(/CHECK constraint failed/)
   })
 })
+
+describe('payment terms can\'t be used to skip the owner\'s release override (Codex Phase 2 security review)', () => {
+  test('staff can\'t relax an order to pay-after-pickup; nobody can change terms once production is complete, at the route or in SQL', async () => {
+    const t = setup()
+    // 2026-0020: pay at pickup, production complete, unpaid.
+    const v = () => t.o('2026-0020').version
+    const before = t.footprint()
+    expect(await t.call('PATCH', '/orders/2026-0020', { paymentTerms: 'due_after_pickup', expectedVersion: v() }, STAFF)).toMatchObject({ status: 403, body: { code: 'payment_terms_owner_only' } })
+    expect(await t.call('PATCH', '/orders/2026-0020', { paymentTerms: 'due_after_pickup', expectedVersion: v() })).toMatchObject({ status: 409, body: { code: 'payment_terms_locked' } })
+    expect(t.footprint()).toEqual(before)
+    expect(() => t.sqlite.exec(`UPDATE orders SET payment_terms = 'due_after_pickup' WHERE number = '2026-0020'`)).toThrow(/payment_terms_locked/)
+    // Staff pickup of the unpaid order is still refused.
+    expect((await t.call('POST', '/orders/2026-0020/pickup/collect', { collectedByName: 'X', expectedVersion: v() }, STAFF)).status).toBe(409)
+  })
+
+  test('staff can\'t create an order or a customer on pay-after-pickup terms their kind doesn\'t default to; districts still work', async () => {
+    const t = setup()
+    const before = t.all('SELECT id FROM customers').length
+    // A regular (individual) customer: pay-after-pickup is owner-only, on the customer and on a new order.
+    expect(await t.call('POST', '/customers', { name: 'Walk-in', kind: 'individual', defaultPaymentTerms: 'due_after_pickup' }, STAFF)).toMatchObject({ status: 403, body: { code: 'payment_terms_owner_only' } })
+    expect(t.all('SELECT id FROM customers').length).toBe(before)
+    const ind = (await t.call<{ customer: { id: number; version: number } }>('POST', '/customers', { name: 'Walk-in', kind: 'individual' }, STAFF)).body.customer
+    expect(await t.call('PATCH', `/customers/${ind.id}`, { defaultPaymentTerms: 'due_after_pickup', expectedVersion: ind.version }, STAFF)).toMatchObject({ status: 403, body: { code: 'payment_terms_owner_only' } })
+    const order = { customerId: ind.id, source: 'phone', title: 'Tees', paymentTerms: 'due_after_pickup' }
+    expect(await t.call('POST', '/orders', order, STAFF)).toMatchObject({ status: 403, body: { code: 'payment_terms_owner_only' } })
+    expect((await t.call('POST', '/orders', order)).status).toBe(201) // an owner may
+    // A district defaults to pay after pickup, so staff create it and its orders as usual.
+    const d = (await t.call<{ customer: { id: number } }>('POST', '/customers', { name: 'ISD', kind: 'district' }, STAFF))
+    expect(d.status).toBe(201)
+    expect((await t.call('POST', '/orders', { customerId: d.body.customer.id, source: 'email', title: 'Shirts' }, STAFF)).status).toBe(201)
+  })
+
+  test('a staff repeat of an owner-granted pay-after-pickup order takes the customer\'s own terms; an owner repeat keeps them', async () => {
+    const t = setup()
+    const ind = (await t.call<{ customer: { id: number } }>('POST', '/customers', { name: 'Regular', kind: 'individual' })).body.customer
+    const src = await t.call('POST', '/orders', { customerId: ind.id, source: 'phone', title: 'Tees', paymentTerms: 'due_after_pickup' }) // owner-granted
+    const terms = (n: string) => t.one<{ payment_terms: string }>('SELECT payment_terms FROM orders WHERE number = ?', n).payment_terms
+    const staffRepeat = await t.call('POST', `/orders/${src.body.number}/repeat`, { source: 'phone' }, STAFF)
+    expect(terms(staffRepeat.body.number)).toBe('due_at_pickup')
+    const ownerRepeat = await t.call('POST', `/orders/${src.body.number}/repeat`, { source: 'phone' })
+    expect(terms(ownerRepeat.body.number)).toBe('due_after_pickup')
+  })
+})
+
