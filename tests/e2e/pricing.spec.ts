@@ -96,6 +96,25 @@ test('publish stays locked until the comparison on screen is of the saved draft'
   await expect(page.getByRole('button', { name: 'Publish' })).toBeEnabled()
 })
 
+test('an open publish dialog closes if the draft changes in another tab, so an unseen draft can never go out', async ({ page }, info) => {
+  test.skip(info.project.name === 'phone')
+  await page.goto('/app/settings/pricing')
+  await page.locator('summary', { hasText: 'Advanced pricing' }).click()
+  await page.locator('section[aria-label="Product and garment costs"]').getByLabel('T-shirts').fill('3.00')
+  await page.getByRole('button', { name: 'Save draft' }).click()
+  await expect(page.getByRole('button', { name: 'Publish' })).toBeEnabled()
+  await page.getByRole('button', { name: 'Publish' }).click()
+  await expect(page.getByRole('dialog')).toBeVisible()
+  let published = 0
+  page.on('request', (r) => { if (r.url().endsWith('/pricing/publish')) published++ })
+  // Another tab saves a different draft.
+  const state = await (await page.request.get('/api/app/pricing')).json() as { draft: { hash: string } }
+  expect((await page.request.put('/api/app/pricing/draft', { data: { config: { productCostCents: { tshirts: 999 }, services: {} }, expectedHash: state.draft.hash } })).ok()).toBe(true)
+  await page.evaluate("window.dispatchEvent(new Event('visibilitychange'))") // what refetches on returning to a tab
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  expect(published).toBe(0)
+})
+
 test('staff never see it: no link, a refusal on the page, and 403 from the server', async ({ page, context }) => {
   await page.route('**/api/app/me', (r) => r.fulfill({ json: { id: 2, email: 'x', name: 'Staff', role: 'staff' } }))
   await page.goto('/app/settings')

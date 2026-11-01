@@ -163,10 +163,12 @@ const toRequest = (lines: SampleLine[]) => ({
 const REASONS_ES: [RegExp, string][] = [
   [/^no published pricing$/, 'no hay precios publicados'], [/^no lines$/, 'sin líneas'], [/^below the minimum margin$/, 'por debajo del margen mínimo'], [/^total over the review limit$/, 'total por encima del límite de revisión'],
   [/^amount too large to calculate exactly$/, 'monto demasiado grande para calcular con exactitud'], [/^the calculation came to nothing$/, 'el cálculo dio cero'], [/^line (\d+): invalid quantity$/, 'línea $1: cantidad no válida'],
-  [/^line (\d+): quantity over the review limit$/, 'línea $1: cantidad por encima del límite de revisión'], [/^line (\d+): method needs a person \((.*)\)$/, 'línea $1: este método requiere a una persona ($2)'], [/^line (\d+): (.*) has no published rates$/, 'línea $1: $2 no tiene tarifas publicadas'],
+  [/^line (\d+): quantity over the review limit$/, 'línea $1: cantidad por encima del límite de revisión'], [/^line (\d+): method needs a person \((.*)\)$/, 'línea $1: este método requiere a una persona ($2)'], [/^line (\d+): screen has no published rates$/, 'línea $1: serigrafía sin tarifas publicadas'], [/^line (\d+): embroidery has no published rates$/, 'línea $1: bordado sin tarifas publicadas'], [/^line (\d+): dtg has no published rates$/, 'línea $1: impresión directa sin tarifas publicadas'], [/^line (\d+): engraving has no published rates$/, 'línea $1: grabado sin tarifas publicadas'],
   [/^line (\d+): no cost for (.*)$/, 'línea $1: sin costo para $2'], [/^line (\d+): no decoration details$/, 'línea $1: sin detalles de decoración'], [/^line (\d+): quantity below the first screen tier$/, 'línea $1: cantidad por debajo del primer nivel'],
   [/^line (\d+): ink colors unknown$/, 'línea $1: colores de tinta desconocidos'], [/^line (\d+): more colors than the review limit$/, 'línea $1: más colores que el límite de revisión'], [/^line (\d+): print size unknown$/, 'línea $1: tamaño desconocido'],
-  [/^line (\d+): no rate for (.*)$/, 'línea $1: sin tarifa para $2'], [/^line (\d+): embroidery complexity unknown$/, 'línea $1: complejidad del bordado desconocida'], [/^line (\d+): machine time unknown$/, 'línea $1: tiempo de máquina desconocido'],
+  [/^line (\d+): no rate for small embroidery at this quantity$/, 'línea $1: sin tarifa de bordado pequeño para esta cantidad'], [/^line (\d+): no rate for medium embroidery at this quantity$/, 'línea $1: sin tarifa de bordado mediano para esta cantidad'], [/^line (\d+): no rate for large embroidery at this quantity$/, 'línea $1: sin tarifa de bordado grande para esta cantidad'],
+  [/^line (\d+): no rate for small prints at this quantity$/, 'línea $1: sin tarifa de impresión pequeña para esta cantidad'], [/^line (\d+): no rate for medium prints at this quantity$/, 'línea $1: sin tarifa de impresión mediana para esta cantidad'], [/^line (\d+): no rate for large prints at this quantity$/, 'línea $1: sin tarifa de impresión grande para esta cantidad'],
+  [/^line (\d+): no rate for small prints$/, 'línea $1: sin tarifa de impresión pequeña'], [/^line (\d+): no rate for medium prints$/, 'línea $1: sin tarifa de impresión mediana'], [/^line (\d+): no rate for large prints$/, 'línea $1: sin tarifa de impresión grande'], [/^line (\d+): embroidery complexity unknown$/, 'línea $1: complejidad del bordado desconocida'], [/^line (\d+): machine time unknown$/, 'línea $1: tiempo de máquina desconocido'],
 ]
 function Result({ title, r }: { title: string; r: SimView | undefined }) {
   const { m, fmt, lang } = useI18n()
@@ -307,12 +309,14 @@ function Editor({ state }: { state: PricingState }) {
   const [compared, setCompared] = useState<string | null>(null)
   const [invalid, setInvalid] = useState(false)
   const form = useRef<HTMLDivElement>(null)
-  const [publishing, setPublishing] = useState(false)
+  const [publishing, setPublishing] = useState<{ id: number; hash: string } | null>(null) // exactly the draft the owner chose to publish
   const savedText = JSON.stringify(state.draft?.config ?? state.active?.config ?? EMPTY)
   const dirty = JSON.stringify(config) !== savedText
   const save = useSend<{ hash: string }, void>(() => send('PUT', '/pricing/draft', { config, expectedHash: state.draft?.hash ?? null }))
   const discard = useSend<unknown, void>(() => send('DELETE', '/pricing/draft', { hash: state.draft!.hash }))
-  const publish = useSend<unknown, void>(() => send('POST', '/pricing/publish', { draftId: state.draft!.id, draftHash: state.draft!.hash, expectedActiveId: state.active?.id ?? null }))
+  const publish = useSend<unknown, { id: number; hash: string }>((d) => send('POST', '/pricing/publish', { draftId: d.id, draftHash: d.hash, expectedActiveId: state.active?.id ?? null }))
+  // A draft changed from another tab while the dialog is open: what was reviewed is no longer what would go out.
+  useEffect(() => { if (publishing && state.draft?.hash !== publishing.hash) setPublishing(null) }, [publishing, state.draft?.hash])
   const restore = useSend<unknown, number>((id) => send('POST', `/pricing/versions/${id}/restore`, { expectedHash: state.draft?.hash ?? null }))
   const canPublish = Boolean(state.draft) && !dirty && compared === JSON.stringify(state.draft?.config ?? null) // only what the comparison on screen actually showed
   const trySave = () => {
@@ -373,7 +377,7 @@ function Editor({ state }: { state: PricingState }) {
         <div className="flex flex-wrap gap-2">
           <button type="button" className={BTN} disabled={!dirty || save.isPending} onClick={trySave}>{t.saveDraft}</button>
           {state.draft && <button type="button" className={BTN} disabled={discard.isPending} onClick={() => discard.mutate(undefined)}>{t.discard}</button>}
-          <button type="button" className={`${BTN} ${BTN_PRIMARY}`} disabled={!canPublish} onClick={() => setPublishing(true)}>{t.publish}</button>
+          <button type="button" className={`${BTN} ${BTN_PRIMARY}`} disabled={!canPublish} onClick={() => setPublishing({ id: state.draft!.id, hash: state.draft!.hash })}>{t.publish}</button>
         </div>
         {!canPublish && <p className={MUTED}>{t.mustPreview}</p>}
         {invalid && <p role="alert" className="text-xs text-status-red-fg">{t.invalidField}</p>}
@@ -405,8 +409,8 @@ function Editor({ state }: { state: PricingState }) {
       </section>
 
       {publishing && (
-        <FormDialog open onOpenChange={() => setPublishing(false)} title={t.publishTitle} description={t.publishBody} submitLabel={t.publish} pending={publish.isPending} error={publish.error}
-          onSubmit={() => publish.mutate(undefined, { onSuccess: () => setPublishing(false) })}>
+        <FormDialog open onOpenChange={() => setPublishing(null)} title={t.publishTitle} description={t.publishBody} submitLabel={t.publish} pending={publish.isPending} error={publish.error} disabled={!canPublish}
+          onSubmit={() => { if (canPublish) publish.mutate(publishing, { onSuccess: () => setPublishing(null) }) }}>
           <span />
         </FormDialog>
       )}
