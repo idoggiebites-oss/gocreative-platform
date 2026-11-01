@@ -40,6 +40,7 @@ const retry = (n: number, e: Error) => !(e instanceof ApiError) && n < 2
 
 export const useDashboard = () => useQuery({ queryKey: ['dashboard'], queryFn: () => call<DashboardResponse>('/dashboard'), retry })
 
+export const usePricing = <T,>(enabled: boolean) => useQuery({ queryKey: ['pricing'], queryFn: () => call<T>('/pricing'), enabled, retry })
 export const useInquiry = (id: string) => useQuery({ queryKey: ['inquiry', id], queryFn: () => call<InquiryDetailResponse>(`/inquiries/${id}`), retry })
 export const useOrders = (view: OrderView, q: string, inquiryStatus?: InquiryStatus) =>
   useQuery({

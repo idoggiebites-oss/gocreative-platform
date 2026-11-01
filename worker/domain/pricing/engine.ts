@@ -65,6 +65,18 @@ export type DecorationInput = {
 export type EstimateLineInput = { product: string; method: string; quantity: number; decorations: DecorationInput[]; assumptions?: string[] }
 export type EstimateRequest = { lines: EstimateLineInput[] }
 
+/** A request as it arrives from outside the engine: bounded, so nobody can make it work unreasonably hard. */
+export const estimateRequestSchema = z.object({
+  lines: z.array(z.object({
+    product: z.string().max(40), method: z.string().max(40), quantity: z.number().int().min(1).max(1_000_000),
+    decorations: z.array(z.object({
+      location: z.string().trim().max(60).optional(), size: z.enum(SIZES).optional(), colors: z.number().int().min(0).max(100).nullish(),
+      complexity: z.enum(SIZES).optional(), machineMinutes: z.number().positive().max(1440).optional(),
+    }).strict()).max(10),
+    assumptions: z.array(z.string().max(200)).max(10).optional(),
+  }).strict()).min(1).max(10),
+}).strict()
+
 export type EstimateStatus = 'available' | 'assumption_based' | 'manual_review_required'
 export type PricedLine = { kind: 'product' | 'charge'; label: string; quantity: number; unitPriceCents: number; lineTotalCents: number; lineIndex: number | null }
 export type InternalLine = { label: string; costCents: number; priceCents: number }

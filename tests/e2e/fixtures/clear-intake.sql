@@ -13,6 +13,11 @@ DELETE FROM inquiries;
 DELETE FROM inquiry_submissions;
 DELETE FROM intake_usage;
 DELETE FROM settings WHERE key = 'intake_closed';
+DROP TRIGGER IF EXISTS pricing_published_no_delete;
+DELETE FROM pricing_versions;
+CREATE TRIGGER pricing_published_no_delete BEFORE DELETE ON pricing_versions
+WHEN OLD.status <> 'draft'
+BEGIN SELECT RAISE(ABORT, 'pricing_published_no_delete'); END;
 CREATE TRIGGER inquiry_files_linked_no_delete BEFORE DELETE ON inquiry_files
 WHEN OLD.status = 'linked'
 BEGIN SELECT RAISE(ABORT, 'inquiry_files_linked_no_delete'); END;

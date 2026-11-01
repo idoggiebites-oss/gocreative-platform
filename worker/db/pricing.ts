@@ -9,8 +9,13 @@ const COLS = 'id, status, config, config_hash, rollback_of, note, created_by, cr
 export const getActivePricing = (db: D1Database) => db.prepare(`SELECT ${COLS} FROM pricing_versions WHERE status = 'active'`).first<PricingVersionRow>()
 export const getDraftPricing = (db: D1Database) => db.prepare(`SELECT ${COLS} FROM pricing_versions WHERE status = 'draft'`).first<PricingVersionRow>()
 export const getPricingVersion = (db: D1Database, id: number) => db.prepare(`SELECT ${COLS} FROM pricing_versions WHERE id = ?`).bind(id).first<PricingVersionRow>()
+export type PricingVersionSummary = { id: number; status: string; note: string | null; rollback_of: number | null; created_at: string; published_at: string | null; published_by_name: string | null; config_hash: string }
 export const listPricingVersions = async (db: D1Database) =>
-  (await db.prepare(`SELECT ${COLS} FROM pricing_versions ORDER BY id DESC LIMIT 100`).all<PricingVersionRow>()).results
+  (await db.prepare(`SELECT v.id, v.status, v.note, v.rollback_of, v.created_at, v.published_at, u.name AS published_by_name, v.config_hash FROM pricing_versions v
+    LEFT JOIN users u ON u.id = v.published_by ORDER BY v.id DESC LIMIT 100`).all<PricingVersionSummary>()).results
+
+export const discardDraft = async (db: D1Database, hash: string) =>
+  ((await db.prepare(`DELETE FROM pricing_versions WHERE status = 'draft' AND config_hash = ?`).bind(hash).run()).meta.changes ?? 0) > 0
 
 /** The same config always hashes the same, so a preview can be bound to exactly what it showed. */
 export async function hashConfig(config: PricingConfig) {
@@ -25,11 +30,16 @@ export async function hashConfig(config: PricingConfig) {
 export async function saveDraft(db: D1Database, p: { config: PricingConfig; expectedHash: string | null; actorId: number; note: string | null; rollbackOf?: number | null }) {
   const json = JSON.stringify(p.config)
   const hash = await hashConfig(p.config)
-  const r = p.expectedHash === null
-    ? await db.prepare(`INSERT INTO pricing_versions (config, config_hash, note, created_by, rollback_of) SELECT ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM pricing_versions WHERE status = 'draft')`)
-      .bind(json, hash, p.note, p.actorId, p.rollbackOf ?? null).run()
-    : await db.prepare(`UPDATE pricing_versions SET config = ?, config_hash = ?, note = ?, created_by = ?, rollback_of = ? WHERE status = 'draft' AND config_hash = ?`)
-      .bind(json, hash, p.note, p.actorId, p.rollbackOf ?? null, p.expectedHash).run()
+  const write = p.expectedHash === null
+    ? db.prepare(`INSERT INTO pricing_versions (config, config_hash, note, created_by, rollback_of) SELECT ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM pricing_versions WHERE status = 'draft')`)
+      .bind(json, hash, p.note, p.actorId, p.rollbackOf ?? null)
+    : db.prepare(`UPDATE pricing_versions SET config = ?, config_hash = ?, note = ?, created_by = ?, rollback_of = ? WHERE status = 'draft' AND config_hash = ?`)
+      .bind(json, hash, p.note, p.actorId, p.rollbackOf ?? null, p.expectedHash)
+  const [r] = await db.batch([
+    write,
+    // The audit trail records that it changed and who did it. The rates themselves stay in the owner-only version history.
+    db.prepare(`INSERT INTO activity_log (actor_kind, actor_id, entity_type, entity_id, action) SELECT 'user', ?, 'pricing_version', id, 'pricing_draft_saved' FROM pricing_versions WHERE status = 'draft' AND changes() > 0`).bind(p.actorId),
+  ])
   return (r.meta.changes ?? 0) > 0 ? hash : null
 }
 

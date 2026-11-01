@@ -461,6 +461,7 @@ export type PrepRequest = { prepStatus: PrepStatus; expectedVersion: number }
 
 // `error` is English text for logs; the UI shows a translation of `code` (and of each gate reason code in `reasons`).
 export const API_ERROR_CODES = [
+  'pricing_invalid', 'pricing_changed',
   'inquiry_not_new', 'inquiry_not_convertible',
   'transition_not_allowed', 'gate_failed', 'conflict_retry', 'po_transition_not_allowed', 'not_found', 'invalid_request',
   'contact_archived', 'contact_not_for_customer', 'confirmation_required', 'order_not_active', 'production_started', 'quote_stale',

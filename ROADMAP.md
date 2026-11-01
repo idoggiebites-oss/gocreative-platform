@@ -23,8 +23,8 @@ S3 is done and live behind Access. Order, per Arturo: compatibility fix → E1 �
 | # | Milestone | State | Done when |
 |---|---|---|---|
 | Fix | Read stored requests leniently, so product-map changes can't strand old inquiries | **Done and live 2026-11-01** | Regression test covers retired products and methods |
-| E1 | Automated estimating foundation: deterministic artwork analysis, per-service pricing engine, estimate persistence | **Built on branch, no live change;** migration 0011 not applied | Stored estimates recalculate exactly; fixtures cover the brief's artwork types |
-| E2 | Settings → Pricing Management: simple and Advanced, simulator, versions, permissions, overrides | Not started; needs the family's real rates | Draft rules provably can't reach the storefront |
+| E1 | Automated estimating foundation: deterministic artwork analysis, per-service pricing engine, estimate persistence | **Done 2026-11-01, merged locally;** migration 0011 not applied | Stored estimates recalculate exactly; fixtures cover the brief's artwork types |
+| E2 | Settings → Pricing Management: simple and Advanced, simulator, versions, permissions, artwork check | **Built, in review;** real rates come from the family; estimate overrides land in E3, where staff see estimates | Draft rules provably can't reach the storefront |
 | Gate | Validate colour counts against at least 30 real past jobs | Not started; needs the family's artwork | Accuracy measured and thresholds set |
 | E3 | Storefront estimates, uncertainty, staff review | Not started | Customer sees only preliminary totals; server recalculates at submit |
 

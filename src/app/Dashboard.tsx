@@ -1,6 +1,7 @@
 import { Route, Routes } from 'react-router'
 import { FileCheck, Image } from 'lucide-react'
 import InquiryDetail from './InquiryDetail'
+import PricingPage from './PricingPage'
 import { useI18n } from '@/i18n'
 import AppShell from './AppShell'
 import ComingSoon from './ComingSoon'
@@ -25,6 +26,7 @@ export default function Dashboard() {
         <Route path="orders/new" element={<NewOrder />} />
         <Route path="orders/:number" element={<OrderDetail />} />
         <Route path="inquiries/:id" element={<InquiryDetail />} />
+        <Route path="settings/pricing" element={<PricingPage />} />
         <Route path="customers" element={<CustomerList />} />
         <Route path="customers/:id" element={<CustomerDetail />} />
         <Route path="artwork" element={<ComingSoon icon={Image} title={m.nav.artwork} line={m.empty.artwork} phase={3} />} />
