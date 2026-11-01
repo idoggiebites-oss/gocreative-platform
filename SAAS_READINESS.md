@@ -17,7 +17,7 @@ There are two ways to host many businesses on this stack:
 | Export, restore, offboarding | Whole-business operations: copy or delete one D1 and one bucket. | Row-by-row and file-by-file, through immutability triggers. |
 | Costs and risks | Provisioning, migrations and Access config repeated per business, so a deploy script and a registry are needed. Pointing a Worker at the wrong database is the main operator risk. Account-level limits need capacity planning. | Fewer moving parts, but security depends on discipline in every query, and restoring a single tenant is hard. |
 
-**Recommendation: keep one deployment per business.** It matches the code, makes the brief's data-ownership
+**Decision (Arturo, 2026-11-01): one deployment per business.** It matches the code, makes the brief's data-ownership
 promise easy to keep, and costs little on Cloudflare's free and low tiers. Revisit only if the number of
 businesses makes per-deployment operations the bottleneck, and even then automate deployments before merging
 databases. **(C) agrees:** "the approved isolated-deployment model remains viable."
@@ -101,7 +101,12 @@ an export at a recorded point in time).
 - backup copies expire by day 60;
 - a deletion certificate (a record of what was deleted and when) is sent to the owner.
 
-**Arturo to decide.**
+**Arturo, 2026-11-01:** plan for a 30-day export window after cancellation, then deletion, with backup removal
+targeted by day 60. **Before these deadlines are promised to any customer, verify:**
+- the technical constraints: D1 Time Travel retention on our plan, R2 lifecycle, and how long our own export
+  copies are kept;
+- the legal constraints: record-keeping obligations for invoices and payments, and the customer's own
+  obligations to keep records.
 
 **Classification:**
 - *Before commercial launch:* a demonstrated export plus a restore round trip, and the written offboarding

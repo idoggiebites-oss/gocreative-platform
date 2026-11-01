@@ -1,12 +1,46 @@
 # GoCreative storefront plan
 
-> Status: **proposal, awaiting Arturo's approval** (brief §9: no storefront code until this plan is reviewed).
+> Status: **conditionally approved 2026-11-01: S0 (design mockups) only.** No public deployment and no irreversible
+> database change until Arturo approves S1. His decisions are in §0 and override anything below that differs.
 > Source: [SPEC-post-phase2.md](SPEC-post-phase2.md) §5–§6. Architecture context:
 > [PLATFORM_ARCHITECTURE_REVIEW.md](PLATFORM_ARCHITECTURE_REVIEW.md). Codex's independent review is folded in
 > where marked **(C)**; disagreements are in PLATFORM_ARCHITECTURE_REVIEW.md §8.
 >
 > **Before S1 (fix now, from the review):** a working backup script and restore drill, and the Access re-scope
 > plan verified for `/app`, `/app/*`, `/api/app`, `/api/app/*` on every hostname.
+
+## 0. Arturo's decisions (2026-11-01, conditional approval)
+
+1. **Architecture approved:**
+   - one shared codebase;
+   - a separate deployment, D1 database, R2 bucket and authentication configuration per business;
+   - GoCreative stays the first client;
+   - no universal workflow engine and no shared multi-tenant database;
+   - all Phase 2 functionality preserved.
+2. **Backup and restore** are implemented **and tested** before public launch (S0b; plan in `notes/backup-restore.md`).
+3. **Public storefront routes stay separate** from the authenticated dashboard routes (§7).
+4. **A Declined inquiry status**, with an optional internal reason (§5).
+5. **School districts may attach a PO** when they inquire. A customer-uploaded document stays **unverified** until
+   staff approve it (§4, §6).
+6. **Retention:**
+   - spam inquiries are kept **up to 30 days**;
+   - unconverted inquiries are kept **up to 12 months**;
+   - staff can delete either earlier (§9).
+7. **Offboarding:** a 30-day export window after cancellation, then deletion, with backup removal targeted by
+   day 60. The **technical and legal retention constraints must be verified before these deadlines are
+   promised to customers** (SAAS_READINESS §5).
+8. **Submission sessions** are short-lived and scoped to one inquiry. The server enforces upload count, file
+   size, file type and aggregate storage limits (§4).
+9. **The kill switch** stops new inquiries and uploads, **including through submission sessions already issued**
+   (§4).
+10. **Converting an inquiry into an order is atomic and idempotent** (§5, §6).
+11. The domain and the final business content can be settled during storefront development.
+
+**S0 direction:** the experience of a professional custom printing and embroidery business, not a SaaS dashboard.
+Light, airy and modern, with warm branding, strong typography, attractive service sections and a simple
+mobile-first inquiry. Responsive mockups of the home page, services, the order inquiry form, the artwork
+upload experience and the submission confirmation. Temporary content is clearly labelled. **No invented contact
+details, hours, prices or guaranteed turnaround times.**
 
 ## 1. Goal and scope
 
@@ -103,7 +137,9 @@ submission session**, not once per upload:
    **(C)**. The `payload` stores the validated, normalised request, never raw JSON. One D1 batch does four things,
    each guarded on the session still being open:
    - inserts the inquiry (`status 'new'`);
-   - links the session's files that are `stored` (pending or failed ones are excluded);
+   - links the session's files that are `stored` (pending or failed ones are excluded), each tagged by the
+     customer as **artwork** or **purchase order** (a PO is offered only when the customer says they are a
+     school, district or organization);
    - writes `inquiry_received`;
    - closes the session last, so later uploads are refused.
 
@@ -155,9 +191,11 @@ submission session**, not once per upload:
   the artwork arrives "under review".
 - `files.ts` download rule: today a file is served only when an artwork version or PO document links it to an
   order. It is extended to inquiry files, for signed-in staff only. Public routes never serve files back.
-- Statuses stay `new / converted / spam`. "Declined" is tracked as `spam` plus a note for now. Adding a status
-  needs a table rebuild; on a 0-row table that is cheap but not additive, so it isn't done unless Arturo wants
-  a distinct "declined".
+- **Statuses: `new / converted / declined / spam`** (Arturo), plus `decline_reason` (optional, internal, never
+  shown publicly). Widening a CHECK needs the `inquiries` table rebuilt. It has **0 live rows and nothing
+  references it**, so the rebuild is low-risk, but it is not additive. **It is listed for Arturo's explicit go at
+  S1**, with a pre-migration export of the table either way.
+- `inquiry_files.kind IN ('artwork','po')`.
 - The usual guards: unconditional `BEFORE UPDATE` identity triggers, no REPLACE on unique columns, and a
   converted inquiry is frozen.
 
@@ -177,7 +215,10 @@ validation rules **(C)**. The batch:
 1. creates or reuses the customer and contact;
 2. creates the order with source `portal`, its items and the defaults from the customer (PO required, payment
    terms; owner-only terms rules still apply);
-3. turns each inquiry file into **artwork version 1** of its own design on the new order, under review;
+3. turns each inquiry **artwork** file into **artwork version 1** of its own design on the new order, under
+   review. Each **PO** file becomes a `purchase_orders` record in status `received`, with the file as its
+   document: **unverified until staff move it to approved** through the existing PO workflow. Approving a PO
+   stays a staff action, so a customer upload can never satisfy authorization by itself;
 4. marks the inquiry `converted`, with `order_id`;
 5. writes one activity row per step.
 
@@ -216,12 +257,15 @@ hides an inquiry from the queue.
 - **What we collect:** name, contact details, an optional organization, the request and the artwork. **Not
   collected:** addresses, dates of birth, payment details.
 - **Consent:** a one-line statement by the Submit button, linking to `/privacy`.
-- **Retention (proposal for Arturo):**
-  - inquiries marked spam, with their files: deleted after 30 days;
-  - unconverted inquiries: deleted after 12 months;
+- **Retention (Arturo, 2026-11-01):**
+  - **spam** inquiries and their files: deleted after **up to 30 days**;
+  - **unconverted** (new or declined) inquiries: deleted after **up to 12 months**;
   - converted inquiries: kept with the order's records.
 
-  All deletion is done by the daily cron and logged as a count, with no personal data in the log.
+  **Staff can delete a spam, declined or unconverted inquiry earlier** (an owner-only action, confirmed, logged
+  as an activity row without the personal data). The daily cron does the scheduled deletions and logs counts
+  only. Deleting an inquiry deletes its files from R2. These are the only deletions of customer records the app
+  performs.
 - **IP addresses** are stored only as a salted hash, for abuse review.
 
 ## 10. Milestones
@@ -231,7 +275,7 @@ standing approval (additive changes only). The Access re-scope is the exception 
 
 | # | Work | Who |
 |---|---|---|
-| S0 | **Design mockups** (home, a service page, the 4-step form at phone and desktop widths, confirmation) on the design canvas, using the design skills. **Review gate: Arturo approves before S2.** | Claude |
+| S0 | **Design mockups** (home, services, the inquiry form, the artwork and PO upload experience, confirmation; phone and desktop) on the design canvas, using the design skills. **Approved to start 2026-11-01. Review gate: Arturo approves before S1.** | Claude |
 | S0b | **Fix-now items:** a backup script (per-table JSON export of the live D1, plus a restore drill into a scratch local D1), with ARCHITECTURE.md corrected. | Claude |
 | S1 | Migration 0008; the submission, upload and submit endpoints; Turnstile; throttling and the admission budget; the off switch; cron cleanup; boundary tests seeded with internal notes, other customers and supplier costs; abuse tests (oversize, wrong type, token reuse and expiry, Turnstile failure and replay, budget races, flood). | Opus agent; Codex reviews security |
 | S2 | Storefront UI to the approved mockups: layout, pages, the inquiry form with uploads and retries, confirmation, privacy page, e2e on phone and desktop. | Sonnet agent; Codex reviews |
@@ -240,14 +284,12 @@ standing approval (additive changes only). The Access re-scope is the exception 
 
 ## 11. Needs from Arturo
 
-1. **Approval** of this plan, or changes to it.
-2. **Domain** for GoCreative (it can come later; the storefront can launch on workers.dev).
-3. **Content:**
+1. ~~Approval~~: conditional approval given for S0 (§0). **S1 needs a separate go**, including the `inquiries`
+   table rebuild for the Declined status.
+2. **Domain** for GoCreative: during storefront development (the storefront can launch on workers.dev).
+3. **Content** (during development; mockups use labelled placeholders until then):
    - the list of products and services to show;
    - any photos of past work and a logo, if there is one (otherwise we keep the typographic wordmark);
    - turnaround times;
    - contact details and hours to publish.
-4. **Retention periods** (§9), or accept the proposal.
-5. **Distinct "declined" status for inquiries?** Yes or no (§5).
-6. Whether school districts should be able to attach a PO when they inquire, or whether POs stay staff-only for
-   now. Proposal: staff-only.
+4. ~~Retention, Declined, PO uploads~~: decided (§0).
