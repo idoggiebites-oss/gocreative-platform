@@ -49,8 +49,14 @@ export type ConvertInput = {
 
 /** Null when nothing happened (not new any more, a stale version, or a customer or contact that moved). Otherwise the order number's sequence. */
 export async function convertInquiry(db: D1Database, p: ConvertInput) {
-  const ok = `EXISTS (SELECT 1 FROM inquiries gi WHERE gi.id = ? AND gi.version = ? AND gi.status = 'new' AND gi.deleting_at IS NULL)`
-  const okB = [p.inquiryId, p.version]
+  // Everything is checked in the first condition, so a refusal writes nothing at all: no customer, no contact, no column.
+  const existing = 'existingId' in p.customer ? p.customer : null
+  const customerOk = existing
+    ? `AND EXISTS (SELECT 1 FROM customers WHERE id = ?)${existing.contactId !== null ? ' AND EXISTS (SELECT 1 FROM customer_contacts WHERE id = ? AND customer_id = ? AND archived_at IS NULL)' : ''}`
+    : ''
+  const customerB = existing ? [existing.existingId, ...(existing.contactId !== null ? [existing.contactId, existing.existingId] : [])] : []
+  const ok = `EXISTS (SELECT 1 FROM inquiries gi WHERE gi.id = ? AND gi.version = ? AND gi.status = 'new' AND gi.deleting_at IS NULL) ${customerOk}`
+  const okB = [p.inquiryId, p.version, ...customerB]
   const chosen = `(SELECT converted_customer_id FROM inquiries WHERE id = ?)`
   const chosenContact = `(SELECT converted_contact_id FROM inquiries WHERE id = ?)`
   const setCustomer = (sql: string, ...b: (string | number | null)[]) => db.prepare(`UPDATE inquiries SET ${sql} WHERE id = ? AND ${ok}`).bind(...b, p.inquiryId, ...okB)
@@ -59,7 +65,6 @@ export async function convertInquiry(db: D1Database, p: ConvertInput) {
   const who = 'existingId' in p.customer
     ? [
         setCustomer('converted_customer_id = (SELECT id FROM customers WHERE id = ?)', p.customer.existingId),
-        // A chosen contact must be this customer's and live; otherwise the guard below stops the whole conversion.
         ...(p.customer.contactId !== null
           ? [setCustomer('converted_contact_id = (SELECT id FROM customer_contacts WHERE id = ? AND customer_id = ? AND archived_at IS NULL)', p.customer.contactId, p.customer.existingId)]
           : []),
@@ -80,9 +85,8 @@ export async function convertInquiry(db: D1Database, p: ConvertInput) {
         setCustomer('converted_contact_id = last_insert_rowid()'),
       ]
     : []
-  // Past here a missing customer or contact stops everything, like a stale version.
-  const full = `${ok} AND (SELECT converted_customer_id IS NOT NULL AND converted_contact_id IS NOT NULL FROM inquiries WHERE id = ?)`
-  const fullB = [...okB, p.inquiryId]
+  const full = ok
+  const fullB = okB
 
   const results = await db.batch([
     ...who,
@@ -149,12 +153,12 @@ export const claimedFiles = async (db: D1Database, inquiryId: number) =>
 export const markClaimedFilesDeleting = (db: D1Database, inquiryId: number) =>
   db.prepare(`UPDATE inquiry_files SET status = 'deleting' WHERE inquiry_id = ? AND status = 'linked'`).bind(inquiryId).run()
 
-/** The objects are confirmed gone. Rows go together, and the audit row carries counts only. */
+/** The objects are confirmed gone. Rows go together, and the audit row (written once, even if two runs overlap) carries counts only. */
 export const removeClaimedRows = (db: D1Database, c: ClaimedInquiry, fileIds: number[], reason: string, actorId: number | null) => db.batch([
+  db.prepare(`INSERT INTO activity_log (actor_kind, actor_id, entity_type, entity_id, action, after) SELECT ?, ?, 'inquiry', ?, 'inquiry_deleted', ? WHERE EXISTS (SELECT 1 FROM inquiries WHERE id = ?)`)
+    .bind(actorId === null ? 'system' : 'user', actorId, c.id, JSON.stringify({ reason, files: fileIds.length }), c.id),
   db.prepare(`DELETE FROM inquiry_files WHERE inquiry_id = ?`).bind(c.id),
   ...fileIds.map((f) => db.prepare(`DELETE FROM files WHERE id = ? AND r2_key LIKE 'inquiries/%'`).bind(f)),
   db.prepare(`DELETE FROM inquiries WHERE id = ? AND deleting_at IS NOT NULL`).bind(c.id),
   ...(c.submission_id ? [db.prepare(`DELETE FROM inquiry_submissions WHERE id = ?`).bind(c.submission_id)] : []),
-  db.prepare(`INSERT INTO activity_log (actor_kind, actor_id, entity_type, entity_id, action, after) VALUES (?, ?, 'inquiry', ?, 'inquiry_deleted', ?)`)
-    .bind(actorId === null ? 'system' : 'user', actorId, c.id, JSON.stringify({ reason, files: fileIds.length })),
 ])

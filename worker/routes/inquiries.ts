@@ -7,7 +7,7 @@ import { CUSTOMER_KINDS } from '../../shared/enums'
 import { requireRole, type AppEnv } from '../auth'
 import { customerDefaults } from '../domain/customerDefaults'
 import { readiness } from '../domain/readiness'
-import { lineToItem, parsePayload } from '../domain/inquiryConversion'
+import { conversionNote, lineToItem, parsePayload } from '../domain/inquiryConversion'
 import * as db from '../db/inquiries'
 import { getCustomerDefaults } from '../db/orders'
 import { processClaimed } from '../inquiryDeletion'
@@ -103,7 +103,7 @@ export function inquiryRoutes() {
         inquiryId: row.id, version: d.expectedVersion, actorId: c.get('user').id, year, title: d.title, dueDate: d.dueDate,
         customer, contact: { name: row.contact_name, email: row.contact_email, phone: row.contact_phone },
         poRequired, paymentTerms: defaults.terms, artworkRequired: d.artworkRequired, productionStatus: status,
-        items: payload.lines.map(lineToItem), description: payload.description ?? null, files,
+        items: payload.lines.map(lineToItem), description: conversionNote(payload), files,
       })
       if (n === null) {
         const raced = await already()

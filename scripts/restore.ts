@@ -12,7 +12,7 @@ import { checksum, dumpTable, foreignKeyOrder, mirrorJournal, readJournal, repla
 const LIVE_ID = /"database_id":\s*"([^"]+)"/.exec(readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'))?.[1]
 if (!LIVE_ID) throw new Error('No database_id in wrangler.jsonc')
 const BUCKET = 'gocreative-files'
-const { values, positionals } = parseArgs({ allowPositionals: true, options: { 'database-id': { type: 'string' }, 'database-name': { type: 'string' } } })
+const { values, positionals } = parseArgs({ allowPositionals: true, options: { 'database-id': { type: 'string' }, 'database-name': { type: 'string' }, 'accept-local-journal': { type: 'boolean' } } })
 const backup = resolve(positionals[0] ?? '')
 const databaseId = values['database-id']
 const remote = databaseId !== undefined
@@ -35,6 +35,18 @@ const config = (migrationsDir: string) => {
 }
 const wrangler = (...args: string[]) => execFileSync('npx', ['wrangler', ...args, '-c', join(scratch, 'wrangler.json')], { encoding: 'utf8', maxBuffer: 1 << 30, stdio: ['ignore', 'pipe', 'inherit'] })
 const d1 = (sql: string) => (JSON.parse(wrangler('d1', 'execute', name, ...where, '--json', '--command', sql)) as { results: Row[] }[])[0].results
+
+// Deletions made after this backup was taken must stay deleted, so a restore needs the current journal. Without the account it stops,
+// unless a person accepts the local copy knowing newer deletions may be missing (the account itself being lost is the reason to).
+const journalDir = join(homedir(), 'gocreative-backups', 'journal')
+try {
+  await mirrorJournal(journalDir, BUCKET)
+} catch (e) {
+  if (!values['accept-local-journal']) throw new Error(`Could not refresh the deletion journal (${String(e)}). A restore could bring deleted requests back. Fix access, or rerun with --accept-local-journal to use the local copy of ${readJournal(journalDir, '').length} entries.`)
+  console.warn('!! Using the local deletion journal: deletions newer than its last copy may be missing.')
+}
+const replay = readJournal(journalDir, manifest.createdAt)
+const deletedKeys = new Set(replay.flatMap((e) => e.files.map((f) => f.r2Key)))
 
 // 1. Migrations up to the backup's version, and no further.
 const subset = join(scratch, 'migrations')
@@ -68,7 +80,7 @@ const after = d1("SELECT name, sql FROM sqlite_schema WHERE type = 'trigger' ORD
 if (JSON.stringify(after.map((t) => t.name)) !== JSON.stringify(triggers.map((t) => t.name))) problems.push('triggers differ after the load')
 
 // The objects, to their original keys. Local only: a real file recovery is a separate, deliberate step (runbook).
-const files = read('files') as { r2_key: string; sha256: string }[]
+const files = (read('files') as { r2_key: string; sha256: string }[]).filter((f) => !deletedKeys.has(f.r2_key)) // journaled as deleted: never put back
 const mirror = join(homedir(), 'gocreative-backups', 'files')
 for (const f of files) {
   const copy = join(mirror, f.sha256)
@@ -80,13 +92,15 @@ if (problems.length > 0) {
   process.exit(1)
 }
 
-// 6. Deletions made after this backup was taken: they stay deleted. If the account can't be reached, the local copy is used and we say so.
-const journalDir = join(homedir(), 'gocreative-backups', 'journal')
-await mirrorJournal(journalDir, BUCKET).catch((e: unknown) => console.warn(`!! Could not refresh the deletion journal (${String(e)}). Using the local copy; newer deletions may be missing.`))
-const replay = readJournal(journalDir, manifest.createdAt)
-const replayFile = join(scratch, 'replay.sql')
-const replayText = replaySql(replay, triggers)
+// 6. Anything newer than the backup, first: a journal entry can name tables an older backup doesn't have.
+config(resolve(new URL('../migrations', import.meta.url).pathname))
+wrangler('d1', 'migrations', 'apply', name, ...where)
+
+// 7. Replay deletions made since the backup.
+const current = d1("SELECT name, sql FROM sqlite_schema WHERE type = 'trigger' ORDER BY name") as { name: string; sql: string }[]
+const replayText = replaySql(replay, current)
 if (replayText) {
+  const replayFile = join(scratch, 'replay.sql')
   writeFileSync(replayFile, replayText, { mode: 0o600 })
   wrangler('d1', 'execute', name, ...where, '--file', replayFile)
   const after = d1('PRAGMA foreign_key_check')
@@ -95,10 +109,6 @@ if (replayText) {
     process.exit(1)
   }
 }
-
-// 7. Anything newer than the backup.
-config(resolve(new URL('../migrations', import.meta.url).pathname))
-wrangler('d1', 'migrations', 'apply', name, ...where)
 
 const rowCount = Object.values(manifest.tables).reduce((n, t) => n + t.rows, 0)
 console.log(`Restored and verified: ${present.length} tables, ${rowCount} rows, ${triggers.length} triggers, ${files.length} files, ${replay.length} deletions replayed.`)

@@ -11,7 +11,7 @@
 - **New cloud database:** `npx wrangler d1 create <name>`, then `npm run restore -- <dir> --database-id <id> --database-name <name>`. Local (no flags) also loads the files into local R2; to boot on it, use the command it prints, setting any flag before boot. Delete the scratch folder afterwards, including after a failed run: it holds customer data.
 - **Time Travel:** 30 days on Workers Paid, 7 on Free (Cloudflare docs, 2026-10-31). Which plan this account is on is unverified, so assume 7.
 
-- **Deletion journal (S3):** every inquiry deletion first writes `_journal/deletions/<time>-inquiry-<id>.json` to R2, holding ids, keys and hashes, no personal data. Backup copies new entries to `~/gocreative-backups/journal/` (listing through Cloudflare's API with wrangler's login, read-only). Restore replays every entry newer than the backup into the isolated database, so a deleted request stays deleted; it warns if the journal can't be refreshed.
+- **Deletion journal (S3):** every inquiry deletion first writes `_journal/deletions/<time>-inquiry-<id>.json` to R2, holding ids, keys and hashes, no personal data. Backup copies new entries to `~/gocreative-backups/journal/` (listing through Cloudflare's API with wrangler's login, read-only). Restore replays every entry newer than the backup into the isolated database, so a deleted request stays deleted, and never puts those objects back. If the journal can't be refreshed, restore **stops**; `--accept-local-journal` overrides it, for when the account itself is lost. Newer migrations apply before the replay, so an older backup works.
 
 ## Restoring for real: the procedure
 

@@ -156,6 +156,7 @@ test('a stale version or a contact that moved writes nothing at all, and burns n
   expect(res.status).toBe(400)
   expect(counts()).toEqual(before)
   expect(t.n(`inquiries WHERE id = ${id} AND status = 'new'`)).toBe(1)
+  expect(t.sqlite.prepare('SELECT converted_customer_id AS a, converted_contact_id AS b, version FROM inquiries WHERE id = ?').get(id)).toEqual({ a: null, b: null, version: 1 }) // not one column
   expect((await t.convert(id, 1, { customer: { existingId: 999999, contactId: null } })).status).toBe(404)
 })
 
@@ -175,7 +176,38 @@ test('an existing customer is matched by email or phone, only suggested, and kee
   expect(t.sqlite.prepare('SELECT customer_id, contact_id, payment_terms FROM orders WHERE number = ?').get(number)).toEqual({ customer_id: existing.id, contact_id: contactId, payment_terms: existing.default_payment_terms })
 })
 
-test('the converted order follows the normal Phase 2 workflow: items edit, quote, PO approval', async () => {
+test('long personalization stays whole in the note, and the item it came from can still be priced with the ordinary editor', async () => {
+  const t = setup()
+  const names = Array.from({ length: 60 }, (_, i) => `Player number ${i}`).join(', ')
+  expect(names.length).toBeGreaterThan(600)
+  const { id } = await t.submit({ ...FORM, description: undefined, lines: [{ product: 'trophies', method: 'laser_engrave', quantity: 60, personalization: names }] })
+  const { number } = await (await t.convert(id, 1)).json() as { number: string }
+  const o = t.sqlite.prepare('SELECT id, version FROM orders WHERE number = ?').get(number) as { id: number; version: number }
+  expect((t.sqlite.prepare("SELECT body FROM notes WHERE entity_type = 'order' AND entity_id = ?").get(o.id) as { body: string }).body).toContain(names)
+  const d = await (await t.staff('GET', `/orders/${number}`)).json() as { items: Record<string, unknown>[] }
+  const edit = await t.staff('PUT', `/orders/${number}/items`, { expectedVersion: o.version, items: d.items.map((i) => ({ id: i.id, kind: i.kind, description: i.description, product: i.product, garmentColor: i.garmentColor, method: i.method, sizes: i.sizes, quantity: i.quantity, unitPriceCents: 1250, notes: i.notes ?? null })) })
+  expect(edit.status, await edit.clone().text()).toBe(200)
+  expect((t.sqlite.prepare('SELECT unit_price_cents AS p FROM order_items WHERE order_id = ?').get(o.id) as { p: number }).p).toBe(1250)
+})
+
+test('two overlapping deletions: the journal keeps the first, full entry, and one audit row is written', async () => {
+  const t = setup()
+  const { id } = await t.submit(FORM, [ART, PO])
+  const { processClaimed } = await import('../../worker/inquiryDeletion')
+  t.sqlite.exec(`UPDATE inquiries SET deleting_at = '2030-01-01T00:00:00.000Z' WHERE id = ${id}`)
+  const { listClaimed, removeClaimedRows } = await import('../../worker/db/inquiries')
+  const stale = (await listClaimed(t.db as never, 10))[0] // the second run already read its claim
+  await processClaimed(t.env, 'owner', 1)
+  const key = [...t.r2.objects.keys()].find((k) => k.startsWith('_journal/'))!
+  const first = new TextDecoder().decode(t.r2.objects.get(key)!.bytes)
+  expect(JSON.parse(first).files).toHaveLength(2)
+  await t.r2.bucket.put(key, JSON.stringify({ files: [] }), { onlyIf: { etagDoesNotMatch: '*' } } as never)
+  expect(new TextDecoder().decode(t.r2.objects.get(key)!.bytes)).toBe(first)
+  await removeClaimedRows(t.db as never, stale, [], 'retention', null)
+  expect(t.n("activity_log WHERE action = 'inquiry_deleted'")).toBe(1)
+})
+
+test('the converted order follows the normal Phase 2 workflow: quote and PO approval', async () => {
   const t = setup()
   const { id } = await t.submit(FORM, [PO])
   const { number } = await (await t.convert(id, 1)).json() as { number: string }

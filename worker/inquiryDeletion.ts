@@ -7,11 +7,13 @@ const JOURNAL_BATCH = 100
 
 async function deleteClaimed(env: Pick<Env, 'DB' | 'FILES'>, c: db.ClaimedInquiry, reason: string, actorId: number | null) {
   const files = await db.claimedFiles(env.DB, c.id)
-  const key = `${JOURNAL_PREFIX}${c.deleting_at.replace(/[:.]/g, '-')}-inquiry-${c.id}.json` // the same on a retry, so a retry can't add a second entry
-  await env.FILES.put(key, JSON.stringify({
+  // Two runs can overlap (an owner's delete and the cron). The key is fixed by the claim and the write is create-only, so the first
+  // entry, the one with the full file list, is the one that stays. Later runs find the rows gone and change nothing.
+  const key = `${JOURNAL_PREFIX}${c.deleting_at.replace(/[:.]/g, '-')}-inquiry-${c.id}.json`
+  if (!(await env.FILES.head(key))) await env.FILES.put(key, JSON.stringify({
     kind: 'inquiry', inquiryId: c.id, submissionId: c.submission_id, at: c.deleting_at, reason,
     files: files.map((f) => ({ fileId: f.file_id, r2Key: f.r2_key, sha256: f.sha256 })),
-  }), { httpMetadata: { contentType: 'application/json' } })
+  }), { httpMetadata: { contentType: 'application/json' }, onlyIf: { etagDoesNotMatch: '*' } })
   await db.markClaimedFilesDeleting(env.DB, c.id)
   if (files.length > 0) await env.FILES.delete(files.map((f) => f.r2_key))
   await db.removeClaimedRows(env.DB, c, files.flatMap((f) => (f.file_id === null ? [] : [f.file_id])), reason, actorId)
