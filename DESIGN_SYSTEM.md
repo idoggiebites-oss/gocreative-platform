@@ -31,3 +31,24 @@ One set of tokens and two layouts.
 GoCreative has no website, logo or brand colour yet. Phase 1 uses a typographic
 wordmark and the default ink-blue accent. Both are set in `src/brand.css` and
 `shared/business.ts`, so replacing them later is a two-file change.
+
+
+## Storefront motion spec (2026-11-01; prototyped in the storefront mockups)
+
+Built in S2 from this spec, using the `animate` skill's rules: animate transform and opacity only; never
+`ease-in`; never `scale(0)`; UI motion stays under 300 ms; reduced motion removes movement and keeps only short
+fades. No motion library: CSS transitions and animations, plus the View Transitions API for navigation.
+
+| What | Why | How |
+|---|---|---|
+| Page to page (home ↔ services ↔ order) | prevents a jarring swap | React Router `viewTransition` on links. The root crossfades 200 ms, ease-out. The header and the sticky "Start an order" bar get their own `view-transition-name`, so they stay put. Browsers without View Transitions just navigate. |
+| Order step forward / back | spatial consistency | The new step enters from the side you're moving toward: `translateX(24px)` + opacity to rest (back: `-24px`), 220 ms `cubic-bezier(0.23, 1, 0.32, 1)`. The old step leaves with a 150 ms fade. Focus moves to the new step's heading, and the step's live region announces "Step 2 of 4". |
+| Progress bar | state indication | `transform: scaleX(step / 4)` from the left, 250 ms ease-out (never animating `width`). |
+| Choice tiles and options | feedback | `:active` scale(0.97), 120 ms. Selection ring and background change color in 150 ms `ease`. No hover movement on touch; any hover motion goes behind `(hover: hover) and (pointer: fine)`. |
+| Method list changing with the product | prevents a jarring change | New options fade up 6 px over 180 ms, staggered 40 ms. |
+| Upload row added | spatial consistency | Enters with `@starting-style` (opacity + `translateY(6px)`), 200 ms. Progress fill uses `scaleX`, linear. An error changes color with no shake. |
+| Submit → confirmation | delight (rare: once per inquiry) | The check badge pops from scale(0.9) in 260 ms, the check stroke draws in 320 ms, then the heading, reference and "what happens next" rise in sequence (220, 300, 380 ms). Under reduced motion: fades only. |
+| Keyboard focus, typing, field validation | none | No animation. Validation messages appear instantly. |
+
+Tokens: `--ease-out: cubic-bezier(0.23, 1, 0.32, 1)`, `--ease-in-out: cubic-bezier(0.77, 0, 0.175, 1)`. These are
+added to the shared tokens (the dashboard keeps its own "no decorative motion" rule).

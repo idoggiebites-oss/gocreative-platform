@@ -458,3 +458,4 @@ Migration 0006 (additive), `worker/db/{pickups,payments}.ts`, `worker/routes/{pi
 - Taste Skill (design-taste-frontend) is the design skill Arturo wanted; the mockups are fine.
 - Correction: only offer methods that fit the product ("you can't laser engrave or cut a shirt or cap"). A product → methods map goes in business config, enforced by the public schema; the size grid shows only for sized apparel. Draft map in STOREFRONT_PLAN §0c, to confirm with GoCreative.
 - Arturo confirmed the product → method map, and added **trophies and awards**: ordered, built and personalized by the shop. They are a storefront product (personalized by laser engraving), and internally they use the existing purchasing (a trophy supplier), prep (assembly) and production steps.
+- Storefront screens animate (Arturo): motion spec in DESIGN_SYSTEM.md, prototyped in the phone order flow and confirmation. CSS + View Transitions API, no motion library; reduced motion removes movement.

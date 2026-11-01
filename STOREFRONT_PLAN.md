@@ -366,7 +366,7 @@ standing approval (additive changes only). The Access re-scope is the exception 
 | S0c | **Access re-scope rehearsal** on a throwaway Worker: hostname inventory, exact config method, outside-in proof (§0b.2). Before S1. | Claude, with Arturo in the dashboard |
 | S0b | **Fix-now items:** a backup script (per-table JSON export of the live D1, plus a restore drill into a scratch local D1), with ARCHITECTURE.md corrected. | Claude |
 | S1 | Migration 0008; the submission, upload and submit endpoints; Turnstile; throttling and the admission budget; the off switch; cron cleanup; boundary tests seeded with internal notes, other customers and supplier costs; abuse tests (oversize, wrong type, token reuse and expiry, Turnstile failure and replay, budget races, flood). | Opus agent; Codex reviews security |
-| S2 | Storefront UI to the approved mockups: layout, pages, the inquiry form with uploads and retries, confirmation, privacy page, e2e on phone and desktop. | Sonnet agent; Codex reviews |
+| S2 | Storefront UI to the approved mockups, **with the motion spec in DESIGN_SYSTEM.md** (View Transitions between pages, direction-aware step changes, the confirmation moment): layout, pages, the inquiry form with uploads and retries, confirmation, privacy page, e2e on phone and desktop. | Sonnet agent; Codex reviews |
 | S3 | Dashboard: inquiry detail, customer match, **Convert to order**, Mark as spam, **Decline with an optional reason**, **owner delete**. Conversion e2e (storefront submit → convert → order has items and artwork → quote). | Opus (conversion batch), Sonnet (screens) |
 | S4 | Launch: Access re-scope (with Arturo), domain if ready, PWA for the dashboard, signed-in smoke test, the family's dry run. | Claude + Arturo |
 
