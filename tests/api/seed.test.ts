@@ -68,7 +68,7 @@ test('the seed’s M5 rows: closed exactly when picked up and paid, and every pi
     '2026-0001': 'picked_up/paid', '2026-0002': 'picked_up/paid', '2026-0006': 'picked_up/unpaid', '2026-0015': 'picked_up/paid', '2026-0020': 'notified/partially_paid',
   })
   const col = (sql: string) => (sqlite.prepare(sql).all() as { v: unknown }[]).map((r) => r.v)
-  expect(col('SELECT status AS v FROM check_collections ORDER BY id')).toEqual(['cleared', 'ready_for_collection'])
+  expect(col('SELECT status AS v FROM check_collections ORDER BY id')).toEqual(['cleared', 'ready_for_collection', 'awaiting_payment', 'collected', 'deposited']) // every CHECK_STATUS
   expect(col('SELECT order_id AS v FROM payments WHERE voided_at IS NOT NULL')).toEqual([15])
   expect(col(`SELECT COUNT(*) AS v FROM activity_log WHERE action = 'payment_voided'`)).toEqual([1])
 })

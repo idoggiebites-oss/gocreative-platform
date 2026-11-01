@@ -33,3 +33,47 @@ migration has been applied remotely it may be edited, but every local state must
 be rebuilt. `tests/e2e/prepare.ts` now deletes `.wrangler/e2e` on every run.
 Locally, run `rm -rf .wrangler/state` before `db:migrate`. Once a migration has
 been applied remotely, never edit it; write a new one.
+
+### 2026-10-31 — `BEFORE UPDATE OF col` triggers miss rowid aliases; guards must be unconditional
+Codex found, in several milestones, that an immutability trigger written as `BEFORE UPDATE OF customer_id, version`
+never fires for an update that goes through `id` or another rowid alias, so the row could be re-keyed. Rule: an
+immutability guard is an unconditional `BEFORE UPDATE` with a `WHEN NEW.x IS NOT OLD.x` for every protected column
+(including the id), and a test that updates through `rowid` and `id`, not only the named columns. Migration 0007 did
+this for `artwork`.
+
+### 2026-10-31 — `INSERT OR REPLACE` on a UNIQUE column deletes the old row without any delete trigger
+`REPLACE` resolves a UNIQUE conflict by deleting the existing row, so a "write-once" or "never deleted" table can lose
+a stored (even approved) row while its delete trigger never fires. Rule: every write-once table gets a BEFORE INSERT
+trigger that aborts when the id or the unique key already exists (`pickups_no_replace`, `artwork_no_replace`), and the
+app never uses REPLACE or `ON CONFLICT DO UPDATE` on them.
+
+### 2026-10-31 — A test that only stubs the route can pass while the rule is gone
+Several Codex findings were tests that mocked the response or checked only the route's status, so removing the rule
+(the SQL guard, the trigger) left them green. Rule: for every rule that matters, one test goes through the real
+database path with the rule's enforcement removed in mind, and asks "would this still pass if the rule were deleted?"
+Parity tests (`gate-parity`) and direct-SQL bypass tests exist for this reason.
+
+### 2026-10-31 — Conflict recovery must wait for a SUCCESSFUL refetch
+After a 409 `conflict_retry` the dialog shows the notice and must replace its stale values with fresh ones. Unblocking
+Save as soon as the version moved, or when the refetch merely finished, lets a failed refetch send stale values with a
+new version. Rule: `useEditSession` blocks saving until the refetch for the new version has succeeded (`ready`), and
+there is an e2e test where the refetch returns 500 and Save stays disabled until a good one lands.
+
+### 2026-10-31 — A retry identity must outlive the dialog (module-level `requestId`)
+A payment's `requestId` generated inside the dialog changed when the dialog closed and reopened, so a lost response
+followed by a "try again" recorded two payments. Rule: the pending submission (requestId plus the details it was sent
+with) lives at module level, shared by every entry point (the tab and the Payments page), is reused only while the
+details are identical, and is cleared on success or on a definitive refusal. Changed details are a new submission.
+
+### 2026-10-31 — Focus is lost when the focused button disappears; fix it once, for every screen
+A button that turns into another (Start becomes Send to QC), a banner that clears (Record approval), or a control that
+becomes disabled (Move down at the end of the list) drops focus to `<body>`, and a keyboard user restarts from the top.
+Patching each button was a losing game. Rule: `useKeepFocus` (in `AppShell`) restores focus to the nearest surviving
+control or section when focus falls to the body after a DOM change; dialogs and menus that manage their own focus are
+left alone. A list that re-orders itself (the ready queue) also puts focus back on the moved row's button.
+
+### 2026-10-31 — Spanish overflow is a layout problem, not a translation problem
+The orders and Payments tables overflowed their cards in Spanish at 1440px because nowrap text cells (customer, terms,
+next step, the quote total with its status) set a minimum width wider than the card. Rule: cells that hold sentences
+wrap (`whitespace-normal!`); only chips, numbers and dates stay nowrap. `polish.spec.ts` fails if any table scrolls
+inside its card in Spanish.

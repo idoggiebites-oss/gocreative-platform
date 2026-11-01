@@ -75,7 +75,9 @@ print-shop/
   scripts/             seed, backup, add-user
 ```
 
-## Initial schema (D1)
+## Initial schema (D1, Phase 1)
+
+This is the Phase 1 shape. Phase 2 (migrations 0002 to 0007) changed it; see "Phase 2 schema" below, which wins where they differ (for example `estimates` became `quotes`).
 
 IDs are integers. Money is integer cents. Timestamps are ISO text in UTC. Every
 FK is declared, and `PRAGMA foreign_keys` is on in D1.
@@ -108,6 +110,73 @@ unit test and an API test.
 Deliberately left out: `pricing_rules` (Phase 6 adds it), `sessions` (Access owns
 those), and `production_steps` as its own table (production is tracked per order;
 stage history lives in `activity_log`).
+
+## Phase 2 schema (migrations 0002 to 0007)
+
+| Migration | Adds |
+|---|---|
+| 0002 | Whole vocabulary switched at once: customer defaults (`default_po_required`, `default_payment_terms`); order columns (`po_required`, `payment_terms`, `artwork_required`, `items_revision`, `authorization_method/notes`, `state` = `active\|cancelled\|closed`); `order_items.kind` (`product\|charge\|discount`); `quotes` + `quote_items` replacing `estimates` |
+| 0003 | `files.filename`, `artwork.design_name`, write-once triggers on artwork versions and PO documents |
+| 0004 | `suppliers` (JDS is the default), `order_purchases`, `purchase_receipts`, `orders.materials_required`, `orders.prep_status` |
+| 0005 | `orders.production_slot`, `production_override_by/reason`, `queue_position`, `units_completed`; the slot triggers and the `one_job_per_slot` index |
+| 0006 | `pickups`, `check_collections`, `payments`; `orders.payment_due_on` |
+| 0007 | Unconditional id guards on `artwork`, and payment terms fixed once production is complete |
+
+| Table | Key columns | Notes |
+|---|---|---|
+| quotes | order_id, version, status `draft\|sent\|accepted\|declined\|superseded`, items_revision (snapshot), total_cents | Only a draft is editable. Triggers freeze an accepted quote and its items; a new version supersedes the old one |
+| quote_items | quote_id, position, kind, description, product, sizes JSON, quantity, unit_price_cents | A frozen copy of the order's lines at the time the quote was made |
+| suppliers | name, is_default | JDS seeded as the default |
+| order_purchases | order_id, supplier_id, description, quantity, sizes JSON, estimated/actual unit cost (cents), ordered_on, expected_on, status `not_ordered\|ordered\|cancelled` | "Partially received" and "received" are **derived** from the receipts, never stored |
+| purchase_receipts | purchase_id, quantity, sizes JSON, received_on | One row per delivery, so partial shipments need no special case |
+| pickups | order_id UNIQUE, ready_on, notified_on/method, picked_up_on, collected_by_name, release_override_by/reason | One pickup per order. The CHECKs tie each fact to its partner (a pickup date needs a name and a recorder) |
+| check_collections | order_id, expected_cents, amount_received_cents, check_number, status `awaiting_payment\|ready_for_collection\|collected\|deposited\|cleared`, available/deposited/cleared dates | Several per order are allowed. Deposited and cleared are statuses of the collection only |
+| payments | order_id, amount_cents (positive integer), method, paid_on, request_id UNIQUE, check_collection_id UNIQUE, voided_at/by/reason | Balance and financial status are **derived**: accepted quote total minus non-voided payments. A correction is a void; the row is kept |
+
+### The four status tracks
+
+An order is not one status; four things move independently and no track writes another's column.
+
+| Track | Where it lives | Values |
+|---|---|---|
+| Production | `orders.production_status` | `awaiting_quote`, `awaiting_authorization`, `awaiting_artwork`, `awaiting_materials`, `awaiting_preparation` (derived from the first unmet readiness item, never chosen by hand), then `ready`, `in_production`, `quality_control`, `production_complete`. Production ends there |
+| Fulfilment | the `pickups` row | `not_ready`, `ready_for_pickup` (set when production completes), `customer_notified`, `picked_up`. Picked up means fulfilled, even if unpaid |
+| Financial | derived from `payments` and the accepted quote | `unpaid`, `partially_paid`, `paid` |
+| Order state | `orders.state` | `active`, `cancelled`, `closed`. Closed = picked up AND paid, set in the same batch as the write that completes the second condition |
+
+### The production slot model
+
+`orders.production_slot` is NULL, 1 or 2, and the database enforces every rule so no SQL path can bypass them:
+`one_job_per_slot` (a unique index) means at most two jobs ever run; entering slot 2 needs another order in slot 1,
+an active owner as `production_override_by` and a non-blank reason (triggers), and the override columns are
+immutable afterwards; an AFTER trigger writes the `production_override` activity row. A start is one batch: an
+UPDATE guarded by `state='active' AND production_status='ready' AND production_slot IS NULL` that **re-checks the
+full five-item readiness gate inside the SQL** (`tests/api/gate-parity.test.ts` keeps that SQL in step with
+`readiness()`), then the activity INSERT guarded by `changes() = 1`. Every other move out of `in_production` clears the
+slot and the override columns in the same UPDATE. A losing concurrent start matches no row or hits the index, and
+the route answers 409 (`production_busy` names the running job).
+
+### Payment de-duplication
+
+Every payment carries one of two keys, enforced by a CHECK. A manual payment has a client-generated `request_id`
+(UNIQUE): the form keeps one id per submission and reuses it across retries, so a lost response and a second click
+record one payment; on a UNIQUE hit the route reads the stored row and `matchRetry` returns it if the details are
+identical, or 409 `request_id_conflict` if they are not. A check collection produces its payment in one batch
+(UPDATE the collection `WHERE status IN (...)`, INSERT the payment `WHERE changes() = 1`, then the activity row), and
+`check_collection_id` is UNIQUE, so a retry or a competing collect changes nothing. Voids keep the row and its keys.
+
+### Single write paths
+
+| Data | Only written by |
+|---|---|
+| `production_status` | `applyProductionChange` (after `checkOrderProductionMove`, which uses `readiness()` and `productionFlow`) and the re-derive of the awaiting statuses; `cancelOrder` only drops a running job as part of cancelling |
+| Quote acceptance | `checkQuoteAcceptable`; a charge-only or empty snapshot can never be accepted |
+| Payments and check collections | the collect and record-payment batches in `worker/db/`, with the domain rules (`balance`, `matchRetry`, `checkCheckTransition`) |
+| Pickup | the pickup batch, which also closes the order if it is now paid; the unpaid-release rule is enforced on the server and the override is owner-only with a reason |
+| `activity_log` | inserted in the same batch as the change it records; UPDATE and DELETE are blocked by triggers |
+| Business dates | `businessToday()` (`shared/businessDate.ts`), shop time zone America/Chicago; never the UTC date |
+
+Writes from the browser send the `expectedVersion` they read; a stale one is a 409 `conflict_retry`.
 
 ## Testing, security, cost
 

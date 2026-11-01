@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { en, type Lang, type Messages } from '@shared/i18n/en'
 import { es } from '@shared/i18n/es'
+import { businessToday } from '@shared/businessDate'
 
 const MESSAGES: Record<Lang, Messages> = { en, es }
 const LOCALES: Record<Lang, string> = { en: 'en-US', es: 'es-US' }
@@ -25,11 +26,8 @@ export function makeFormat(lang: Lang) {
       const [y, m, d] = isoDate.slice(0, 10).split('-').map(Number)
       return new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' }).format(new Date(y, m - 1, d))
     },
-    /** Today as a local 'YYYY-MM-DD', the same shape as an order's due date. */
-    todayIso: () => {
-      const n = new Date()
-      return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`
-    },
+    /** Today in shop time ('YYYY-MM-DD', the same shape as an order's due date), not the browser's or UTC's. */
+    todayIso: () => businessToday(new Date()),
     longDate: (d: Date) => new Intl.DateTimeFormat(locale, { weekday: 'long', month: 'long', day: 'numeric' }).format(d),
     weekdayDate: (isoDate: string) => {
       const [y, m, d] = isoDate.slice(0, 10).split('-').map(Number)

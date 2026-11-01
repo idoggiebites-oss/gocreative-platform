@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { OrderDetailResponse, PurchaseRecord } from '@shared/api'
+import { businessToday } from '@shared/businessDate'
 import { formatCentsPlain, parseDollarsToCents } from '@shared/money'
 import { useI18n } from '@/i18n'
 import { isConflict, useCancelPurchase, useCreatePurchase, useCreateSupplier, useMarkPurchaseOrdered, usePurchases, useRecordReceipt, useSuppliers, useUpdatePurchase } from '@/lib/api'
@@ -119,9 +120,9 @@ function PurchaseDialog({ d, p, edit, fetching, onClose }: { d: Detail; edit: bo
 }
 
 function OrderedDialog({ d, p, fetching, onClose }: { d: Detail; onClose: () => void } & Live) {
-  const { m, fmt } = useI18n()
+  const { m } = useI18n()
   const t = m.purchasing
-  const ed = useEditSession(d.order.version, () => fmt.todayIso(), !fetching)
+  const ed = useEditSession(d.order.version, () => businessToday(new Date()), !fetching)
   const gone = !p || p.status !== 'not_ordered'
   const w = useMarkPurchaseOrdered(d.order.number)
   return (
@@ -139,9 +140,9 @@ function OrderedDialog({ d, p, fetching, onClose }: { d: Detail; onClose: () => 
 }
 
 function ReceiptDialog({ d, p, fetching, onClose }: { d: Detail; onClose: () => void } & Live) {
-  const { m, fmt } = useI18n()
+  const { m } = useI18n()
   const t = m.purchasing
-  const ed = useEditSession(d.order.version, () => ({ quantity: String(p ? Math.max(p.quantity - p.receivedQuantity, 1) : 1), useSizes: false, sizes: {} as Record<string, string>, on: fmt.todayIso(), notes: '' }), !fetching)
+  const ed = useEditSession(d.order.version, () => ({ quantity: String(p ? Math.max(p.quantity - p.receivedQuantity, 1) : 1), useSizes: false, sizes: {} as Record<string, string>, on: businessToday(new Date()), notes: '' }), !fetching)
   const gone = !p || !['ordered', 'partially_received', 'received'].includes(p.status)
   const f = ed.values
   const set = (x: Partial<typeof f>) => ed.setValues({ ...f, ...x })

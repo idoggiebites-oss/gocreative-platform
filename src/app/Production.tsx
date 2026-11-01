@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import { Link } from 'react-router'
 import { ArrowDown, ArrowUp } from 'lucide-react'
 import type { ProductionJob } from '@shared/api'
@@ -70,7 +71,19 @@ function ReadyRow({ job, index, last, running, move, busy }: { job: ProductionJo
 function ReadyList({ jobs, running }: { jobs: ProductionJob[]; running: ProductionJob[] }) {
   const { m } = useI18n()
   const reorder = useReorderQueue()
+  // Moving a row re-renders the list and the browser drops focus from the button just used (or it is now disabled at the end):
+  // put it back on that job's move button, or on its other one.
+  const refocus = useRef<{ number: string; dir: -1 | 1 } | null>(null)
+  useEffect(() => {
+    const r = refocus.current
+    if (!r || reorder.isPending) return
+    refocus.current = null
+    const label = (d: -1 | 1) => m.production.ariaFor(d === -1 ? m.production.moveUp : m.production.moveDown, r.number)
+    const find = (d: -1 | 1) => document.querySelector<HTMLButtonElement>(`button[aria-label="${label(d)}"]:not(:disabled)`)
+    ;(find(r.dir) ?? find(r.dir === -1 ? 1 : -1))?.focus()
+  }, [jobs, reorder.isPending, m])
   const move = (i: number, dir: -1 | 1) => {
+    refocus.current = { number: jobs[i].number, dir }
     const next = jobs.map((j) => j.number)
     ;[next[i], next[i + dir]] = [next[i + dir], next[i]]
     reorder.mutate({ seen: jobs.map((j) => j.number), orderNumbers: next })

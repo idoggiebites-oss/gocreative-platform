@@ -294,14 +294,14 @@ logic it can test, Claude for design, integration and verification).
       to collect, dashboard Outstanding payments + Ready for pickup. *(Sonnet)*
 
 ### M6 — Polish and validation (brief Step 6)
-- [ ] Two end-to-end lifecycle tests through the real UI: a regular customer (direct
+- [x] Two end-to-end lifecycle tests through the real UI (`tests/e2e/lifecycle.spec.ts`): a regular customer (direct
       authorization, pay at pickup, unpaid-release override) and a school district (PO,
       pickup before payment, check collected → deposited → cleared). Together they cover
       acceptance 1–17.
-- [ ] Phase 1 carry-overs: the ES column overflow, focus after "Record approval".
+- [x] Phase 1 carry-overs: the ES column overflow, focus after "Record approval" (`tests/e2e/polish.spec.ts`).
 - [x] Additive migration 0007: unconditional `BEFORE UPDATE` id guards on `quotes` (already covered by quotes_frozen) and `artwork` (their `UPDATE OF` triggers miss `rowid` aliases; direct-DB edits only — Codex, M3 review).
-- [ ] Whole-phase Codex security review; accessibility pass; docs (README setup, ARCHITECTURE
-      schema section, DECISIONS, notes); realistic seed for every new state.
+- [ ] Whole-phase Codex security review *(ran separately; its fixes are 0007 and the request guards)*. Done in M6: [x] accessibility pass, [x] README setup,
+      [x] ARCHITECTURE schema section, [x] realistic seed for every new state. Still open: DECISIONS and notes entries.
 - [ ] Deploy, migrate remote, signed-in smoke test; then the family starts entering real orders.
 
 ## 6. How Codex reviews each milestone

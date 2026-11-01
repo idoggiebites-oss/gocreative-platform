@@ -110,7 +110,7 @@ INSERT INTO orders (id, number, customer_id, contact_id, source, title, due_date
   (15, '2026-0015', 4, 7, 'phone', 'Season jerseys', date('now', '-15 days'), 0, 'due_at_pickup', strftime('%Y-%m-%dT%H:%M:%fZ','now','-25 days'), 1, 'phone', 'Lee approved the mockup and price by phone.', 1, 0, 'ready', 1, 'production_complete', 2, 'closed', 2),
   (16, '2026-0016', 4, 7, 'email', 'Coach polos', date('now', '+3 days'), 0, 'due_at_pickup', strftime('%Y-%m-%dT%H:%M:%fZ','now','-5 days'), 1, 'email', 'Approval email filed with the order.', 1, 1, 'not_started', 1, 'awaiting_materials', 1, 'active', 1),
   (17, '2026-0017', 5, 8, 'portal', 'Staff aprons', date('now', '-1 days'), 0, 'due_at_pickup', strftime('%Y-%m-%dT%H:%M:%fZ','now','-5 days'), 2, 'in_person', NULL, 1, 0, 'not_required', 1, 'ready', 2, 'active', 2),
-  (18, '2026-0018', 5, 8, 'phone', 'Cutting boards', date('now', '+10 days'), 0, 'due_at_pickup', strftime('%Y-%m-%dT%H:%M:%fZ','now','-4 days'), 1, 'signed_form', 'Customer supplies the engraving file; no artwork approval needed.', 0, 0, 'in_progress', 1, 'awaiting_preparation', 1, 'active', 1),
+  (18, '2026-0018', 5, 8, 'phone', 'Cutting boards', date('now', '+10 days'), 0, 'due_at_pickup', strftime('%Y-%m-%dT%H:%M:%fZ','now','-4 days'), 1, 'signed_form', 'Customer supplies the engraving file; no artwork approval needed.', 0, 1, 'in_progress', 1, 'awaiting_preparation', 1, 'active', 1),
   (19, '2026-0019', 6, NULL, 'email', 'Family reunion tees', date('now', '+7 days'), 0, 'due_at_pickup', strftime('%Y-%m-%dT%H:%M:%fZ','now','-6 days'), 2, 'email', NULL, 1, 0, 'ready', 1, 'quality_control', 2, 'active', 2),
   (20, '2026-0020', 6, NULL, 'portal', 'Engraved tumbler', date('now', '+0 days'), 0, 'due_at_pickup', strftime('%Y-%m-%dT%H:%M:%fZ','now','-8 days'), 1, 'other', 'Approved by text message.', 1, 0, 'ready', 1, 'production_complete', 1, 'active', 1),
   (21, '2026-0021', 7, NULL, 'phone', 'Wedding favors', date('now', '+16 days'), 0, 'due_at_pickup', NULL, NULL, NULL, NULL, 1, 1, 'not_started', 1, 'awaiting_authorization', 2, 'active', 2),
@@ -320,14 +320,17 @@ INSERT INTO activity_log (actor_kind, actor_id, entity_type, entity_id, action, 
 
 -- Suppliers come from migration 0004 (JDS, the default, id 1) and are never wiped here.
 -- Order 16: a cancelled purchase (wrong colour), the replacement ordered and 30 of 40 received, and acrylic blanks not
--- ordered yet, so it stays awaiting_materials. Order 10: a purchase drafted before authorization.
+-- ordered yet, so it stays awaiting_materials. Order 10: a purchase drafted before authorization. Order 18: its blanks
+-- ordered and received in full, so materials are complete and it waits on preparation.
 INSERT INTO order_purchases (id, order_id, supplier_id, description, quantity, sizes, estimated_unit_cost_cents, actual_unit_cost_cents, status, ordered_on, expected_on, notes, created_by) VALUES
   (1, 16, 1, 'Gildan 5000 tee, Navy', 40, '{"S":6,"M":14,"L":14,"XL":6}', 350, NULL, 'ordered', date('now', '-6 days'), NULL, 'Ordered the wrong colour.', 1),
   (2, 16, 1, 'Gildan 5000 tee, Black', 40, '{"S":6,"M":14,"L":14,"XL":6}', 350, 365, 'ordered', date('now', '-5 days'), date('now', '+1 days'), NULL, 1),
   (3, 16, 1, 'Acrylic sign blanks, 8x10', 10, NULL, 600, NULL, 'not_ordered', NULL, date('now', '+4 days'), NULL, 1),
-  (4, 10, 1, 'Gildan 5000 tee, Black', 40, '{"S":6,"M":14,"L":14,"XL":6}', 350, NULL, 'not_ordered', NULL, NULL, 'Order once the PO is approved.', 1);
+  (4, 10, 1, 'Gildan 5000 tee, Black', 40, '{"S":6,"M":14,"L":14,"XL":6}', 350, NULL, 'not_ordered', NULL, NULL, 'Order once the PO is approved.', 1),
+  (5, 18, 1, 'Maple cutting board blanks, 8x12', 12, NULL, 900, 925, 'ordered', date('now', '-6 days'), date('now', '-2 days'), NULL, 1);
 INSERT INTO purchase_receipts (id, purchase_id, quantity, sizes, received_on, notes, recorded_by) VALUES
-  (1, 2, 30, '{"S":6,"M":14,"L":10}', date('now', '-1 days'), 'XL and 4 L on back order.', 1);
+  (1, 2, 30, '{"S":6,"M":14,"L":10}', date('now', '-1 days'), 'XL and 4 L on back order.', 1),
+  (2, 5, 12, NULL, date('now', '-2 days'), 'All twelve arrived together.', 1);
 UPDATE order_purchases SET status = 'cancelled' WHERE id = 1;
 
 -- Pickups and payments (0006). Closed = picked up AND paid, so the closed orders are made active while their pickup is
@@ -335,21 +338,30 @@ UPDATE order_purchases SET status = 'cancelled' WHERE id = 1;
 --   1  district, paid by a check collected, deposited and cleared; picked up.     2  district, paid by ACH; picked up.
 --   15 regular, paid by card at pickup, plus a cash entry voided as a duplicate.  6  district, picked up unpaid, check ready.
 --   20 regular, ready and notified, a cash deposit paid (partially paid).
+--   The other check statuses: 3, 4 and 5 (order 5, the PTA wear, paid in instalments) are awaiting payment, collected and deposited; 2 is ready.
 UPDATE orders SET state = 'active' WHERE id IN (1, 2, 15);
 INSERT INTO check_collections (id, order_id, expected_cents, check_number, status, available_on, notes, created_by) VALUES
   (1, 1, 156600, '10442', 'ready_for_collection', date('now', '-12 days'), NULL, 1),
-  (2, 6, 72000, NULL, 'ready_for_collection', date('now', '-2 days'), 'Pick up at the district office, front desk.', 2);
+  (2, 6, 72000, NULL, 'ready_for_collection', date('now', '-2 days'), 'Pick up at the district office, front desk.', 2),
+  (3, 5, 10000, NULL, 'awaiting_payment', NULL, 'Second check, for the t-shirt reprint, not issued yet.', 2),
+  (4, 5, 10000, '20871', 'ready_for_collection', date('now', '-4 days'), NULL, 2),
+  (5, 5, 12000, '20844', 'ready_for_collection', date('now', '-6 days'), NULL, 1);
 UPDATE check_collections SET status = 'collected', amount_received_cents = 156600, collected_at = strftime('%Y-%m-%dT%H:%M:%fZ','now','-11 days'), collected_by = 2 WHERE id = 1;
+UPDATE check_collections SET status = 'collected', amount_received_cents = 10000, collected_at = strftime('%Y-%m-%dT%H:%M:%fZ','now','-3 days'), collected_by = 2 WHERE id = 4;
+UPDATE check_collections SET status = 'collected', amount_received_cents = 12000, collected_at = strftime('%Y-%m-%dT%H:%M:%fZ','now','-5 days'), collected_by = 1 WHERE id = 5;
 INSERT INTO payments (id, order_id, amount_cents, method, paid_on, notes, recorded_by, request_id, check_collection_id) VALUES
   (1, 1, 156600, 'check', date('now', '-11 days'), NULL, 2, NULL, 1),
   (2, 2, 230300, 'ach', date('now', '-6 days'), 'Remittance from the district office.', 1, 'seed-payment-2', NULL),
   (3, 15, 1800, 'cash', date('now', '-14 days'), NULL, 2, 'seed-payment-3', NULL),
   (4, 15, 18000, 'card', date('now', '-14 days'), NULL, 2, 'seed-payment-4', NULL),
-  (5, 20, 50000, 'cash', date('now', '-9 days'), 'Deposit when the order was placed.', 1, 'seed-payment-5', NULL);
+  (5, 20, 50000, 'cash', date('now', '-9 days'), 'Deposit when the order was placed.', 1, 'seed-payment-5', NULL),
+  (6, 5, 10000, 'check', date('now', '-3 days'), NULL, 2, NULL, 4),
+  (7, 5, 12000, 'check', date('now', '-5 days'), NULL, 1, NULL, 5);
 -- The void's activity row comes from the payments_void_log trigger.
 UPDATE payments SET voided_at = strftime('%Y-%m-%dT%H:%M:%fZ','now','-13 days'), voided_by = 1, void_reason = 'Entered by mistake; the card payment covers it.' WHERE id = 3;
 UPDATE check_collections SET status = 'deposited', deposited_on = date('now', '-10 days') WHERE id = 1;
 UPDATE check_collections SET status = 'cleared', cleared_on = date('now', '-7 days') WHERE id = 1;
+UPDATE check_collections SET status = 'deposited', deposited_on = date('now', '-4 days') WHERE id = 5;
 INSERT INTO pickups (order_id, ready_on, notified_on, notification_method, picked_up_on, collected_by_name, completed_by) VALUES
   (1, date('now', '-20 days'), date('now', '-20 days'), 'email', date('now', '-18 days'), 'Helen Marsh', 2),
   (2, date('now', '-10 days'), date('now', '-10 days'), 'phone', date('now', '-9 days'), 'Tom Eddings', 1),

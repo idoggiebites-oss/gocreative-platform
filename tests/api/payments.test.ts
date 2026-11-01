@@ -306,7 +306,8 @@ describe('the Payments page and the dashboard', () => {
     expect(page.outstanding[0]).toMatchObject({ customerName: 'Maple Ridge School District', paymentTerms: 'due_after_pickup', financialStatus: 'unpaid', daysOutstanding: days('picked_up_on', 6) })
     expect(page.outstanding[1]).toMatchObject({ daysOutstanding: days('ready_on', 20), receivedCents: 50000, agreedCents: 230300 })
     expect(page.checksToCollect.map((k) => [k.id, k.orderNumber, k.customerName])).toEqual([[2, '2026-0006', 'Maple Ridge School District']])
-    expect([page.checksAwaitingPayment, page.checksInHand]).toEqual([[], []])
+    // The seed's other check situations sit on order 5 (not picked up, so not in the outstanding list): one awaiting payment, one collected, one deposited.
+    expect([page.checksAwaitingPayment.map((k) => k.id), page.checksInHand.map((k) => k.id).sort()]).toEqual([[3], [4, 5]])
     const d = (await t.call<DashboardResponse>('GET', '/dashboard')).body
     expect(d.outstandingPayments).toEqual({ count: 2, totalCents: 252300, oldestDays: page.outstanding[0].daysOutstanding })
     // Picked-up orders are no longer ready for pickup.
@@ -320,6 +321,6 @@ describe('the Payments page and the dashboard', () => {
     await checkPost(t, 2, 'collect', { amountReceivedCents: 72000 })
     const after = (await t.call<PaymentsPageResponse>('GET', '/payments')).body
     expect(after.outstanding.map((r) => r.number)).toEqual(['2026-0020'])
-    expect(after.checksInHand.map((k) => [k.id, k.status])).toEqual([[2, 'collected']])
+    expect(after.checksInHand.map((k) => [k.id, k.status])).toEqual([[5, 'deposited'], [4, 'collected'], [2, 'collected']]) // 4 and 5 are the seed's
   })
 })
