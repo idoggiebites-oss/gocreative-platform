@@ -77,3 +77,19 @@ The orders and Payments tables overflowed their cards in Spanish at 1440px becau
 next step, the quote total with its status) set a minimum width wider than the card. Rule: cells that hold sentences
 wrap (`whitespace-normal!`); only chips, numbers and dates stay nowrap. `polish.spec.ts` fails if any table scrolls
 inside its card in Spanish.
+
+### 2026-11-01 — Chain the commit on the verify exit code
+- **Cost:** the M6 fix was committed and pushed with a type error in an e2e file, because the commit ran after
+  `npm run verify ...; echo exit=$?` in the same `;`-chained command, regardless of the result.
+- **Rule:** `npm run verify > log 2>&1 && git commit ...`, never `;`. Read the exit code before anything outward.
+
+### 2026-11-01 — Plans need Codex too, not just code
+- **Cost:** the storefront plan took four Codex passes. Turnstile tokens are single-use, so one per submission
+  session. Strict per-IP limits block whole schools. Upload/submit/cleanup races. A restore through write-once
+  triggers fails. Backups resurrect deleted data.
+- **Rule:** run Codex on any security or data design before presenting it for approval, and fold its findings
+  in with **(C)** marks.
+
+### 2026-11-01 — New MCP servers need a fresh session
+- `claude mcp add` connects immediately, but its tools only reach the model in the next session. Add connectors
+  at the end of a session, before the work that needs them.
