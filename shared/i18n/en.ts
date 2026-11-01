@@ -530,6 +530,7 @@ export const en = {
     notFound: 'This inquiry is gone.',
   },
   pricing: {
+    invalidField: 'Fix the highlighted values. A blank or invalid rate is never treated as zero.',
     simFailed: 'Could not compare. Check that every value is valid.', ownerOnly: 'Only an owner can open Pricing Management.',
     title: 'Pricing Management', settingsHelp: 'Owner only. Prices, costs and margins for estimates.', open: 'Open', back: 'Settings',
     intro: 'Customers only ever see the published version. Changes here stay in a draft until you publish them.',

@@ -52,6 +52,50 @@ test('owner sets rates in Advanced, previews, publishes; a percentage then moves
   await expect(page.getByText('You have an unpublished draft.')).toBeVisible()
 })
 
+test('no invented prices: enabling a service sets no rates, and blank or invalid values are never saved as zero', async ({ page }, info) => {
+  test.skip(info.project.name === 'phone')
+  let saves = 0
+  page.on('request', (r) => { if (r.method() === 'PUT' && r.url().endsWith('/pricing/draft')) saves++ })
+  await page.goto('/app/settings/pricing')
+  await page.locator('summary', { hasText: 'Advanced pricing' }).click()
+  const costs = page.locator('section[aria-label="Product and garment costs"]')
+  await costs.getByLabel('T-shirts').fill('3.00')
+  const screen = page.getByRole('region', { name: 'Screen printing' })
+  await screen.getByLabel('Offer estimates for this service').check()
+  await expect(screen.getByLabel('Rate (%)')).toHaveValue('')
+  // An incomplete service: the server refuses to save it, and it can't produce a figure.
+  await page.getByRole('button', { name: 'Save draft' }).click()
+  await expect(page.getByText('Some pricing values are not valid')).toBeVisible()
+  await expect(page.getByText('You have an unpublished draft.')).toHaveCount(0)
+  await screen.getByLabel('Offer estimates for this service').uncheck()
+  // A value that isn't money stops the save here, and points at the field.
+  await costs.getByLabel('Hats').fill('-1')
+  const before = saves
+  await page.getByRole('button', { name: 'Save draft' }).click()
+  await expect(page.getByText('A blank or invalid rate is never treated as zero.')).toBeVisible()
+  await expect(costs.getByLabel('Hats')).toBeFocused()
+  expect(saves).toBe(before)
+})
+
+test('publish stays locked until the comparison on screen is of the saved draft', async ({ page }, info) => {
+  test.skip(info.project.name === 'phone')
+  await page.goto('/app/settings/pricing')
+  await page.locator('summary', { hasText: 'Advanced pricing' }).click()
+  await page.locator('section[aria-label="Product and garment costs"]').getByLabel('T-shirts').fill('3.00')
+  await page.getByRole('button', { name: 'Save draft' }).click()
+  await expect(page.getByRole('button', { name: 'Publish' })).toBeEnabled()
+  // A slow comparison of a new edit: publish locks at the edit, and again until the new answer arrives.
+  let release!: () => void
+  const held = new Promise<void>((r) => { release = r })
+  await page.route('**/api/app/pricing/simulate', async (route) => { await held; return route.fallback() })
+  await page.locator('section[aria-label="Product and garment costs"]').getByLabel('T-shirts').fill('4.00')
+  await page.getByRole('button', { name: 'Save draft' }).click()
+  await expect(page.getByRole('button', { name: 'Save draft' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Publish' })).toBeDisabled()
+  release()
+  await expect(page.getByRole('button', { name: 'Publish' })).toBeEnabled()
+})
+
 test('staff never see it: no link, a refusal on the page, and 403 from the server', async ({ page, context }) => {
   await page.route('**/api/app/me', (r) => r.fulfill({ json: { id: 2, email: 'x', name: 'Staff', role: 'staff' } }))
   await page.goto('/app/settings')
@@ -70,13 +114,15 @@ test('the artwork check measures locally: no upload, counts and refusals shown',
   await page.locator('input[type=file]').setInputFiles([
     { name: 'two-inks.svg', mimeType: 'image/svg+xml', buffer: svg('<rect x="50" y="50" width="120" height="300" fill="#142870"/><rect x="220" y="50" width="120" height="300" fill="#f0b41e"/>') },
     { name: 'scripted.svg', mimeType: 'image/svg+xml', buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>') },
+    { name: 'sneaky.svg', mimeType: 'image/svg+xml', buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><filter id="f"><feGaussianBlur stdDeviation="9"/></filter><rect width="10" height="10" filter="u&#114;l(#f)"/></svg>') },
     { name: 'job.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.7') },
     { name: 'broken.png', mimeType: 'image/png', buffer: Buffer.from('not a png at all') },
   ])
   const row = (name: string) => page.getByRole('row').filter({ hasText: name })
   await expect(row('two-inks.svg')).toContainText('2')
   await expect(row('two-inks.svg')).toContainText('Background assumed not printed')
-  await expect(row('scripted.svg')).toContainText('Manual review required')
+  await expect(row('scripted.svg')).toContainText('Format not analyzed')
+  await expect(row('sneaky.svg')).toContainText('Format not analyzed')
   await expect(row('job.pdf')).toContainText('Format not analyzed')
   await expect(row('broken.png')).toContainText('Could not read this file')
   await page.getByLabel('Screens used: two-inks.svg').fill('2')

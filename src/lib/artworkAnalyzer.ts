@@ -4,8 +4,26 @@ import { analyzeArtwork, type ArtworkAnalysis } from '@shared/artworkAnalysis'
 export type AnalyzerOutcome = { analysis: ArtworkAnalysis } | { refused: 'unreadable' | 'too_large' | 'timed_out' | 'unsupported' }
 const TIMEOUT_MS = 20_000
 const SVG_MAX_BYTES = 1024 * 1024
-// Only drawn shapes. Anything that fetches, embeds or scripts is refused rather than rendered.
-const SVG_REFUSE = /<script|<foreignObject|<image|<use\b|<iframe|<style|href\s*=|url\s*\(|on[a-z]+\s*=/i
+const SVG_MAX_ELEMENTS = 5000
+const SVG_ELEMENTS = new Set(['svg', 'g', 'path', 'rect', 'circle', 'ellipse', 'line', 'polygon', 'polyline', 'title', 'desc', 'metadata'])
+const SVG_ATTRIBUTES = /^(id|class|version|xmlns|xmlns:.*|width|height|viewbox|x|y|x1|x2|y1|y2|cx|cy|r|rx|ry|d|points|transform|fill|fill-opacity|fill-rule|stroke|stroke-width|stroke-opacity|stroke-linecap|stroke-linejoin|stroke-miterlimit|opacity)$/i
+
+/**
+ * An allowlist over the parsed document, not a text search: character references like u&#114;l( are already decoded here, so they can't slip past.
+ * Only plain shapes with plain paints get rendered. Filters, masks, images, styles, fonts and links are all work or requests we refuse; a person reviews those.
+ */
+export function isPlainSvg(text: string) {
+  const doc = new DOMParser().parseFromString(text, 'image/svg+xml')
+  if (doc.querySelector('parsererror') || doc.documentElement.localName !== 'svg' || /<!DOCTYPE|<!ENTITY/i.test(text)) return false
+  const all = doc.querySelectorAll('*')
+  if (all.length > SVG_MAX_ELEMENTS) return false
+  for (const el of all) {
+    if (el.closest('metadata') && el.localName !== 'metadata') continue
+    if (!SVG_ELEMENTS.has(el.localName)) return false
+    for (const attr of el.attributes) if (!SVG_ATTRIBUTES.test(attr.name) || /url\s*\(|javascript:|expression/i.test(attr.value)) return false
+  }
+  return true
+}
 
 function inWorker(file: File) {
   return new Promise<AnalyzerOutcome>((resolve) => {
@@ -21,11 +39,13 @@ function inWorker(file: File) {
 async function simpleSvg(file: File): Promise<AnalyzerOutcome> {
   if (file.size > SVG_MAX_BYTES) return { refused: 'too_large' }
   const text = await file.text()
-  if (SVG_REFUSE.test(text)) return { refused: 'unsupported' }
+  if (!isPlainSvg(text)) return { refused: 'unsupported' }
   const url = URL.createObjectURL(new Blob([text], { type: 'image/svg+xml' }))
   try {
     const img = new Image()
-    await new Promise((resolve, reject) => { img.onload = resolve; img.onerror = reject; img.src = url }) // <img>: scripts never run
+    const loaded = new Promise((resolve, reject) => { img.onload = resolve; img.onerror = reject; img.src = url }) // <img>: scripts never run
+    const stalled = new Promise((_, reject) => setTimeout(() => reject(new Error('timed_out')), TIMEOUT_MS))
+    await Promise.race([loaded, stalled])
     const longest = Math.max(img.naturalWidth || 1000, img.naturalHeight || 1000)
     const scale = 1000 / longest
     const canvas = document.createElement('canvas')

@@ -23,12 +23,13 @@ type SimView = { status: string; totalCents: number | null; assumptions: string[
 type SimResult = { current: SimView; proposed: SimView; differenceCents: number | null }
 
 const EMPTY: PricingConfig = { productCostCents: {}, services: {} }
-const PRICING = { mode: 'markup' as const, rateBps: 0 }
+// Enabling a service gives it no rates at all: a rate is only ever a number the owner typed. An incomplete service can't be saved or priced.
+const PRICING = { mode: 'markup' as const } as unknown as { mode: 'markup'; rateBps: number }
 const SKELETON: { [K in Service]: NonNullable<PricingConfig['services'][K]> } = {
-  screen: { adjustmentBps: 0, pricing: PRICING, colorCostTiers: [{ minQty: 1, costCents: 0 }] },
+  screen: { adjustmentBps: 0, pricing: PRICING, colorCostTiers: [] },
   embroidery: { adjustmentBps: 0, pricing: PRICING, complexityCostTiers: {} },
   dtg: { adjustmentBps: 0, pricing: PRICING, sizeCostTiers: {} },
-  engraving: { adjustmentBps: 0, pricing: PRICING, machineCostPerMinuteCents: 0 },
+  engraving: { adjustmentBps: 0, pricing: PRICING } as unknown as NonNullable<PricingConfig['services']['engraving']>,
 }
 
 // Text in, whole cents and basis points out. Blank means "not set", and never zero.
@@ -61,12 +62,12 @@ function Tiers({ title, tiers, onChange }: { title: string; tiers: Tier[] | unde
       <legend className="text-[13px] font-medium">{title}</legend>
       {list.map((row, i) => (
         <div key={i} className="flex flex-wrap items-end gap-2">
-          <Whole label={t.fromQty} value={row.minQty} onChange={(n) => onChange(list.map((x, j) => (j === i ? { ...x, minQty: n ?? 1 } : x)))} />
-          <Money label={t.costDollars} value={row.costCents} onChange={(c) => onChange(list.map((x, j) => (j === i ? { ...x, costCents: c ?? 0 } : x)))} />
+          <Whole label={t.fromQty} value={row.minQty} onChange={(n) => onChange(list.map((x, j) => (j === i ? { ...x, minQty: n as number } : x)))} />
+          <Money label={t.costDollars} value={row.costCents} onChange={(c) => onChange(list.map((x, j) => (j === i ? { ...x, costCents: c as number } : x)))} />
           <button type="button" className={BTN} onClick={() => { const next = list.filter((_, j) => j !== i); onChange(next.length ? next : undefined) }}>{t.removeTier}</button>
         </div>
       ))}
-      <button type="button" className={`${BTN} self-start`} onClick={() => onChange([...list, { minQty: list.length ? list[list.length - 1].minQty + 1 : 1, costCents: 0 }])}>{t.addTier}</button>
+      <button type="button" className={`${BTN} self-start`} onClick={() => onChange([...list, { minQty: list.length ? list[list.length - 1].minQty + 1 : 1, costCents: undefined as unknown as number }])}>{t.addTier}</button>
     </fieldset>
   )
 }
@@ -74,8 +75,8 @@ function Tiers({ title, tiers, onChange }: { title: string; tiers: Tier[] | unde
 function FeeFields({ title, fee, onChange }: { title: string; fee: { sellCents: number; costCents: number } | undefined; onChange: (f: { sellCents: number; costCents: number } | undefined) => void }) {
   const t = useI18n().m.pricing
   const set = (k: 'sellCents' | 'costCents', c: number | undefined) => {
-    const next = { sellCents: fee?.sellCents ?? 0, costCents: fee?.costCents ?? 0, [k]: c ?? 0 }
-    onChange(next.sellCents === 0 && next.costCents === 0 ? undefined : next)
+    const next = { sellCents: fee?.sellCents, costCents: fee?.costCents, [k]: c } as { sellCents: number; costCents: number }
+    onChange(next.sellCents === undefined && next.costCents === undefined ? undefined : next) // half a fee stays invalid until both are entered
   }
   return (
     <fieldset className="flex flex-col gap-2">
@@ -90,7 +91,7 @@ function ModeFields({ pricing, onChange }: { pricing: { mode: 'markup' | 'margin
   return (
     <div className="flex flex-wrap gap-2">
       <Field label={t.mode}><select className={INPUT} value={pricing.mode} onChange={(e) => onChange({ ...pricing, mode: e.target.value as 'markup' | 'margin' })}><option value="markup">{t.markup}</option><option value="margin">{t.margin}</option></select></Field>
-      <Percent label={t.rate} value={pricing.rateBps} onChange={(b) => onChange({ ...pricing, rateBps: b ?? 0 })} />
+      <Percent label={t.rate} value={pricing.rateBps} onChange={(b) => onChange({ ...pricing, rateBps: b as number })} />
     </div>
   )
 }
@@ -128,7 +129,7 @@ function ServiceAdvanced({ service, c, set }: { service: Service; c: PricingConf
     const s = c.services.engraving
     body = (
       <>
-        <Money label={t.machine} value={s.machineCostPerMinuteCents} onChange={(v) => put({ ...s, machineCostPerMinuteCents: v ?? 0 })} />
+        <Money label={t.machine} value={s.machineCostPerMinuteCents} onChange={(v) => put({ ...s, machineCostPerMinuteCents: v })} />
         <FeeFields title={t.setup} fee={s.setupFee} onChange={(f) => put({ ...s, setupFee: f })} />
       </>
     )
@@ -158,9 +159,23 @@ const toRequest = (lines: SampleLine[]) => ({
   })),
 })
 
+// The engine's reasons are for the owner, in plain words. Spanish screens get them translated here; an unknown one shows as it is.
+const REASONS_ES: [RegExp, string][] = [
+  [/^no published pricing$/, 'no hay precios publicados'], [/^no lines$/, 'sin líneas'], [/^below the minimum margin$/, 'por debajo del margen mínimo'], [/^total over the review limit$/, 'total por encima del límite de revisión'],
+  [/^amount too large to calculate exactly$/, 'monto demasiado grande para calcular con exactitud'], [/^the calculation came to nothing$/, 'el cálculo dio cero'], [/^line (\d+): invalid quantity$/, 'línea $1: cantidad no válida'],
+  [/^line (\d+): quantity over the review limit$/, 'línea $1: cantidad por encima del límite de revisión'], [/^line (\d+): method needs a person \((.*)\)$/, 'línea $1: este método requiere a una persona ($2)'], [/^line (\d+): (.*) has no published rates$/, 'línea $1: $2 no tiene tarifas publicadas'],
+  [/^line (\d+): no cost for (.*)$/, 'línea $1: sin costo para $2'], [/^line (\d+): no decoration details$/, 'línea $1: sin detalles de decoración'], [/^line (\d+): quantity below the first screen tier$/, 'línea $1: cantidad por debajo del primer nivel'],
+  [/^line (\d+): ink colors unknown$/, 'línea $1: colores de tinta desconocidos'], [/^line (\d+): more colors than the review limit$/, 'línea $1: más colores que el límite de revisión'], [/^line (\d+): print size unknown$/, 'línea $1: tamaño desconocido'],
+  [/^line (\d+): no rate for (.*)$/, 'línea $1: sin tarifa para $2'], [/^line (\d+): embroidery complexity unknown$/, 'línea $1: complejidad del bordado desconocida'], [/^line (\d+): machine time unknown$/, 'línea $1: tiempo de máquina desconocido'],
+]
 function Result({ title, r }: { title: string; r: SimView | undefined }) {
-  const { m, fmt } = useI18n()
+  const { m, fmt, lang } = useI18n()
   const t = m.pricing
+  const reason = (x: string) => {
+    if (lang !== 'es') return x
+    const hit = REASONS_ES.find(([re]) => re.test(x))
+    return hit ? x.replace(hit[0], hit[1]) : x
+  }
   if (!r) return null
   return (
     <div className="flex min-w-[220px] flex-1 flex-col gap-1 text-[13px]" data-testid={`sim-${title}`}>
@@ -169,13 +184,13 @@ function Result({ title, r }: { title: string; r: SimView | undefined }) {
       {r.costCents !== null && <p><span className={MUTED}>{t.internalCost}:</span> {fmt.money(r.costCents)}</p>}
       {r.marginBps !== null && <p><span className={MUTED}>{t.grossMargin}:</span> {(r.marginBps / 100).toFixed(2)}%</p>}
       {r.assumptions.length > 0 && <p><span className={MUTED}>{t.assumptions}:</span> {r.assumptions.join('; ')}</p>}
-      {r.reasons.length > 0 && <p><span className={MUTED}>{t.warnings}:</span> {r.reasons.join('; ')}</p>}
+      {r.reasons.length > 0 && <p><span className={MUTED}>{t.warnings}:</span> {r.reasons.map(reason).join('; ')}</p>}
       {r.lines.length > 0 && <ul className="mt-1 list-none p-0">{r.lines.map((l, i) => <li key={i} className={MUTED}>{l.label}: {l.quantity} × {fmt.money(l.unitPriceCents)} = {fmt.money(l.lineTotalCents)}</li>)}</ul>}
     </div>
   )
 }
 
-function Simulator({ proposal, activeId, onCompared }: { proposal: PricingConfig; activeId: number | null; onCompared: () => void }) {
+function Simulator({ proposal, activeId, onCompared }: { proposal: PricingConfig; activeId: number | null; onCompared: (config: string | null) => void }) {
   const { m, fmt } = useI18n()
   const t = m.pricing
   const [lines, setLines] = useState<SampleLine[]>([newLine()])
@@ -186,10 +201,12 @@ function Simulator({ proposal, activeId, onCompared }: { proposal: PricingConfig
   notify.current = onCompared
   useEffect(() => {
     let live = true
+    const compared = JSON.stringify(proposal)
+    notify.current(null) // until this answer arrives, what is on screen isn't this proposal
     const timer = setTimeout(() => {
       send<SimResult>('POST', '/pricing/simulate', { request: toRequest(lines), config: proposal })
-        .then((r) => { if (live) { setResult(r); setFailed(false); notify.current() } })
-        .catch(() => { if (live) setFailed(true) })
+        .then((r) => { if (live) { setResult(r); setFailed(false); notify.current(compared) } })
+        .catch(() => { if (live) { setResult(null); setFailed(true) } })
     }, 300)
     return () => { live = false; clearTimeout(timer) }
   }, [key]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -231,6 +248,7 @@ function ArtworkCheck() {
   const { m } = useI18n()
   const t = m.pricing
   const [rows, setRows] = useState<CheckRow[]>([])
+  const busy = rows.some((r) => !r.outcome) // one batch at a time, so a large selection can't exhaust the browser
   const add = (files: File[]) => {
     const start = rows.length
     setRows((r) => [...r, ...files.map((f) => ({ name: f.name, outcome: null, known: '' }))])
@@ -250,7 +268,7 @@ function ArtworkCheck() {
       <div className={SEC}><h2 id="pricing-check" className={H2}>{t.check}</h2></div>
       <div className="flex flex-col gap-3 px-4 pb-4">
         <p className={MUTED}>{t.checkHelp}</p>
-        <label className={`${BTN} self-start cursor-pointer`}>{t.chooseFiles}<input type="file" multiple accept=".png,.jpg,.jpeg,.svg,.pdf" className="sr-only" onChange={(e) => { add([...(e.target.files ?? [])]); e.target.value = '' }} /></label>
+        <label className={`${BTN} self-start cursor-pointer`}>{busy ? t.analyzing : t.chooseFiles}<input type="file" multiple disabled={busy} accept=".png,.jpg,.jpeg,.svg,.pdf" className="sr-only" onChange={(e) => { add([...(e.target.files ?? [])]); e.target.value = '' }} /></label>
         {rows.length > 0 && (
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-[13px]">
@@ -286,7 +304,9 @@ function Editor({ state }: { state: PricingState }) {
   const seed = state.draft?.hash ?? state.active?.hash ?? ''
   const seedRef = useRef(seed)
   useEffect(() => { if (seedRef.current !== seed) { seedRef.current = seed; setConfig(state.draft?.config ?? state.active?.config ?? EMPTY) } }, [seed]) // eslint-disable-line react-hooks/exhaustive-deps
-  const [compared, setCompared] = useState(false)
+  const [compared, setCompared] = useState<string | null>(null)
+  const [invalid, setInvalid] = useState(false)
+  const form = useRef<HTMLDivElement>(null)
   const [publishing, setPublishing] = useState(false)
   const savedText = JSON.stringify(state.draft?.config ?? state.active?.config ?? EMPTY)
   const dirty = JSON.stringify(config) !== savedText
@@ -294,13 +314,22 @@ function Editor({ state }: { state: PricingState }) {
   const discard = useSend<unknown, void>(() => send('DELETE', '/pricing/draft', { hash: state.draft!.hash }))
   const publish = useSend<unknown, void>(() => send('POST', '/pricing/publish', { draftId: state.draft!.id, draftHash: state.draft!.hash, expectedActiveId: state.active?.id ?? null }))
   const restore = useSend<unknown, number>((id) => send('POST', `/pricing/versions/${id}/restore`, { expectedHash: state.draft?.hash ?? null }))
-  const canPublish = Boolean(state.draft) && !dirty && compared
+  const canPublish = Boolean(state.draft) && !dirty && compared === JSON.stringify(state.draft?.config ?? null) // only what the comparison on screen actually showed
+  const trySave = () => {
+    const bad = form.current?.querySelector<HTMLElement>('[aria-invalid="true"]')
+    setInvalid(Boolean(bad))
+    if (bad) {
+      bad.focus()
+      return
+    }
+    save.mutate()
+  }
   const setAdjustment = (s: Service, b: number | undefined) => {
     const rules = config.services[s]
-    if (rules) setConfig({ ...config, services: { ...config.services, [s]: { ...rules, adjustmentBps: b ?? 0 } } })
+    if (rules) setConfig({ ...config, services: { ...config.services, [s]: { ...rules, adjustmentBps: b as number } } })
   }
   return (
-    <>
+    <div ref={form} className="flex flex-col gap-5">
       <section className={CARD} aria-labelledby="pricing-simple">
         <div className={SEC}><h2 id="pricing-simple" className={H2}>{t.simple}</h2></div>
         <div className="flex flex-col gap-3 px-4 pb-4">
@@ -338,15 +367,16 @@ function Editor({ state }: { state: PricingState }) {
         </div>
       </details>
 
-      <Simulator proposal={config} activeId={state.active?.id ?? null} onCompared={() => setCompared(true)} />
+      <Simulator proposal={config} activeId={state.active?.id ?? null} onCompared={setCompared} />
 
       <section className="flex flex-col gap-2">
         <div className="flex flex-wrap gap-2">
-          <button type="button" className={BTN} disabled={!dirty || save.isPending} onClick={() => save.mutate()}>{t.saveDraft}</button>
+          <button type="button" className={BTN} disabled={!dirty || save.isPending} onClick={trySave}>{t.saveDraft}</button>
           {state.draft && <button type="button" className={BTN} disabled={discard.isPending} onClick={() => discard.mutate(undefined)}>{t.discard}</button>}
           <button type="button" className={`${BTN} ${BTN_PRIMARY}`} disabled={!canPublish} onClick={() => setPublishing(true)}>{t.publish}</button>
         </div>
         {!canPublish && <p className={MUTED}>{t.mustPreview}</p>}
+        {invalid && <p role="alert" className="text-xs text-status-red-fg">{t.invalidField}</p>}
         <MutationError error={save.error ?? discard.error ?? restore.error} />
       </section>
 
@@ -380,7 +410,7 @@ function Editor({ state }: { state: PricingState }) {
           <span />
         </FormDialog>
       )}
-    </>
+    </div>
   )
 }
 

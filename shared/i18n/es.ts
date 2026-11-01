@@ -517,6 +517,7 @@ export const es: Messages = {
     notFound: 'Esta solicitud ya no existe.',
   },
   pricing: {
+    invalidField: 'Corrige los valores marcados. Una tarifa en blanco o no válida nunca se toma como cero.',
     simFailed: 'No se pudo comparar. Revisa que todos los valores sean válidos.', ownerOnly: 'Solo un dueño puede abrir Gestión de precios.',
     title: 'Gestión de precios', settingsHelp: 'Solo dueños. Precios, costos y márgenes de los estimados.', open: 'Abrir', back: 'Ajustes',
     intro: 'Los clientes solo ven la versión publicada. Los cambios quedan en un borrador hasta que los publiques.',

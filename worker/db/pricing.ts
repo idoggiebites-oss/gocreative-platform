@@ -17,9 +17,10 @@ export const listPricingVersions = async (db: D1Database) =>
 export const discardDraft = async (db: D1Database, hash: string) =>
   ((await db.prepare(`DELETE FROM pricing_versions WHERE status = 'draft' AND config_hash = ?`).bind(hash).run()).meta.changes ?? 0) > 0
 
-/** The same config always hashes the same, so a preview can be bound to exactly what it showed. */
+const canonical = (v: unknown): unknown => (Array.isArray(v) ? v.map(canonical) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, x]) => [k, canonical(x)])) : v)
+/** The same config always hashes the same, whatever order its keys were entered in, so a preview can be bound to exactly what it showed. */
 export async function hashConfig(config: PricingConfig) {
-  const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(config)))
+  const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(canonical(config))))
   return Array.from(new Uint8Array(bytes), (b) => b.toString(16).padStart(2, '0')).join('')
 }
 

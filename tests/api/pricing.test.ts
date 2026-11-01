@@ -94,6 +94,13 @@ test('replaying a deletion into a backup older than these tables still works', (
   expect(target.sqlite.prepare('SELECT COUNT(*) AS n FROM inquiries').get()).toEqual({ n: 0 })
 })
 
+test('the same config hashes the same whatever order its keys were entered in', async () => {
+  const a = await db.hashConfig({ productCostCents: { a: 1, b: 2 }, services: {} })
+  const b = await db.hashConfig({ services: {}, productCostCents: { b: 2, a: 1 } })
+  expect(a).toBe(b)
+  expect(await db.hashConfig({ productCostCents: { a: 1, b: 3 }, services: {} })).not.toBe(a)
+})
+
 test('parallel publishes: exactly one wins, and there is always exactly one active version', async () => {
   const t = setup()
   const v1 = await t.publish(300, null)
