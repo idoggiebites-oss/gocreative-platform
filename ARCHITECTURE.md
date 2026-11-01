@@ -210,8 +210,8 @@ Writes from the browser send the `expectedVersion` they read; a stale one is a 4
 - D1 Time Travel gives point-in-time restore. Its retention depends on the plan; check it in the dashboard.
 - To build (STOREFRONT_PLAN S0b): a scripted per-table JSON export of the live D1 (`wrangler d1 export --remote`
   failed with auth error 10000 on this account), plus a restore drill into a scratch local D1, documented in `notes/`.
-- R2 originals are write-once and are never deleted by the app (the storefront's cleanup of expired,
-  unsubmitted uploads will be the one exception).
+- R2 originals are write-once. The app deletes an object only when an upload's D1 batch certainly rolled back
+  (`worker/files.ts`), and, once the storefront ships, when its cleanup removes expired, unsubmitted uploads.
 
 **Cost**
 - Free tier covers this load comfortably: Workers 100k requests/day, D1 5GB,

@@ -88,14 +88,26 @@ submission session**, not once per upload:
    It returns an opaque session token, which is stored only as a hash.
 2. `POST /api/public/submissions/:token/files`: **one file per request**, raw body, through the existing
    streamed pipeline with a **public per-file cap** (proposal 20 MB; PNG, JPEG, PDF and SVG; SVG stays
-   download-only for staff). The file counts against the session's budget in a conditional D1 update, so
-   parallel uploads can't exceed the caps **(C)**. It is stored under R2 key `inquiries/<submission>/<uuid>`.
-   A guessed inquiry or order id authorises nothing.
+   download-only for staff). It is stored under R2 key `inquiries/<submission>/<uuid>`. A guessed inquiry or
+   order id authorises nothing. The lifecycle:
+   1. **Reserve first.** Before streaming, one conditional D1 update reserves the declared Content-Length
+      against the session's caps and the global daily budget, and only for an open, unexpired session. If it
+      matches no row, the request is refused (413 or 429) before any byte is read.
+   2. **Stream.**
+   3. **Settle.** Success marks the file row `stored`. A failure releases the reservation. An ambiguous outcome
+      leaves an unlinked object for the cleanup to reconcile.
+
+   Parallel uploads therefore can't exceed the caps **(C)**.
 3. `POST /api/public/submissions/:token/submit`: JSON form fields, validated by an **allowlisted** zod schema
    shared with the form. The browser can never send customer ids, statuses, prices, notes or any order field
-   **(C)**. The `payload` stores the validated, normalised request, never raw JSON. One D1 batch inserts the
-   inquiry (`status 'new'`), links the session's files, closes the session and writes `inquiry_received`. It
-   returns `{ ref }`, a short human-friendly reference such as `INQ-7K3Q`.
+   **(C)**. The `payload` stores the validated, normalised request, never raw JSON. One D1 batch does four things,
+   each guarded on the session still being open:
+   - inserts the inquiry (`status 'new'`);
+   - links the session's files that are `stored` (pending or failed ones are excluded);
+   - closes the session, so later uploads are refused;
+   - writes `inquiry_received`.
+
+   It returns `{ ref }`, a short human-friendly reference such as `INQ-7K3Q`.
 4. Retries: submitting a closed session returns the same `ref`, so a double-tap or a lost response never creates
    two inquiries.
 
@@ -108,15 +120,21 @@ submission session**, not once per upload:
 
   Cloudflare's Workers rate-limiting binding can add a cheap first filter **(unverified on our plan: check it
   before building)**. Its counts are approximate and per-location, so it isn't the quota itself **(C)**.
-- **Emergency off switch:** a setting that makes the storefront's form show "call or email us" and makes
-  `/api/public/*` refuse new sessions, without a deploy.
+- **Emergency off switch:** a setting changed without a deploy. When it's on:
+  - the form shows "call or email us";
+  - `/api/public/*` refuses **every public write** (new sessions, uploads to existing sessions, and submits)
+    **(C)**.
+
+  Already-submitted inquiries are unaffected.
 - **Shared request budget:** a flood still costs Worker requests that the dashboard needs, so that risk is part
   of the launch checks and incident notes **(C)**.
 - Strict field limits, a 64 KB JSON cap and a honeypot field.
 - File sniffing proves a plausible file type, **not that a file is safe** **(C)**. Staff open customer files
   through the existing safe download (sandboxed, nosniff, SVG served as an attachment).
-- A daily **cron cleanup** (Workers cron triggers are free) deletes expired, unsubmitted sessions and their
-  files from R2 and D1. This is the one place a file is ever deleted, and only files nothing references.
+- A daily **cron cleanup** (Workers cron triggers are free) deletes expired, unsubmitted sessions and their files
+  from R2 and D1, re-checking in the same statement that the session is still unsubmitted, so it can never
+  delete a submitted inquiry's files. It also reconciles objects under `inquiries/` that have no file row.
+  Besides the existing rollback cleanup in `worker/files.ts`, this is the only place a file is deleted.
 
 ## 5. Data model (migration 0008, additive)
 
@@ -128,9 +146,10 @@ submission session**, not once per upload:
   expires_at, submitted_inquiry_id NULL)`: the upload session with its caps.
 - `inquiry_files (id, submission_id REFERENCES inquiry_submissions, inquiry_id NULL REFERENCES inquiries,
   file_id UNIQUE REFERENCES files, created_at)`: linked to its inquiry at submit, write-once after.
-- Conversion is **idempotent and race-safe** **(C)**. The conversion statement is guarded by
-  `status = 'new' AND order_id IS NULL`, so one inquiry produces exactly one order. A partial unique index
-  enforces it, and there is a retry/concurrency test.
+- `orders.inquiry_id` (ADD COLUMN) with `CREATE UNIQUE INDEX one_order_per_inquiry ON orders (inquiry_id) WHERE
+  inquiry_id IS NOT NULL`. Conversion is **idempotent and race-safe** **(C)**: a second conversion's order
+  INSERT violates that index, and because every side effect of the conversion is in the same batch (§6), the
+  whole batch rolls back and nothing is half-written. A retry/concurrency test proves it.
 - **Provenance** **(C)**: the original submission is kept as submitted. The order records `source = portal`
   and `inquiry_id`. A public submission never satisfies quote, authorization or artwork approval by itself:
   the artwork arrives "under review".
@@ -151,9 +170,11 @@ matching existing customer by email or phone. Staff confirm or edit:
 - the contact;
 - the line items.
 
-Then **Convert** does one D1 batch:
+Then **Convert** runs one D1 batch. It is a **new dedicated writer** in `worker/db`: the existing customer and order
+writers each run their own batch, so they can't be composed into an atomic one. It reuses their SQL and
+validation rules **(C)**. The batch:
 
-1. creates or reuses the customer and contact, through the existing customer writers;
+1. creates or reuses the customer and contact;
 2. creates the order with source `portal`, its items and the defaults from the customer (PO required, payment
    terms; owner-only terms rules still apply);
 3. turns each inquiry file into **artwork version 1** of its own design on the new order, under review;
@@ -165,8 +186,9 @@ hides an inquiry from the queue.
 
 ## 7. Launch configuration
 
-- **Access re-scope**: from "all traffic" to `/app`, `/app/*`, `/api/app`, `/api/app/*`. The worked steps are
-  already in `notes/access-setup.md`. The Worker still re-verifies the JWT and looks up the role, so a mistake
+- **Access re-scope**: from "all traffic" to `/app`, `/app/*`, `/api/app`, `/api/app/*`.
+  `notes/access-setup.md` has a reference outline, and some steps are marked unverified. The exact dashboard
+  steps get verified at S4, then tested from outside on every hostname **(C)**. The Worker still re-verifies the JWT and looks up the role, so a mistake
   can't open the API. The `/app` page shell holds no data. This is an outward-facing change, so I'll ask
   before doing it.
 - **Domain**: the storefront can launch on `gocreative.idoggiebites.workers.dev`, but a customer-facing site
