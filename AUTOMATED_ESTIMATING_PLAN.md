@@ -101,7 +101,7 @@ Then for the **whole inquiry**:
 5. **Minimum order charge applies once per inquiry, not per line:** if the total is below it, a separate "minimum order" charge line makes up the difference.
 6. **Minimum margin is checked last,** on the rounded totals, including fee costs. Below the floor means `manual_review_required`, never a silent price change.
 
-**Mapping to quotes.** The existing quote code needs integer unit prices, with `quantity × unit price`. Rounding per unit in step 4 means every estimate line fits exactly, with no remainder charge and a margin floor that holds after rounding. Rounding up costs the customer at most `quantity − 1` cents on a line, which is disclosed in the plan's tests, and is simple enough for the family to check by hand.
+**Mapping to quotes.** The existing quote code needs integer unit prices, with `quantity × unit price`. Rounding per unit in step 4 means every estimate line fits exactly, with no remainder charge and a margin floor that holds after rounding. Compared with the unrounded total, rounding up adds **less than `quantity` cents** to a line. The tests assert that bound, and it is simple enough for the family to check by hand.
 
 **Build order inside E1:** screen printing first, since that is where analysis matters. Other services get a model only once the family's real rates show what it needs; until then they return manual review.
 
@@ -124,7 +124,7 @@ Any missing rate or unknown input gives `manual_review`, with reasons. **The eng
 **Reproducibility, stated exactly:**
 - The **stored result is the historical record**. Nothing is ever recalculated in place.
 - The pricing arithmetic can be replayed from stored inputs and the stored rule version by the same engine version, and the test does this. Old engine code isn't kept forever, so replay across engine versions is not promised.
-- Artwork analysis is replayable from its stored **normalized analysis** (the histogram it worked from), not from the original file, because browsers may decode and scale differently.
+- **Artwork analysis is not replayed.** Its stored result, with analyzer version and thresholds, is the historical record. Staff can run a fresh analysis on the stored file at any time, which adds a new result and never replaces the old one; browsers may decode and scale differently, so the two can differ.
 
 ## 7. E2: Settings → Pricing Management
 
@@ -168,7 +168,7 @@ S3 (done) → one compatibility fix → E1 → E2 → validation gate → E3 →
 | Colour counts disagree with shop practice | Real-artwork validation; staff override; never binding |
 | Price behaviour inferred through the estimate API | Slowed by session, Turnstile and atomic quotas; **residual risk the family must accept**; costs and formulas never leave the server |
 | Dishonest artwork facts | Labelled `customer_reported`; staff re-analysis required; nothing binding |
-| Rounding up per unit raises a line by up to `quantity − 1` cents | Small, disclosed and consistent; staff can adjust the final quote |
+| Rounding up per unit raises a line by less than `quantity` cents over the unrounded total | Small, disclosed and consistent; staff can adjust the final quote |
 | Costs leak to the public or to staff | Owner-only routes and field allowlists, boundary tests signed in as staff; backups encrypted offsite, plaintext on this Mac |
 | Family doesn't maintain pricing | Simple view first; missing data falls back to manual review |
 | Garment cost varies by style, and the form doesn't capture style | Assumed base garment per product, stated to the customer; or manual review |
