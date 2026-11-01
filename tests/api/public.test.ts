@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { cleanupIntake } from '../../worker/cron'
-import { CLEANUP_BATCH, DAILY_MAX_SESSIONS, IP_SESSIONS_PER_HOUR, OPEN_SESSIONS_MAX, ORPHAN_PAGES_PER_RUN, OUTSTANDING_MAX_BYTES, SESSION_MAX_ATTEMPTS, SESSION_MAX_FILES, newRef } from '../../worker/domain/intake'
+import { CLEANUP_BATCH, DAILY_MAX_BYTES, DAILY_MAX_SESSIONS, IP_SESSIONS_PER_HOUR, OPEN_SESSIONS_MAX, ORPHAN_PAGES_PER_RUN, OUTSTANDING_MAX_BYTES, SESSION_MAX_ATTEMPTS, SESSION_MAX_FILES, UPLOAD_DEADLINE_MINUTES, newRef } from '../../worker/domain/intake'
 import { app } from '../../worker/index'
 import { INQUIRY_STATUSES } from '../../shared/enums'
 import { createTestD1 } from './d1'
@@ -253,6 +253,33 @@ test('the orphan sweep pages through the bucket and keeps its place across runs 
   expect((await cleanupIntake(t.env, new Date())).orphans).toBe(1)
   expect(t.r2.objects.has('inquiries/z-orphan')).toBe(false)
   expect(t.n("settings WHERE key = 'orphan_cursor'")).toBe(0)
+})
+
+test('daily budget: uploads in flight hold headroom, so parallel requests cannot overrun it (Codex)', async () => {
+  const t = setup()
+  const left = 15
+  t.sqlite.exec(`INSERT INTO intake_usage (day, bytes) VALUES (date('now'), ${DAILY_MAX_BYTES - left})`)
+  const token = await t.open()
+  t.sqlite.exec(`INSERT INTO inquiry_files (id, submission_id, r2_key, kind, bytes) SELECT 'flying', id, 'inquiries/' || id || '/flying', 'artwork', 10 FROM inquiry_submissions`)
+  expect(PNG.byteLength).toBeGreaterThan(left - 10) // the file fits what is settled, but not with the one in flight
+  expect(await code(await t.upload(token))).toEqual([429, 'upload_limit'])
+  t.sqlite.exec("UPDATE inquiry_files SET status = 'failed' WHERE id = 'flying'")
+  expect((await t.upload(token, PNG.subarray(0, 15))).status).toBe(201)
+})
+
+test('a stalled upload holds nothing past its deadline, cannot settle afterwards and blocks nobody (Codex)', async () => {
+  const t = setup()
+  const token = await t.open()
+  t.sqlite.exec(`INSERT INTO inquiry_files (id, submission_id, r2_key, kind, bytes) SELECT 'stalled', id, 'inquiries/' || id || '/stalled', 'artwork', ${OUTSTANDING_MAX_BYTES} FROM inquiry_submissions`)
+  expect(await code(await t.upload(token))).toEqual([429, 'upload_limit']) // live: it holds the whole pool
+  expect(await code(await t.submit(token))).toEqual([409, 'uploads_in_progress'])
+  t.sqlite.exec(`DROP TRIGGER inquiry_files_identity_fixed; UPDATE inquiry_files SET created_at = strftime('%Y-%m-%dT%H:%M:%fZ','now','-${UPLOAD_DEADLINE_MINUTES + 1} minutes') WHERE id = 'stalled'`)
+  const { settleFile } = await import('../../worker/db/intake')
+  expect(await settleFile(t.db as never, 'stalled', { r2Key: 'k', mime: 'image/png', bytes: 1, sha256: 'x', filename: null }, '2026-01-01')).toBeNull()
+  expect((await t.upload(token)).status).toBe(201)
+  await cleanupIntake(t.env, new Date())
+  expect(t.n("inquiry_files WHERE id = 'stalled'")).toBe(0) // collected
+  expect((await t.submit(token)).status).toBe(201)
 })
 
 test('an R2 cursor that has gone stale resets instead of failing every future run', async () => {

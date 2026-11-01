@@ -466,3 +466,16 @@ Migration 0006 (additive), `worker/db/{pickups,payments}.ts`, `worker/routes/{pi
 - Restore reads trigger text from the target's own schema instead of keeping the planned inventory, which could go stale.
 - The storefront's migration becomes 0009.
 - Deferred to S3, before the first deletion feature: deletion journal, its replay, and orphan detection. Wrangler has no `r2 object list`, and nothing deletes yet.
+
+## 2026-11-01 — S1 public inquiry API (Arturo's go, including the inquiries rebuild; the rest Claude's, Arturo can overturn)
+- **Order:** Arturo said go on S1 before the S0c rehearsal. Safe because the whole Worker stays behind Access until S4; S0c is still required before the S4 cut-over.
+- **Ships closed:** migration 0009 inserts `intake_closed`. Opening is a deliberate step at launch.
+- **Limits beyond the plan, for Arturo to change** (`worker/domain/intake.ts`): 300 sessions and 3 GB a day, 200 open sessions, 20 upload attempts per session, 10 minutes per upload. From the plan: 5 files, 60 MB per session, 20 MB per file, 20 sessions per IP per hour, 2 GB outstanding.
+- **Differs from the plan:**
+  - The session token goes in the Authorization header, so routes are `/submissions`, `/submissions/files`, `/submissions/submit`. A token in the path would land in Worker logs.
+  - `inquiries.submission_id` replaces `request_id`: the session is the idempotency key.
+  - The `files` row is created only at submit, so nothing unsubmitted can be served.
+  - Added `DELETE /submissions/files/:id` for "remove this file" in the form, and `GET /status` for the off-switch message.
+  - `orders.inquiry_id` moves to S3, where conversion uses it.
+- **Daily byte budget** is charged only for stored bytes (Codex showed refused uploads could exhaust it). It is never refunded.
+- **Known ceiling:** someone rotating IPs and passing Turnstile can use up the daily sessions or hold storage for 10 minutes at a time. That blocks new inquiries, never the dashboard or stored data. The off switch and phone or email remain.

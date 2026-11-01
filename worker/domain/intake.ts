@@ -6,6 +6,7 @@ export const SESSION_MAX_FILES = 5
 export const SESSION_MAX_BYTES = 60 * MB
 export const SESSION_MAX_ATTEMPTS = 20 // refused and removed uploads count: they return their bytes, but not forever
 export const FILE_MAX_BYTES = 20 * MB
+export const UPLOAD_DEADLINE_MINUTES = 10 // enough for 20 MB on a slow phone connection; a stalled request can't hold capacity longer
 export const JSON_MAX_BYTES = 64 * 1024
 export const IP_SESSIONS_PER_HOUR = 20 // cautious: a school shares one address
 export const DAILY_MAX_SESSIONS = 300

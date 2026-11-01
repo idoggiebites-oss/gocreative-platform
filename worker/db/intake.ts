@@ -5,8 +5,11 @@ import type { NewFile } from './files'
 
 const NOW = `strftime('%Y-%m-%dT%H:%M:%fZ','now')`
 const OPEN = `status = 'open' AND expires_at > ${NOW}`
+// A reservation is live for the upload deadline. Past it, it counts for nothing, can't settle and blocks nobody; cron collects it.
+const LIVE = `status = 'reserved' AND created_at > strftime('%Y-%m-%dT%H:%M:%fZ','now','-${limits.UPLOAD_DEADLINE_MINUTES} minutes')`
 // Held against the storage cap until a deletion is confirmed; a linked file counts until conversion moves it on (S3).
-const OUTSTANDING = `COALESCE((SELECT SUM(bytes) FROM inquiry_files WHERE status IN ('reserved','stored','linked','deleting')), 0)`
+const OUTSTANDING = `COALESCE((SELECT SUM(bytes) FROM inquiry_files WHERE status IN ('stored','linked','deleting') OR (${LIVE})), 0)`
+const IN_FLIGHT = `COALESCE((SELECT SUM(bytes) FROM inquiry_files WHERE ${LIVE}), 0)`
 const usage = (column: 'sessions' | 'bytes') => `COALESCE((SELECT ${column} FROM intake_usage WHERE day = ?), 0)`
 
 export type SessionRow = { id: string; status: 'open' | 'submitted' | 'expiring'; expired: number }
@@ -30,14 +33,14 @@ export async function openSession(db: D1Database, p: { id: string; tokenHash: st
 
 /** Holds the declared bytes before any are read. False when a cap refused it. */
 export async function reserveFile(db: D1Database, p: { id: string; submissionId: string; r2Key: string; kind: 'artwork' | 'po'; bytes: number; day: string }) {
-  const held = `FROM inquiry_files WHERE submission_id = ? AND status IN ('reserved','stored')`
+  const held = `FROM inquiry_files WHERE submission_id = ? AND (status = 'stored' OR (${LIVE}))`
   const inserted = await db.prepare(`INSERT INTO inquiry_files (id, submission_id, r2_key, kind, bytes) SELECT ?, ?, ?, ?, ?
       WHERE EXISTS (SELECT 1 FROM inquiry_submissions WHERE id = ? AND ${OPEN})
         AND (SELECT COUNT(*) FROM inquiry_files WHERE submission_id = ?) < ?
         AND (SELECT COUNT(*) ${held}) < ?
         AND (SELECT COALESCE(SUM(bytes), 0) ${held}) + ? <= ?
         AND ${OUTSTANDING} + ? <= ?
-        AND ${usage('bytes')} + ? <= ?`)
+        AND ${usage('bytes')} + ${IN_FLIGHT} + ? <= ?`)
       .bind(p.id, p.submissionId, p.r2Key, p.kind, p.bytes, p.submissionId, p.submissionId, limits.SESSION_MAX_ATTEMPTS, p.submissionId, limits.SESSION_MAX_FILES, p.submissionId, p.bytes, limits.SESSION_MAX_BYTES,
         p.bytes, limits.OUTSTANDING_MAX_BYTES, p.day, p.bytes, limits.DAILY_MAX_BYTES).run()
   return inserted.meta.changes > 0
@@ -45,13 +48,13 @@ export async function reserveFile(db: D1Database, p: { id: string; submissionId:
 
 /**
  * reserved -> stored, only while the session is still open. Null means it lost: the caller's object must go. The daily
- * budget is charged here, for bytes actually stored: a declared size costs nothing, or one session could spend it all
- * on uploads refused after the first few bytes (Codex). Parallel uploads may overshoot it slightly; the outstanding-storage cap is exact.
+ * budget is charged here, for bytes actually stored: a declared size only holds headroom while in flight, or one session
+ * could spend it all on uploads refused after the first few bytes (Codex).
  */
 export async function settleFile(db: D1Database, id: string, file: NewFile, day: string) {
   const [r] = await db.batch([
     db.prepare(`UPDATE inquiry_files SET status = 'stored', mime = ?, sha256 = ?, filename = ?
-      WHERE id = ? AND status = 'reserved' AND EXISTS (SELECT 1 FROM inquiry_submissions s WHERE s.id = submission_id AND s.status = 'open')`)
+      WHERE id = ? AND ${LIVE} AND EXISTS (SELECT 1 FROM inquiry_submissions s WHERE s.id = submission_id AND s.status = 'open')`)
       .bind(file.mime, file.sha256, file.filename, id),
     db.prepare(`INSERT INTO intake_usage (day, bytes) SELECT ?, ? WHERE changes() > 0
       ON CONFLICT (day) DO UPDATE SET bytes = bytes + excluded.bytes`).bind(day, file.bytes),
@@ -78,7 +81,7 @@ export const saveOrphanCursor = (db: D1Database, cursor: string | undefined) => 
   : db.prepare(`DELETE FROM settings WHERE key = 'orphan_cursor'`).run()
 
 export const sessionFileKinds = async (db: D1Database, submissionId: string) =>
-  (await db.prepare(`SELECT kind, status FROM inquiry_files WHERE submission_id = ?`).bind(submissionId).all<{ kind: string; status: string }>()).results
+  (await db.prepare(`SELECT kind, status, ${LIVE} AS live FROM inquiry_files WHERE submission_id = ?`).bind(submissionId).all<{ kind: string; status: string; live: number }>()).results
 
 export const findRef = async (db: D1Database, submissionId: string) =>
   (await db.prepare(`SELECT ref FROM inquiries WHERE submission_id = ?`).bind(submissionId).first<{ ref: string }>())?.ref ?? null
@@ -98,7 +101,7 @@ export async function submitInquiry(db: D1Database, p: { submissionId: string; r
     db.prepare(`INSERT INTO inquiries (payload, contact_name, contact_email, contact_phone, status, ref, submission_id, customer_kind, organization, preferred_contact, due_date, ip_hash)
       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
       WHERE EXISTS (SELECT 1 FROM inquiry_submissions WHERE id = ? AND ${OPEN})
-        AND NOT EXISTS (SELECT 1 FROM inquiry_files WHERE submission_id = ? AND status = 'reserved')
+        AND NOT EXISTS (SELECT 1 FROM inquiry_files WHERE submission_id = ? AND ${LIVE})
         AND (? <> 'individual' OR NOT EXISTS (SELECT 1 FROM inquiry_files WHERE submission_id = ? AND status = 'stored' AND kind = 'po'))`)
       .bind(payload, i.contactName, i.contactEmail ?? null, i.contactPhone ?? null, p.spam ? 'spam' : 'new', p.ref, sid, i.customerKind, i.organization ?? null, i.preferredContact ?? null, i.dueDate ?? null, p.ipHash, sid, sid, i.customerKind, sid),
     db.prepare(`INSERT INTO files (r2_key, mime, bytes, sha256, via_portal, filename)
@@ -121,6 +124,7 @@ export async function claimExpired(db: D1Database) {
     db.prepare(`UPDATE inquiry_submissions SET status = 'expiring' WHERE status = 'open' AND expires_at <= ${NOW}`),
     db.prepare(`UPDATE inquiry_files SET status = 'deleting' WHERE status IN ('reserved','stored')
       AND submission_id IN (SELECT id FROM inquiry_submissions WHERE status = 'expiring')`),
+    db.prepare(`UPDATE inquiry_files SET status = 'deleting' WHERE status = 'reserved' AND NOT (${LIVE})`),
   ])
 }
 

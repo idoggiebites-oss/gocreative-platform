@@ -6,10 +6,17 @@ Update this whenever something deploys. History is in git and ROADMAP.md; this i
 - **Worker version:** 93660340 (S0b).
 - **Remote migrations applied:** 0001–0008. Never edit these.
 - **Test data left in live on purpose:** customer "TEST – ignore" and cancelled order 2026-0001, so the next real order is 2026-0002.
-- **Storefront:** not built. Mockups: https://claude.ai/artifact/CV2TZQvJGPwzhCVK4EwT4X
+- **Public intake API:** deployed, but closed twice over: the Worker is still all behind Access, and the `intake_closed` row in `settings` refuses every public write. `TURNSTILE_SECRET` and `IP_HASH_SALT` aren't set; without them no session can open.
+- **Storefront UI:** not built. Mockups: https://claude.ai/artifact/CV2TZQvJGPwzhCVK4EwT4X
 - **Backups:** `~/gocreative-backups/` on Arturo's Mac only. No off-machine copy yet. Latest: 2026-11-01T04-47-45-031Z. Run weekly by hand and before every remote migration.
 
 - **Throwaway:** Worker `gocreative-access-drill` (no data), public until the S0c rehearsal finishes, then delete it.
+
+## Needed before opening intake (S4)
+
+1. Create the Turnstile widget (action `inquiry`, the real hostname), and set `TURNSTILE_SECRET` and a random `IP_HASH_SALT` with `wrangler secret put`.
+2. Access re-scope (notes/access-rescope.md).
+3. Remove the row: `npx wrangler d1 execute gocreative --remote --command "DELETE FROM settings WHERE key = 'intake_closed'"`. Adding it back is the emergency off switch; no deploy needed.
 
 ## Open
 

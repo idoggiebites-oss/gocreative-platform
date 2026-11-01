@@ -118,7 +118,9 @@ export function publicRoutes() {
       }
       if (stored.result === null) {
         await db.markDeleting(c.env.DB, id, ['reserved']) // settled too late; storeUpload tried the delete, cron confirms it
-        return fail(c, 409, 'session_closed', 'This request has already been sent.')
+        return (await session(c))?.status === 'open'
+          ? fail(c, 409, 'upload_too_slow', 'That file took too long to upload. Please try again on a better connection.')
+          : fail(c, 409, 'session_closed', 'This request has already been sent.')
       }
       return c.json({ id, filename: stored.result.filename, bytes: stored.result.bytes }, 201)
     })
@@ -169,7 +171,7 @@ export function publicRoutes() {
       const raced = await db.findRef(c.env.DB, s.id)
       if (raced) return c.json({ ref: raced })
       const files = await db.sessionFileKinds(c.env.DB, s.id)
-      if (files.some((f) => f.status === 'reserved')) return fail(c, 409, 'uploads_in_progress', 'Your files are still uploading.')
+      if (files.some((f) => f.live)) return fail(c, 409, 'uploads_in_progress', 'Your files are still uploading.')
       if (input.customerKind === 'individual' && files.some((f) => f.kind === 'po' && f.status === 'stored')) {
         return fail(c, 400, 'po_not_accepted', 'Purchase orders are for schools, districts and organizations.')
       }
