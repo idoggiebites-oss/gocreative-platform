@@ -50,7 +50,8 @@ test('focus after "Record approval" lands on a real element, not the page body',
   await approve.focus()
   await page.keyboard.press('Enter')
   await expect(approve).toHaveCount(0)
-  await expect.poll(() => focusedLabel(page)).toBe(AFTER_APPROVE)
+  // Which neighbour takes focus depends on which refetch lands first under load; both are real controls in the same panel. Never the body.
+  await expect.poll(() => focusedLabel(page)).toMatch(new RegExp(`^(${AFTER_APPROVE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}|View purchase order)$`))
 })
 
 test('focus follows a production-tab button that turns into another one', async ({ page }, info) => {

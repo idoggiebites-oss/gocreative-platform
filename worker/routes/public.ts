@@ -12,6 +12,7 @@ import { FILE_MAX_BYTES, JSON_MAX_BYTES, SESSION_HOURS, newRef, usageDay } from 
 import { isDefiniteRollback, storeUpload, type FileKind } from '../files'
 import { sameOriginWrites } from '../sameOrigin'
 import { verifyTurnstile } from '../turnstile'
+import { isLocalHost } from '../auth'
 
 type Env_ = AppEnv // no user is ever set here: this just matches the shared upload helper
 const fail = (c: Context, status: 400 | 401 | 404 | 409 | 410 | 413 | 429 | 503, code: string, error: string) => c.json({ error, code }, status)
@@ -27,6 +28,10 @@ const hashIp = async (ip: string, salt: string) => {
 }
 const base64url = (b: Uint8Array) => btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 const clientIp = (c: Context) => c.req.header('cf-connecting-ip') ?? 'unknown'
+
+/** Local dev and e2e only, like DEV_AUTH_EMAIL: never honoured on a real hostname. */
+const skipsTurnstile = (c: Context<Env_>) => Boolean(c.env.DEV_TURNSTILE_PASS) && isLocalHost(c.req.url)
+const ready = (c: Context<Env_>) => Boolean(c.env.IP_HASH_SALT && (skipsTurnstile(c) || (c.env.TURNSTILE_SECRET && c.env.TURNSTILE_SITE_KEY)))
 
 const intakeOpen: MiddlewareHandler<Env_> = async (c, next) =>
   (await isIntakeClosed(c.env.DB)) ? fail(c, 503, 'intake_closed', 'We are not taking online requests right now. Please call or email us.') : next()
@@ -65,16 +70,20 @@ export function publicRoutes() {
       c.header('Cache-Control', 'no-store')
     })
     .use(sameOriginWrites)
-    .get('/status', async (c) => c.json({ open: !(await isIntakeClosed(c.env.DB)) }))
+    // The site key is public by design. `open` is only true when a session could really open, so the form never promises what the API would refuse.
+    .get('/status', async (c) => c.json({
+      open: !(await isIntakeClosed(c.env.DB)) && ready(c),
+      turnstileSiteKey: c.env.TURNSTILE_SITE_KEY ?? null,
+    }))
 
     .post('/submissions', intakeOpen, jsonCap, async (c) => {
       const secret = c.env.TURNSTILE_SECRET
       const salt = c.env.IP_HASH_SALT
-      if (!secret || !salt) return fail(c, 503, 'intake_closed', 'We are not taking online requests right now. Please call or email us.') // fail closed
+      if (!salt || (!secret && !skipsTurnstile(c))) return fail(c, 503, 'intake_closed', 'We are not taking online requests right now. Please call or email us.') // fail closed
       const body = await readJson(c) as { turnstileToken?: unknown } | undefined
       const ip = clientIp(c)
       const proof = typeof body?.turnstileToken === 'string' ? body.turnstileToken : ''
-      const verified = await verifyTurnstile({ secret, token: proof, ip, hostname: new URL(c.req.url).hostname })
+      const verified = skipsTurnstile(c) ? 'ok' : await verifyTurnstile({ secret: secret!, token: proof, ip, hostname: new URL(c.req.url).hostname })
       if (verified === 'unavailable') return fail(c, 503, 'verification_unavailable', 'Please try again in a moment.')
       if (verified === 'refused') return fail(c, 400, 'verification_failed', 'We could not verify your browser. Please try again.')
 

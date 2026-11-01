@@ -16,7 +16,7 @@ function setup() {
   sqlite.exec(seed)
   sqlite.exec("DELETE FROM settings WHERE key = 'intake_closed'")
   const r2 = createTestR2()
-  const env = { DB: db, FILES: r2.bucket, TURNSTILE_SECRET: 's', IP_HASH_SALT: 'salt' } as unknown as Env
+  const env = { DB: db, FILES: r2.bucket, TURNSTILE_SECRET: 's', TURNSTILE_SITE_KEY: 'site', IP_HASH_SALT: 'salt' } as unknown as Env
   const call = (path: string, init: RequestInit = {}, ip = '203.0.113.1') =>
     app.request(`https://${HOST}/api/public${path}`, { ...init, headers: { 'CF-Connecting-IP': ip, ...init.headers } }, env)
   const open = async (ip = '203.0.113.1') => {
@@ -57,7 +57,7 @@ test('as migrated, intake is closed: every public write refuses and status says 
   const t = setup()
   t.sqlite.exec("INSERT INTO settings (key, value) VALUES ('intake_closed', 'x')")
   expect(await code(await t.call('/submissions', { method: 'POST', body: '{}' }))).toEqual([503, 'intake_closed'])
-  expect(await (await t.call('/status')).json()).toEqual({ open: false })
+  expect(await (await t.call('/status')).json()).toEqual({ open: false, turnstileSiteKey: 'site' })
   expect(turnstile).not.toHaveBeenCalled()
   // The migration itself ships the row.
   const fresh = createTestD1()
@@ -149,6 +149,23 @@ test('Turnstile: refused, replayed, wrong host, wrong action, missing and down a
   // Without its secrets the route refuses rather than opening unverified.
   const noSecret = await app.request(`https://${HOST}/api/public/submissions`, { method: 'POST', body: '{"turnstileToken":"good"}' }, { ...t.env, TURNSTILE_SECRET: undefined })
   expect(await code(noSecret)).toEqual([503, 'intake_closed'])
+})
+
+test('status tells the truth: open only when a session could open, and it holds nothing but the public site key', async () => {
+  const t = setup()
+  const status = async (env: Partial<Env>) => (await app.request(`https://${HOST}/api/public/status`, {}, { ...t.env, ...env })).json()
+  expect(await status({})).toEqual({ open: true, turnstileSiteKey: 'site' })
+  for (const missing of ['TURNSTILE_SECRET', 'TURNSTILE_SITE_KEY', 'IP_HASH_SALT']) expect(await status({ [missing]: undefined }), missing).toMatchObject({ open: false })
+})
+
+test('the dev Turnstile pass works only on localhost: a real hostname still verifies', async () => {
+  const t = setup()
+  const env = { ...t.env, DEV_TURNSTILE_PASS: '1', TURNSTILE_SECRET: undefined, TURNSTILE_SITE_KEY: undefined }
+  const post = (host: string) => app.request(`${host}/api/public/submissions`, { method: 'POST', body: '{"turnstileToken":"spent"}' }, env)
+  expect(await code(await post(`https://${HOST}`))).toEqual([503, 'intake_closed']) // no secret, and the pass doesn't count here
+  expect(await code(await app.request(`https://${HOST}/api/public/submissions`, { method: 'POST', body: '{"turnstileToken":"spent"}' }, { ...t.env, DEV_TURNSTILE_PASS: '1' }))).toEqual([400, 'verification_failed'])
+  expect((await post('http://localhost')).status).toBe(201)
+  expect(turnstile).toHaveBeenCalledOnce()
 })
 
 test('the session token is the only key: stored hashed, absent or wrong refuses, and it stops working once expired', async () => {

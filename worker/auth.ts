@@ -70,7 +70,7 @@ async function verifyAccessJwt(token: string | undefined, aud: string, teamDomai
   }
 }
 
-const isLocalHost = (url: string) => ['localhost', '127.0.0.1'].includes(new URL(url).hostname)
+export const isLocalHost = (url: string) => ['localhost', '127.0.0.1'].includes(new URL(url).hostname)
 
 /**
  * Cloudflare Access sits in front of /api/app/*, but the Worker re-verifies the

@@ -5,4 +5,8 @@
   --brand-foreground: #ffffff;
   --brand-hover: #1a3184;
   --brand-tint: #e3e8f8;
+  /* Storefront accent (approved mockups, STOREFRONT_PLAN). Replaced when the shop has a brand colour. */
+  --store-accent: #2343d6;
+  --store-accent-hover: #1a33a8;
+  --store-accent-tint: #eceffc;
 }

@@ -3,3 +3,6 @@
 # localhost or 127.0.0.1. The email must still exist and be active in `users`
 # (npm run db:seed creates owner1@example.com). Never set it in production.
 DEV_AUTH_EMAIL=owner1@example.com
+# Public intake locally. DEV_TURNSTILE_PASS is honoured only on localhost; never set it in production.
+DEV_TURNSTILE_PASS=1
+IP_HASH_SALT=local-only
