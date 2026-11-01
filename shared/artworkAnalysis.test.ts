@@ -144,6 +144,19 @@ describe('artwork that has no honest ink count', () => {
     const r = analyzeArtwork(image(200, 200, (x, y) => (x > 20 && x < 100 && y > 20 && y < 180 ? [0, 0, 0, 255] : x === 150 && y > 20 && y < 180 ? [0, 0, 0, 255] : WHITE)))
     expect(r.estimatedInkColors).toBe(1)
   })
+  test('small anti-aliased type in a counted ink is that ink, not a reason to refuse', () => {
+    const r = analyzeArtwork(image(200, 200, (x, y) => {
+      if (x >= 20 && x < 80 && y >= 20 && y < 100) return [0, 0, 0, 255]
+      if (y >= 130 && y < 150 && x >= 20 && x < 180) {
+        const m = (x - 20) % 8
+        if (m === 1) return [0, 0, 0, 255]
+        if (m === 0 || m === 2) return [128, 128, 128, 255]
+      }
+      return WHITE
+    }))
+    expect(r.estimatedInkColors).toBe(1)
+    expect(r.needsManualReview).toBe(false)
+  })
   test('line art with no solid ink at all goes to manual review, not "one color: white"', () => {
     const r = analyzeArtwork(image(200, 200, (x, y) => ((x % 40 === 0 || y % 40 === 0) ? [0, 0, 0, 255] : WHITE)))
     expect(r.needsManualReview).toBe(true)

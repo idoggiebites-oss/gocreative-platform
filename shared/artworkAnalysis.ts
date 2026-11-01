@@ -209,7 +209,16 @@ export function analyzeArtwork(px: Pixels, settings: AnalysisSettings = ANALYSIS
         for (let nx = Math.max(0, x - NEAR); nx <= Math.min(w - 1, x + NEAR); nx++) {
           const key = flatKey[ny * w + nx]
           const c = key >= 0 ? keptIndex.get(key) : undefined
-          if (c !== undefined) near.add(c)
+          if (c !== undefined) {
+            near.add(c)
+            continue
+          }
+          // A thin stroke of a counted ink isn't flat, yet it is that ink, and its soft edge is a blend with it.
+          const j = (ny * w + nx) * 4
+          if (key < 0 && data[j + 3] >= settings.alphaOpaque) {
+            const match = anchors.findIndex((A) => distTo(data[j], data[j + 1], data[j + 2], A) <= settings.edgeColorDistance / 3)
+            if (match >= 0) near.add(match)
+          }
         }
       }
       const around = [...near]
