@@ -206,7 +206,7 @@ Writes from the browser send the `expectedVersion` they read; a stale one is a 4
 - Planned, not built yet: an app-wide CSP and security headers (today only file downloads carry a CSP), and a
   service worker (no PWA yet). When one is added, it must never cache `/api` or `/files`.
 
-**Backups** *(corrected 2026-11-01: there is no backup script yet; the architecture review lists it as a fix-now item)*
+**Backups** *(built and drilled 2026-10-31: see notes/backup-restore.md, whose status overrides any text here)*
 - D1 Time Travel gives point-in-time restore. Its retention depends on the plan; check it in the dashboard.
 - To build (STOREFRONT_PLAN S0b): a scripted per-table JSON export of the live D1 (`wrangler d1 export --remote`
   failed with auth error 10000 on this account), plus a restore drill into a scratch local D1, documented in `notes/`.

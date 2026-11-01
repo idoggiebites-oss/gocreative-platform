@@ -62,8 +62,8 @@ for (const t of present) {
 }
 const fk = d1('PRAGMA foreign_key_check')
 if (fk.length > 0) problems.push(`foreign_key_check: ${JSON.stringify(fk)}`)
-const integrity = d1('PRAGMA integrity_check')
-if (integrity[0]?.integrity_check !== 'ok') problems.push(`integrity_check: ${JSON.stringify(integrity)}`)
+const integrity = d1('PRAGMA quick_check') // D1 refuses integrity_check
+if (integrity[0]?.quick_check !== 'ok') problems.push(`quick_check: ${JSON.stringify(integrity)}`)
 const after = d1("SELECT name, sql FROM sqlite_schema WHERE type = 'trigger' ORDER BY name")
 if (JSON.stringify(after.map((t) => t.name)) !== JSON.stringify(triggers.map((t) => t.name))) problems.push('triggers differ after the load')
 

@@ -259,7 +259,7 @@ submission session**, not once per upload:
   delete a submitted inquiry's files. It also reconciles objects under `inquiries/` that have no file row.
   Besides the existing rollback cleanup in `worker/files.ts`, this is the only place a file is deleted.
 
-## 5. Data model (migration 0008, additive)
+## 5. Data model (migration 0009, additive; 0008 went to the S0b settings table)
 
 - `inquiries`, new columns: `ref TEXT UNIQUE`, `request_id TEXT UNIQUE`, `customer_kind`, `organization`,
   `preferred_contact`, `due_date`, `converted_at`, `converted_by`, `ip_hash` (a salted hash for abuse review,
@@ -364,8 +364,8 @@ standing approval (additive changes only). The Access re-scope is the exception 
 |---|---|---|
 | S0 | **Design mockups** (home, services, the inquiry form, the artwork and PO upload experience, confirmation; phone and desktop) on the design canvas, using the design skills. **Approved to start 2026-11-01. Review gate: Arturo approves before S1.** | Claude |
 | S0c | **Access re-scope rehearsal** on a throwaway Worker: hostname inventory, exact config method, outside-in proof (§0b.2). Before S1. | Claude, with Arturo in the dashboard |
-| S0b | **Fix-now items:** a backup script (per-table JSON export of the live D1, plus a restore drill into a scratch local D1), with ARCHITECTURE.md corrected. | Claude |
-| S1 | Migration 0008; the submission, upload and submit endpoints; Turnstile; throttling and the admission budget; the off switch; cron cleanup; boundary tests seeded with internal notes, other customers and supplier costs; abuse tests (oversize, wrong type, token reuse and expiry, Turnstile failure and replay, budget races, flood). | Opus agent; Codex reviews security |
+| S0b | **Done 2026-10-31.** **Fix-now items:** a backup script (per-table JSON export of the live D1, plus a restore drill into a scratch local D1), with ARCHITECTURE.md corrected. | Claude |
+| S1 | Migration 0009; the submission, upload and submit endpoints; Turnstile; throttling and the admission budget; the off switch; cron cleanup; boundary tests seeded with internal notes, other customers and supplier costs; abuse tests (oversize, wrong type, token reuse and expiry, Turnstile failure and replay, budget races, flood). | Opus agent; Codex reviews security |
 | S2 | Storefront UI to the approved mockups, **with the motion spec in DESIGN_SYSTEM.md** (View Transitions between pages, direction-aware step changes, the confirmation moment): layout, pages, the inquiry form with uploads and retries, confirmation, privacy page, e2e on phone and desktop. | Sonnet agent; Codex reviews |
 | S3 | Dashboard: inquiry detail, customer match, **Convert to order**, Mark as spam, **Decline with an optional reason**, **owner delete**. Conversion e2e (storefront submit → convert → order has items and artwork → quote). | Opus (conversion batch), Sonnet (screens) |
 | S4 | Launch: Access re-scope (with Arturo), domain if ready, PWA for the dashboard, signed-in smoke test, the family's dry run. | Claude + Arturo |

@@ -1,8 +1,37 @@
-# Backup and restore (plan; S0b builds and tests it)
+# Backup and restore
 
-> Status 2026-11-01: **plan only.** Arturo: backup and restore must be implemented **and tested** before the
-> storefront goes public (STOREFRONT_PLAN §0.2). Nothing here exists yet. ARCHITECTURE.md said otherwise; that
-> claim was corrected in the architecture review.
+> **Status 2026-10-31: built and drilled (S0b).** `npm run backup [-- pre-migration]` and `npm run restore -- <dir>`.
+> "How it works now" and the drill record are the present truth. The plan below them is kept for its reasoning; where it differs, this section wins.
+
+## How it works now
+
+- **Backup:** sets the `maintenance` row in `settings`, which makes every non-GET under `/api` answer 503 (`worker/index.ts`). Waits 30 s for in-flight requests, exports every table by keyset, mirrors and re-hashes R2 files, fails if rows arrived meanwhile, writes `manifest.json` last, lifts the pause, expires old backups. About 75 s.
+- **Stuck pause** (only after a crash that couldn't clean up; signals and errors clear it): `npx wrangler d1 execute gocreative --remote --command "DELETE FROM settings WHERE key = 'maintenance'"`.
+- **Restore:** refuses the database bound in `wrangler.jsonc` and any non-empty target. Applies migrations to the backup's version, drops triggers in that target only (text read from its own `sqlite_schema`, so there is no list to go stale), loads in foreign-key order, restores triggers, checks every table's checksum, `foreign_key_check`, `quick_check` and mirror hashes, then applies newer migrations.
+- **New cloud database:** `npx wrangler d1 create <name>`, then `npm run restore -- <dir> --database-id <id> --database-name <name>`. Local (no flags) also loads the files into local R2; to boot on it, use the command it prints, setting any flag before boot. Delete the scratch folder afterwards, including after a failed run: it holds customer data.
+- **Time Travel:** 30 days on Workers Paid, 7 on Free (Cloudflare docs, 2026-10-31). Which plan this account is on is unverified, so assume 7.
+
+## Not built, on purpose
+
+- **Orphan check and journal copy.** Wrangler has no `r2 object list`, so objects with no `files` row aren't detected. **Must be solved in S3 before the first deletion feature ships:** deletion journal writing, its off-machine copy and its replay in restore. Nothing deletes today, so nothing needs replaying yet.
+- **Restoring files to a cloud bucket:** manual, per the runbook below.
+- **Weekly schedule:** run by hand until the off-machine location is chosen.
+- **Off-machine copy:** Arturo's choice is open. Until then, losing this Mac loses the backups.
+
+## Drill record
+
+**2026-10-31**, backup `2026-11-01T04-47-45-031Z` (16 rows, 1 file, 23 tables, 52 triggers; took 74 s):
+
+| Drill | Result |
+|---|---|
+| Restore into fresh local D1 | Verified, about 70 s |
+| Boot on it (real workerd) | Dashboard and order 200; file bytes match the recorded SHA-256 |
+| Maintenance under workerd | Flag on: POST 503, no row written, GET 200. Flag off: POST 201 |
+| Restore into a throwaway cloud D1 | Verified, then deleted |
+| Refusals | Live database id refused; non-empty target refused |
+| Time Travel on the throwaway | Row changed, restored to bookmark, value back |
+
+**Limits of this evidence:** live data is one test order, so the historical states the plan lists (voided payments, superseded quotes, deposited checks) were proven only against seed data through `restoreSql` in `tests/api/backup.test.ts`, not through a real D1. That test's control shows the load fails with triggers on. Repeat the drill once real orders exist. The live 503 itself couldn't be exercised from outside, because Access answers first.
 
 ## What must be recoverable
 

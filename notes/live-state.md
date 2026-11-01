@@ -3,11 +3,11 @@
 Update this whenever something deploys. History is in git and ROADMAP.md; this is only the present.
 
 - **Dashboard:** gocreative.idoggiebites.workers.dev, behind Cloudflare Access (reusable policy "GoCreative staff").
-- **Worker version:** 52951268 (M6).
-- **Remote migrations applied:** 0001–0007. Never edit these.
+- **Worker version:** 93660340 (S0b).
+- **Remote migrations applied:** 0001–0008. Never edit these.
 - **Test data left in live on purpose:** customer "TEST – ignore" and cancelled order 2026-0001, so the next real order is 2026-0002.
 - **Storefront:** not built. Mockups: https://claude.ai/artifact/CV2TZQvJGPwzhCVK4EwT4X
-- **Backups:** `~/gocreative-backups/` on Arturo's Mac only. No off-machine copy yet.
+- **Backups:** `~/gocreative-backups/` on Arturo's Mac only. No off-machine copy yet. Latest: 2026-11-01T04-47-45-031Z. Run weekly by hand and before every remote migration.
 
 ## Open
 

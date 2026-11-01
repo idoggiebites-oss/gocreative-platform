@@ -93,3 +93,11 @@ inside its card in Spanish.
 ### 2026-11-01 — New MCP servers need a fresh session
 - `claude mcp add` connects immediately, but its tools only reach the model in the next session. Add connectors
   at the end of a session, before the work that needs them.
+
+### 2026-10-31 — Don't send a setup command's errors to /dev/null in a drill
+- **Cost:** the maintenance drill showed POST 201 with the flag "on". zsh doesn't word-split `$VAR`, so wrangler rejected the insert and `>/dev/null` hid it. It looked like a production bug. An earlier run also picked the wrong scratch folder and got 500s.
+- **Rule:** assert a drill's precondition before reading its result (show the flag is set), and leave setup errors visible.
+
+### 2026-10-31 — D1 is stricter than SQLite; in-memory tests can't see it
+- **Cost:** restore passed its node:sqlite test, then the first real run failed because D1 refuses `PRAGMA integrity_check` (`SQLITE_AUTH`). `quick_check` is allowed.
+- **Rule:** anything that runs against D1 from outside the Worker gets one run on real D1 before it counts as tested.

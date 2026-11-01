@@ -14,7 +14,7 @@ Standing approval (Arturo, 2026-10-31): once a milestone is Codex-reviewed "read
 
 Always ask first for anything possibly irreversible: a migration that rebuilds or drops tables or rewrites or deletes live data, wiping data, Access or auth changes, deleting R2 objects.
 
-Before any remote migration, re-check live row counts and pending migrations, and run `npm run backup -- pre-migration` once it is live.
+Before any remote migration, re-check live row counts and pending migrations, and run `npm run backup -- pre-migration`.
 
 Pushing still needs asking (AGENTS.md); the repo is public.
 

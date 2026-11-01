@@ -460,3 +460,9 @@ Migration 0006 (additive), `worker/db/{pickups,payments}.ts`, `worker/routes/{pi
 - Arturo confirmed the product → method map, and added **trophies and awards**: ordered, built and personalized by the shop. They are a storefront product (personalized by laser engraving), and internally they use the existing purchasing (a trophy supplier), prep (assembly) and production steps.
 - Storefront screens animate (Arturo): motion spec in DESIGN_SYSTEM.md, prototyped in the phone order flow and confirmation. CSS + View Transitions API, no motion library; reduced motion removes movement.
 - Storefront uses Motion (motion/react, storefront bundle only) with components adapted from Motion Primitives and Watermelon UI (both MIT; copied and restyled, one icon set, no Next-only deps). Replaces the earlier "no motion library" line for the storefront only; the dashboard stays library-free. Why: Transition Panel gives step exits CSS can't, plus stagger reveals and the morphing submit. Arturo approved.
+
+## 2026-10-31 — S0b as built differs from the plan (Claude; Arturo can overturn)
+- The maintenance switch is a D1 row, not a Worker variable: it needs no new Worker version and reads strongly from the primary.
+- Restore reads trigger text from the target's own schema instead of keeping the planned inventory, which could go stale.
+- The storefront's migration becomes 0009.
+- Deferred to S3, before the first deletion feature: deletion journal, its replay, and orphan detection. Wrangler has no `r2 object list`, and nothing deletes yet.
