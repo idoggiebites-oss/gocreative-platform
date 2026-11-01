@@ -479,3 +479,13 @@ Migration 0006 (additive), `worker/db/{pickups,payments}.ts`, `worker/routes/{pi
   - `orders.inquiry_id` moves to S3, where conversion uses it.
 - **Daily byte budget** is charged only for stored bytes (Codex showed refused uploads could exhaust it). It is never refunded.
 - **Known ceiling:** someone rotating IPs and passing Turnstile can use up the daily sessions or hold storage for 10 minutes at a time. That blocks new inquiries, never the dashboard or stored data. The off switch and phone or email remain.
+
+## 2026-11-01 — S2 storefront as built (Claude; Arturo reviews the UI before S3 or S4)
+- **Screens follow the approved mockups.** One `/services` page with anchors, as drawn, rather than the plan's `/services/:slug`.
+- **Motion, per Emil Kowalski's rules (Arturo asked for them).** Press feedback, step transitions, upload rows, scroll reveals, the confirmation moment. Cut: hero Text Effect (the first thing read should not be delayed). Deferred: Morphing Dialog (no real photos to open). Motion Primitives pieces were adapted by hand; no Watermelon code was copied, since its MCP was not available here.
+- **Light theme only,** as Arturo's direction and the mockups say.
+- **Copy is in English in the components,** not i18n: Arturo said the storefront stays English, and shared/i18n requires every string in Spanish. Moving it later is mechanical.
+- **Added `GET /submissions/files`:** the session lists its own stored files. Codex showed a lost upload reply could otherwise send an unseen file or a duplicate.
+- **`GET /status` is open only when a session could open,** so missing secrets show the closed message, not a form that fails.
+- **`DEV_TURNSTILE_PASS`** skips Turnstile on localhost only, the same pattern as `DEV_AUTH_EMAIL`, with a test that a real hostname still verifies.
+- **The Worker is not deployed with S2.** Arturo asked to review the UI first.

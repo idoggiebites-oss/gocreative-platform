@@ -230,6 +230,58 @@ test('a file cancelled after it reached the server is removed before sending, so
   await expect(page.getByLabel('What you sent')).not.toContainText('sent-then-cancelled.png')
 })
 
+test('a cancelled file that will not delete becomes visible and stops the send, so it can never go out unseen', async ({ page }) => {
+  await toStep3(page)
+  let release!: () => void
+  const held = new Promise<void>((r) => { release = r })
+  let stuck = true
+  await page.route('**/api/public/submissions/files**', async (route) => {
+    const method = route.request().method()
+    if (method === 'DELETE' && stuck) return route.abort()
+    if (method !== 'POST') return route.fallback()
+    const reply = await route.fetch()
+    await held
+    return route.fulfill({ response: reply })
+  })
+  await artworkInput(page).setInputFiles([png('wont-delete.png')])
+  await page.waitForTimeout(800)
+  await page.getByRole('button', { name: 'Cancel wont-delete.png' }).click()
+  release()
+  await toStep4(page)
+  await page.getByRole('button', { name: 'Send my request' }).click()
+  await expect(page.getByRole('list', { name: 'Your files' }).getByText('wont-delete.png')).toBeVisible()
+  expect(page.url()).not.toContain('sent')
+  stuck = false
+  await page.getByRole('button', { name: 'Remove wont-delete.png' }).click()
+  await page.getByRole('button', { name: 'Continue to your details' }).click()
+  await page.getByRole('button', { name: 'Send my request' }).click()
+  await expect(page).toHaveURL(/order\/sent\//)
+  await expect(page.getByLabel('What you sent')).not.toContainText('wont-delete.png')
+})
+
+test('retry after a lost reply checks with the server first: unreachable means no second copy is posted', async ({ page }) => {
+  await toStep3(page)
+  let posts = 0
+  let blind = true
+  await page.route('**/api/public/submissions/files', async (route) => {
+    const method = route.request().method()
+    if (method === 'GET' && blind) return route.abort()
+    if (method !== 'POST') return route.fallback()
+    posts++
+    await route.fetch()
+    return route.abort()
+  })
+  await artworkInput(page).setInputFiles([png('careful.png')])
+  const retry = page.getByRole('button', { name: 'Retry careful.png' })
+  await retry.click()
+  await expect(page.getByRole('list', { name: 'Your files' }).getByText('We still cannot reach the shop.')).toBeVisible()
+  expect(posts).toBe(1)
+  blind = false
+  await retry.click()
+  await expect(page.getByText(/^Artwork, .*Uploaded\.$/)).toBeVisible()
+  expect(posts).toBe(1)
+})
+
 test('reloading while the reply was lost still shows the file that would be sent', async ({ page }) => {
   await toStep3(page)
   await artworkInput(page).setInputFiles([png('first.png')])

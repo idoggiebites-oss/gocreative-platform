@@ -113,3 +113,11 @@ inside its card in Spanish.
 ### 2026-11-01 — Security review keeps paying on public surfaces
 - **Cost:** three Codex passes on S1 found six real defects after 500 passing tests, including one session spending the whole daily budget on refused uploads. Tests prove what you thought of.
 - **Rule:** for anything internet-facing, re-review after each fix round until a pass finds nothing new, and turn every finding into a test.
+
+### 2026-11-01 — Look at the screens; a green suite cannot see them
+- **Cost:** 40 passing tests and zero contrast failures, and the first screenshots still showed the wrong nav links highlighted, "Uploaded., 1 KB", and a missing phone thumbnail.
+- **Rule:** read every screenshot at both widths before any review.
+
+### 2026-11-01 — An upload failure that may have reached the server is not a failure
+- **Cost:** three Codex rounds on S2 were about this: a retry after a lost reply duplicates, a removed row can leave an unseen file attached.
+- **Rule:** the server's list is the truth. Reconcile with it after anything ambiguous, and before anything irreversible.

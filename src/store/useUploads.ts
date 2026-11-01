@@ -7,6 +7,7 @@ export type Row = {
   key: string; name: string; bytes: number; purpose: FilePurpose
   state: 'uploading' | 'done' | 'failed' | 'removing'
   progress: number; error?: string; id?: string; file?: File; preview?: string
+  ambiguous?: boolean // the attempt may have reached the server: check before posting it again
 }
 
 const MB = 2 ** 20
@@ -25,14 +26,17 @@ export function useUploads(p: { initial: SavedFile[]; ensureToken: () => Promise
   const [announcement, setAnnouncement] = useState('')
   const [canRestart, setCanRestart] = useState(false)
   const rowsRef = useRef(rows)
-  rowsRef.current = rows
   const cancelled = useRef(new Set<string>())
   const tombstones = useRef<{ name: string; bytes: number }[]>([]) // cancelled mid-send: the server may have kept them
   const cancels = useRef(new Map<string, () => void>())
-  const patch = useCallback((key: string, change: Partial<Row>) => setRows((all) => all.map((r) => (r.key === key ? { ...r, ...change } : r))), [])
+  const patch = useCallback((key: string, change: Partial<Row>) => {
+    rowsRef.current = rowsRef.current.map((r) => (r.key === key ? { ...r, ...change } : r))
+    setRows(rowsRef.current)
+  }, [])
   const drop = useCallback((row: Row) => {
     if (row.preview) URL.revokeObjectURL(row.preview)
-    setRows((all) => all.filter((r) => r.key !== row.key))
+    rowsRef.current = rowsRef.current.filter((r) => r.key !== row.key)
+    setRows(rowsRef.current)
   }, [])
 
   /** The session is gone, and its files with it. Rows we still hold a file for can go up again. */
@@ -50,6 +54,8 @@ export function useUploads(p: { initial: SavedFile[]; ensureToken: () => Promise
   const reconcile = useCallback(async () => {
     const token = p.currentToken()
     if (!token) return true
+    // Rows finished while the listing is in flight aren't in it; only rows known before it can be judged by it.
+    const knownBefore = new Set(rowsRef.current.flatMap((r) => (r.id ? [r.id] : [])))
     let held: StoredFile[]
     try {
       held = (await listFiles(token)).files
@@ -69,16 +75,17 @@ export function useUploads(p: { initial: SavedFile[]; ensureToken: () => Promise
     }
     for (const t of tombstones.current.splice(0)) {
       const hit = claim((f) => f.bytes === t.bytes && f.filename === t.name)
-      if (hit) await removeFile(token, hit.id).catch(() => tombstones.current.push(t))
+      // A file that won't delete is still going to be sent, so it goes back in the list below and gets a visible row.
+      if (hit) await removeFile(token, hit.id).catch(() => { free = [...free, hit] })
     }
     const ids = new Set(held.map((f) => f.id))
     const inFlight = rowsRef.current.some((r) => r.state === 'uploading')
     const next = rowsRef.current.map((r): Row => {
       if (r.state === 'failed' && !r.id) {
         const hit = claim((f) => f.bytes === r.bytes && f.purpose === r.purpose && (f.filename === r.name || !f.filename))
-        return hit ? { ...r, id: hit.id, state: 'done', progress: 1, error: undefined } : r
+        return hit ? { ...r, id: hit.id, state: 'done', progress: 1, error: undefined, ambiguous: false } : { ...r, ambiguous: false }
       }
-      return r.state === 'done' && r.id && !ids.has(r.id) ? { ...r, id: undefined, state: 'failed', progress: 0, error: r.file ? 'This file did not reach us. Please retry.' : 'This file did not reach us. Please remove it and add it again.' } : r
+      return r.state === 'done' && r.id && knownBefore.has(r.id) && !ids.has(r.id) ? { ...r, id: undefined, state: 'failed', progress: 0, error: r.file ? 'This file did not reach us. Please retry.' : 'This file did not reach us. Please remove it and add it again.' } : r
     })
     // Anything left would be sent unseen. Unless an upload is still running (it may be that upload's), it gets a row.
     const extra: Row[] = inFlight ? [] : free.map((f) => ({ key: f.id, id: f.id, name: f.filename ?? 'Uploaded file', bytes: f.bytes, purpose: f.purpose, state: 'done', progress: 1 }))
@@ -88,7 +95,8 @@ export function useUploads(p: { initial: SavedFile[]; ensureToken: () => Promise
   }, [p, sessionEnded])
 
   const start = useCallback(async (key: string, file: File, purpose: FilePurpose) => {
-    patch(key, { state: 'uploading', progress: 0, error: undefined })
+    rowsRef.current = rowsRef.current.map((r) => (r.key === key ? { ...r, state: 'uploading', progress: 0, error: undefined, ambiguous: false } : r))
+    setRows(rowsRef.current)
     try {
       const token = await p.ensureToken()
       if (cancelled.current.delete(key)) return // cancelled while the session was opening: nothing was sent
@@ -96,7 +104,7 @@ export function useUploads(p: { initial: SavedFile[]; ensureToken: () => Promise
       cancels.current.set(key, cancel)
       const ack = await done
       if (cancelled.current.delete(key)) {
-        await removeFile(token, ack.id).catch(() => tombstones.current.push({ name: ack.filename ?? file.name, bytes: file.size }))
+        await removeFile(token, ack.id).catch(() => tombstones.current.push({ name: ack.filename ?? file.name, bytes: file.size })) // retried, or shown, at the next reconcile
         return
       }
       patch(key, { state: 'done', progress: 1, id: ack.id })
@@ -107,7 +115,7 @@ export function useUploads(p: { initial: SavedFile[]; ensureToken: () => Promise
       if (SESSION_ENDED.has(err.code)) sessionEnded()
       if (err.code === 'intake_closed') p.onClosed()
       if (err.code === 'upload_limit') setCanRestart(true)
-      patch(key, { state: 'failed', progress: 0, error: err.message })
+      patch(key, { state: 'failed', progress: 0, error: err.message, ambiguous: err.code === 'network' || err.code === 'timeout' })
       setAnnouncement(`${file.name} did not upload. ${err.message}`)
       // The body may have arrived with only the reply lost. If so this row is really fine, and a retry would duplicate it.
       if (err.code === 'network' || err.code === 'timeout') {
@@ -143,7 +151,18 @@ export function useUploads(p: { initial: SavedFile[]; ensureToken: () => Promise
     for (const [key, file] of started) void start(key, file, purpose)
   }, [start])
 
-  const retry = useCallback((row: Row) => { if (row.file) void start(row.key, row.file, row.purpose) }, [start])
+  const retry = useCallback(async (row: Row) => {
+    if (!row.file) return
+    if (row.ambiguous) {
+      try {
+        await reconcile()
+      } catch {
+        return patch(row.key, { error: 'We still cannot reach the shop. Please try again in a moment.' }) // not knowing, posting again could duplicate it
+      }
+    }
+    const now = rowsRef.current.find((r) => r.key === row.key)
+    if (now?.state === 'failed' && now.file) void start(now.key, now.file, now.purpose)
+  }, [patch, reconcile, start])
 
   const remove = useCallback(async (row: Row) => {
     if (row.state === 'uploading') {

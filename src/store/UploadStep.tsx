@@ -26,7 +26,7 @@ function FileRow({ row, uploads }: { row: Row; uploads: ReturnType<typeof useUpl
         )}
       </div>
       <div className="s-file-actions">
-        {row.state === 'failed' && row.file && <button type="button" className="s-icon-button" aria-label={`Retry ${row.name}`} onClick={() => uploads.retry(row)}><RotateCcw aria-hidden size={20} /></button>}
+        {row.state === 'failed' && row.file && <button type="button" className="s-icon-button" aria-label={`Retry ${row.name}`} onClick={() => void uploads.retry(row)}><RotateCcw aria-hidden size={20} /></button>}
         <button type="button" className="s-icon-button" disabled={row.state === 'removing'} aria-label={`${row.state === 'uploading' ? 'Cancel' : 'Remove'} ${row.name}`} onClick={() => void uploads.remove(row)}><X aria-hidden size={20} /></button>
       </div>
     </li>
