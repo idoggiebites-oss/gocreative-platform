@@ -49,6 +49,7 @@ export function UploadStep({ form, set, uploads }: { form: Form; set: (c: Partia
   const poAttached = visible.some((r) => r.purpose === 'po')
   return (
     <div className="s-stack-20">
+      <p className="s-body s-tight-top"><strong>Artwork is optional.</strong> You can send your request without a finished design. A rough sketch is fine too.</p>
       <div className={`s-dropzone${dragging ? ' s-dropzone-on' : ''}`} onDragOver={(e) => { e.preventDefault(); setDragging(true) }} onDragLeave={() => setDragging(false)} onDrop={drop}>
         <label className="s-big-choice">
           <Upload aria-hidden size={28} strokeWidth={1.8} /><span>Choose files<span className="s-desktop-inline"> or drop them here</span></span>
@@ -56,7 +57,7 @@ export function UploadStep({ form, set, uploads }: { form: Form; set: (c: Partia
           <input className="s-visually-hidden" type="file" multiple accept=".png,.jpg,.jpeg,.pdf,.svg,image/png,image/jpeg,application/pdf,image/svg+xml" onChange={pick('artwork')} />
         </label>
       </div>
-      <p className="s-meta s-tight-top">PNG, JPG, PDF or SVG. Up to 5 files, 20 MB each. A rough sketch is fine.</p>
+      <p className="s-meta s-tight-top">PNG, JPG, PDF or SVG. Up to 5 files, 20 MB each.</p>
       {uploads.notice && <p role="alert" className="s-error-block">{uploads.notice}</p>}
       <p role="status" className="s-visually-hidden">{uploads.announcement}</p>
       {uploads.canRestart && (

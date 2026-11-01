@@ -492,3 +492,10 @@ Migration 0006 (additive), `worker/db/{pickups,payments}.ts`, `worker/routes/{pi
 
 ## 2026-11-01 — S2 UI approved, without "Take a photo" (Arturo)
 - Arturo reviewed the screens: everything looks good, and he does not want the Take a photo button. It is removed, and the mockup is superseded on that point. "Choose files" stays; a phone's own file picker can still offer its camera or photo library.
+
+## 2026-11-01 — S2 revisions (Arturo's review; supersedes "S2 UI approved" above: approval is pending this round)
+- **Multiple products in one request.** Needs no migration: the S1 schema already takes up to 10 lines, stored in `inquiries.payload`. `description` is a new optional field in the same JSON. **S3 dependency:** conversion must map each line to its own order item, show the description to staff, and show lines without a price until quoted.
+- **Step 1 now takes several products (checkboxes).** The same product can repeat as a second line, such as a second shirt color.
+- **No reply-time promise.** The response-time placeholder is gone from the confirmation and from `business.ts`.
+- **"Needed by" became "Requested deadline",** stated as a request, not a guarantee.
+- **Launch gate:** `npm run check:launch` fails while contact details, photos, privacy review or the shop's confirmation of services are missing. S4 must run it before the Access cut-over.

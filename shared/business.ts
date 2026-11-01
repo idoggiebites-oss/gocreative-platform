@@ -13,7 +13,9 @@ export const business = {
     headline: 'Custom apparel for schools, teams and you.',
     intro: 'Printing, embroidery, engraving and custom trophies from a family shop. Tell us your idea and we will quote it.',
     // Null until the business supplies it: the site shows a labelled placeholder and never a guess.
-    contact: { address: null, phone: null, email: null, hours: null, responseTime: null } as Record<'address' | 'phone' | 'email' | 'hours' | 'responseTime', string | null>,
+    contact: { address: null, phone: null, email: null, hours: null } as Record<'address' | 'phone' | 'email' | 'hours', string | null>,
+    // Both stay false until the real thing exists. scripts/launch-check.ts refuses a launch while they are.
+    launch: { photosSupplied: false as boolean, privacyReviewed: false as boolean, servicesConfirmed: false as boolean },
     services: [
       {
         id: 'screen', name: 'Screen printing', short: 'Bold color for team shirts and events.', card: 'Bold, durable color for team shirts, events and spirit wear. Great for larger runs.',

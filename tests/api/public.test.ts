@@ -120,6 +120,28 @@ test('attacker-supplied internal fields are refused, not ignored', async () => {
   expect(t.n('inquiries')).toBe(0)
 })
 
+test('one request can hold several products, each with its own fields, plus a project description; no organization needed for a person', async () => {
+  const t = setup()
+  const token = await t.open()
+  const res = await t.submit(token, {
+    customerKind: 'individual', contactName: 'Pat', contactPhone: '555-010-0000', description: 'Left chest logo, navy thread. For the spring banquet.',
+    lines: [
+      { product: 'tshirts', method: 'screen', quantity: 3, sizes: { M: 3 }, color: 'Navy' },
+      { product: 'polos', method: 'embroidery', quantity: 2, sizes: { L: 2 } },
+      { product: 'hats', method: 'embroidery', quantity: 4 },
+    ],
+  })
+  expect(res.status).toBe(201)
+  const row = t.sqlite.prepare('SELECT payload, organization FROM inquiries').get() as { payload: string; organization: string | null }
+  const payload = JSON.parse(row.payload)
+  expect(payload.lines.map((l: { product: string }) => l.product)).toEqual(['tshirts', 'polos', 'hats'])
+  expect(payload.description).toContain('banquet')
+  expect(row.organization).toBeNull()
+  const other = await t.open('203.0.113.9')
+  expect((await t.submit(other, { ...FORM, lines: Array.from({ length: 11 }, () => FORM.lines[0]) })).status).toBe(400)
+  expect((await t.submit(other, { ...FORM, description: 'x'.repeat(4001) })).status).toBe(400)
+})
+
 test('the form rules hold on the server: method fits product, sizes add up, a contact is required', async () => {
   const t = setup()
   const token = await t.open()

@@ -38,6 +38,7 @@ export const inquirySubmitSchema = z.object({
   preferredContact: z.enum(['email', 'phone']).optional(),
   dueDate: z.iso.date().optional(),
   designHelp: z.boolean().optional(),
+  description: text(4000).optional(), // placement, colors, special instructions, the event
   lines: z.array(line).min(1).max(10),
   website: z.string().max(200).optional(), // honeypot: hidden from people
 }).strict().refine((d) => d.contactEmail || d.contactPhone, { message: 'email or phone required' })

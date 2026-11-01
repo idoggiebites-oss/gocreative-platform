@@ -97,7 +97,7 @@ export const findRef = async (db: D1Database, submissionId: string) =>
  */
 export async function submitInquiry(db: D1Database, p: { submissionId: string; ref: string; ipHash: string; input: Omit<InquirySubmit, 'website'>; spam: boolean }) {
   const i = p.input
-  const payload = JSON.stringify({ lines: i.lines, designHelp: i.designHelp ?? false })
+  const payload = JSON.stringify({ lines: i.lines, designHelp: i.designHelp ?? false, description: i.description ?? null })
   const sid = p.submissionId
   const mine = `(SELECT id FROM inquiries WHERE submission_id = ?)`
   // True only for the batch that just inserted: a losing retry also finds the inquiry, but the winner closed the session.

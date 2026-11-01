@@ -3,7 +3,7 @@ import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { Check } from 'lucide-react'
 import { Link, useNavigate, useSearchParams } from 'react-router'
 import { business } from '@shared/business'
-import { EMPTY_FORM, METHOD_NAMES, PRODUCTS, SIZES, buildPayload, chooseProduct, clearDraft, loadDraft, methodsFor, productOf, saveDraft, sizeTotal, summarize, validateStep, type Errors, type Form } from './orderForm'
+import { EMPTY_FORM, MAX_ITEMS, METHOD_NAMES, PRODUCTS, SIZES, buildPayload, clearDraft, describeItem, duplicateItem, itemTitle, loadDraft, methodsFor, patchItem, productOf, saveDraft, sizeTotal, toggleProduct, validateStep, type Errors, type Form, type Item } from './orderForm'
 import { PublicError, SESSION_ENDED, fetchStatus, openSession, submitInquiry, type Status } from './publicApi'
 import type { SentState } from './SentPage'
 import { Contact, usePageTitle } from './StoreLayout'
@@ -32,89 +32,126 @@ function StepHeading({ children, focus }: { children: ReactNode; focus: boolean 
 }
 
 function ProductStep({ f, set, errors, focus }: { f: Form; set: (fn: (f: Form) => Form) => void; errors: Errors; focus: boolean }) {
-  const methods = f.product ? methodsFor(f.product) : []
   return (
     <>
       <StepHeading focus={focus}>What would you like made?</StepHeading>
-      <fieldset role="radiogroup" aria-invalid={errors.product ? true : undefined} aria-describedby={errors.product ? 's-product-error' : undefined}>
-        <legend className="s-visually-hidden">Product</legend>
+      <fieldset data-invalid={errors.product ? true : undefined} aria-describedby={errors.product ? 's-product-error' : undefined}>
+        <legend className="s-label s-legend-gap">Choose one or more</legend>
         <div className="s-tiles">
           {PRODUCTS.map((p) => (
             <label key={p.slug} className="s-tile-choice">
-              <input type="radio" name="product" className="s-visually-hidden" checked={f.product === p.slug} onChange={() => set((x) => chooseProduct(x, p.slug))} />
+              <input type="checkbox" className="s-visually-hidden" checked={f.items.some((i) => i.product === p.slug)} onChange={() => set((x) => toggleProduct(x, p.slug))} />
               <span className="s-tile-name">{p.name}</span><small>{p.hint}</small>
+              <Check aria-hidden size={18} strokeWidth={2.4} className="s-tile-check" />
             </label>
           ))}
         </div>
         {errors.product && <p id="s-product-error" className="s-error">{errors.product}</p>}
       </fieldset>
-      {f.product && (
-        <fieldset role="radiogroup" aria-invalid={errors.method ? true : undefined} aria-describedby={errors.method ? 's-method-error' : undefined}>
-          <legend className="s-label">How should we decorate it?</legend>
-          <p className="s-meta s-legend-help">Showing the options that work for this item.</p>
-          <div className="s-options" key={f.product}>
-            {methods.map((m, i) => (
-              <label key={m} className="s-option" style={{ animationDelay: `${i * 40}ms` }}>
-                <input type="radio" name="method" className="s-visually-hidden" checked={f.method === m} onChange={() => set((x) => ({ ...x, method: m }))} />
-                <span>{METHOD_NAMES[m]}</span><Check aria-hidden size={20} strokeWidth={2.4} className="s-option-check" />
-              </label>
-            ))}
-          </div>
-          {errors.method && <p id="s-method-error" className="s-error">{errors.method}</p>}
-        </fieldset>
-      )}
+      {f.items.map((item) => {
+        const name = productOf(item)?.name
+        const error = errors[`method-${item.key}`]
+        return (
+          <fieldset key={item.key} role="radiogroup" aria-invalid={error ? true : undefined} aria-describedby={error ? `method-${item.key}-error` : undefined}>
+            <legend className="s-label">How should we decorate: {name}?</legend>
+            <p className="s-meta s-legend-help">Showing the options that work for this item.</p>
+            <div className="s-options">
+              {methodsFor(item.product).map((m, i) => (
+                <label key={m} className="s-option" style={{ animationDelay: `${i * 40}ms` }}>
+                  <input type="radio" name={`method-${item.key}`} className="s-visually-hidden" checked={item.method === m} onChange={() => set((x) => patchItem(x, item.key, { method: m }))} />
+                  <span>{METHOD_NAMES[m]}</span><Check aria-hidden size={20} strokeWidth={2.4} className="s-option-check" />
+                </label>
+              ))}
+            </div>
+            {error && <p id={`method-${item.key}-error`} className="s-error">{error}</p>}
+          </fieldset>
+        )
+      })}
     </>
   )
 }
 
 const digits = (s: string) => s.replace(/\D/g, '').slice(0, 6)
 
-function QuantityStep({ f, patch, errors, focus }: { f: Form; patch: (c: Partial<Form>) => void; errors: Errors; focus: boolean }) {
-  const product = productOf(f)
-  const extra = f.product === 'trophies'
+/** The fields follow the product: a size grid for apparel, one quantity for anything else, and what engraving needs. */
+function ItemCard({ item, f, set, error, canRemove }: { item: Item; f: Form; set: (fn: (f: Form) => Form) => void; error?: string; canRemove: boolean }) {
+  const change = (c: Partial<Item>) => set((x) => patchItem(x, item.key, c))
+  const sized = productOf(item)?.sized
+  const extra = item.product === 'trophies'
     ? { key: 'personalization' as const, label: 'Names or wording to engrave (optional)', help: 'Or tell us the list will follow.' }
-    : f.product === 'engraved' ? { key: 'material' as const, label: 'Material or item (optional)', help: undefined }
-    : { key: 'color' as const, label: 'Color (optional)', help: undefined }
-  const today = useMemo(() => new Date(Date.now() - new Date().getTimezoneOffset() * 60_000).toISOString().slice(0, 10), [])
+    : item.product === 'engraved' ? { key: 'material' as const, label: 'Material or item (optional)', help: undefined }
+    : { key: 'color' as const, label: sized ? 'Garment color (optional)' : 'Color (optional)', help: undefined }
+  const errorId = `quantity-${item.key}-error`
   return (
-    <>
-      <StepHeading focus={focus}>{product?.sized ? 'How many, and which sizes?' : 'How many do you need?'}</StepHeading>
-      <p className="s-meta s-tight-top">{summarize(f).split('.')[0]}</p>
-      {product?.sized ? (
-        <fieldset aria-describedby={errors.quantity ? 's-quantity-error' : 's-size-total'}>
+    <section className="s-item" aria-label={itemTitle(item)}>
+      <h2 className="s-display s-item-title">{itemTitle(item)}</h2>
+      {sized ? (
+        <fieldset aria-describedby={error ? errorId : undefined}>
           <legend className="s-label s-legend-gap">Quantity per size</legend>
           <div className="s-sizes">
             {SIZES.map((s) => (
               <div key={s} className="s-size">
-                <label htmlFor={`size-${s}`}>{s}</label>
-                <input id={`size-${s}`} inputMode="numeric" autoComplete="off" aria-invalid={errors.quantity ? true : undefined} value={f.sizes[s] ?? ''} placeholder="0" onChange={(e) => patch({ sizes: { ...f.sizes, [s]: digits(e.target.value) } })} />
+                <label htmlFor={`size-${item.key}-${s}`}>{s}</label>
+                <input id={`size-${item.key}-${s}`} inputMode="numeric" pattern="[0-9]*" enterKeyHint="next" autoComplete="off" aria-invalid={error ? true : undefined} value={item.sizes[s] ?? ''} placeholder="0" onChange={(e) => change({ sizes: { ...item.sizes, [s]: digits(e.target.value) } })} />
               </div>
             ))}
           </div>
-          <p id="s-size-total" className="s-meta s-size-total">Total: <strong>{sizeTotal(f)}</strong></p>
-          {errors.quantity && <p id="s-quantity-error" className="s-error">{errors.quantity}</p>}
+          <p className="s-meta s-size-total">Total: <strong>{sizeTotal(item)}</strong></p>
+          {error && <p id={errorId} className="s-error">{error}</p>}
         </fieldset>
       ) : (
-        <Field id="quantity" label="Quantity" error={errors.quantity}>
-          {(a) => <input {...a} className="s-input" inputMode="numeric" autoComplete="off" value={f.quantity} onChange={(e) => patch({ quantity: digits(e.target.value) })} />}
+        <Field id={`quantity-${item.key}`} label="Quantity" error={error}>
+          {(a) => <input {...a} className="s-input" inputMode="numeric" pattern="[0-9]*" enterKeyHint="next" autoComplete="off" value={item.quantity} onChange={(e) => change({ quantity: digits(e.target.value) })} />}
         </Field>
       )}
-      <Field id="extra" label={extra.label} help={extra.help}>
+      <Field id={`extra-${item.key}`} label={extra.label} help={extra.help}>
         {(a) => extra.key === 'personalization'
-          ? <textarea {...a} className="s-input s-textarea" maxLength={4000} value={f.personalization} onChange={(e) => patch({ personalization: e.target.value })} />
-          : <input {...a} className="s-input" maxLength={100} value={f[extra.key]} onChange={(e) => patch({ [extra.key]: e.target.value })} />}
+          ? <textarea {...a} className="s-input s-textarea" maxLength={4000} value={item.personalization} onChange={(e) => change({ personalization: e.target.value })} />
+          : <input {...a} className="s-input" maxLength={100} value={item[extra.key]} onChange={(e) => change({ [extra.key]: e.target.value })} />}
       </Field>
-      <Field id="due" label="Needed by (optional)" help="We will confirm what is possible." error={errors.dueDate}>
+      <div className="s-item-actions">
+        {f.items.length < MAX_ITEMS && <button type="button" className="s-link-button" onClick={() => set((x) => duplicateItem(x, item.key))}>Add another {productOf(item)?.name}, such as a second color</button>}
+        {canRemove && <button type="button" className="s-link-button" aria-label={`Remove ${itemTitle(item)}`} onClick={() => set((x) => ({ ...x, items: x.items.filter((i) => i.key !== item.key) }))}>Remove</button>}
+      </div>
+    </section>
+  )
+}
+
+function QuantityStep({ f, set, patch, errors, focus }: { f: Form; set: (fn: (f: Form) => Form) => void; patch: (c: Partial<Form>) => void; errors: Errors; focus: boolean }) {
+  const today = useMemo(() => new Date(Date.now() - new Date().getTimezoneOffset() * 60_000).toISOString().slice(0, 10), [])
+  return (
+    <>
+      <StepHeading focus={focus}>{f.items.length > 1 ? 'How many of each?' : productOf(f.items[0])?.sized ? 'How many, and which sizes?' : 'How many do you need?'}</StepHeading>
+      {f.items.map((item) => <ItemCard key={item.key} item={item} f={f} set={set} error={errors[`quantity-${item.key}`]} canRemove={f.items.length > 1} />)}
+      <section className="s-describe" aria-labelledby="s-describe-title">
+        <h2 id="s-describe-title" className="s-display">Tell us about your project</h2>
+        <label htmlFor="description" className="s-visually-hidden">Project description (optional)</label>
+        <p id="description-help" className="s-meta">Optional, and it helps us quote accurately. It helps to mention:</p>
+        <ul className="s-examples">
+          <li><strong>Placement:</strong> left chest, full back, sleeve</li>
+          <li><strong>Colors:</strong> ink or thread colors, school colors</li>
+          <li><strong>Special instructions:</strong> names and numbers, a logo to match</li>
+          <li><strong>Event:</strong> a tournament, banquet or fundraiser</li>
+        </ul>
+        <textarea id="description" aria-describedby="description-help" className="s-input s-textarea s-textarea-large" maxLength={4000} value={f.description} onChange={(e) => patch({ description: e.target.value })} />
+      </section>
+      <Field id="due" label="Requested deadline (optional)" help="This is a request, not a guaranteed date. We will confirm what is possible." error={errors.dueDate}>
         {(a) => <input {...a} className="s-input" type="date" min={today} value={f.dueDate} onChange={(e) => patch({ dueDate: e.target.value })} />}
-      </Field>
-      <Field id="notes" label="Anything else we should know? (optional)">
-        {(a) => <textarea {...a} className="s-input s-textarea" maxLength={2000} value={f.notes} onChange={(e) => patch({ notes: e.target.value })} />}
       </Field>
     </>
   )
 }
 
-function DetailsStep({ f, patch, errors, focus, fileCount }: { f: Form; patch: (c: Partial<Form>) => void; errors: Errors; focus: boolean; fileCount: number }) {
+function ReviewRow({ title, onEdit, children }: { title: string; onEdit: () => void; children: ReactNode }) {
+  return (
+    <div className="s-review-row">
+      <div className="s-review-head"><h3>{title}</h3><button type="button" className="s-link-button" aria-label={`Edit ${title.toLowerCase()}`} onClick={onEdit}>Edit</button></div>
+      {children}
+    </div>
+  )
+}
+
+function DetailsStep({ f, patch, errors, focus, files, go }: { f: Form; patch: (c: Partial<Form>) => void; errors: Errors; focus: boolean; files: string[]; go: (n: number) => void }) {
   return (
     <>
       <StepHeading focus={focus}>How can we reach you?</StepHeading>
@@ -132,18 +169,18 @@ function DetailsStep({ f, patch, errors, focus, fileCount }: { f: Form; patch: (
             </div>
           </fieldset>
           <Field id="organization" label="School, district or organization" error={errors.organization}>
-            {(a) => <input {...a} className="s-input" autoComplete="organization" maxLength={200} value={f.organization} onChange={(e) => patch({ organization: e.target.value })} />}
+            {(a) => <input {...a} className="s-input" autoComplete="organization" enterKeyHint="next" maxLength={200} value={f.organization} onChange={(e) => patch({ organization: e.target.value })} />}
           </Field>
         </>
       )}
       <Field id="name" label="Your name" error={errors.contactName}>
-        {(a) => <input {...a} className="s-input" autoComplete="name" maxLength={200} value={f.contactName} onChange={(e) => patch({ contactName: e.target.value })} />}
+        {(a) => <input {...a} className="s-input" autoComplete="name" enterKeyHint="next" maxLength={200} value={f.contactName} onChange={(e) => patch({ contactName: e.target.value })} />}
       </Field>
       <Field id="email" label="Email" error={errors.contactEmail} help="An email or a phone number is enough.">
-        {(a) => <input {...a} className="s-input" type="email" autoComplete="email" maxLength={254} value={f.contactEmail} onChange={(e) => patch({ contactEmail: e.target.value })} />}
+        {(a) => <input {...a} className="s-input" type="email" inputMode="email" autoCapitalize="off" autoComplete="email" enterKeyHint="next" maxLength={254} value={f.contactEmail} onChange={(e) => patch({ contactEmail: e.target.value })} />}
       </Field>
       <Field id="phone" label="Phone" error={errors.contactPhone}>
-        {(a) => <input {...a} className="s-input" type="tel" autoComplete="tel" maxLength={30} value={f.contactPhone} onChange={(e) => patch({ contactPhone: e.target.value })} />}
+        {(a) => <input {...a} className="s-input" type="tel" inputMode="tel" autoComplete="tel" enterKeyHint="done" maxLength={30} value={f.contactPhone} onChange={(e) => patch({ contactPhone: e.target.value })} />}
       </Field>
       <Field id="preferred" label="Best way to reach you (optional)">
         {(a) => (
@@ -157,9 +194,20 @@ function DetailsStep({ f, patch, errors, focus, fileCount }: { f: Form; patch: (
         <label htmlFor="website">Website</label>
         <input id="website" name="website" tabIndex={-1} autoComplete="off" value={f.website} onChange={(e) => patch({ website: e.target.value })} />
       </div>
-      <section aria-label="Review your request" className="s-review">
-        <h2 className="s-display">Your request</h2>
-        <p>{summarize(f)} {fileCount === 0 ? 'No files attached.' : `${fileCount} ${fileCount === 1 ? 'file' : 'files'} attached.`}{f.designHelp ? ' You asked for design help.' : ''}</p>
+      <section aria-labelledby="s-review-title" className="s-review">
+        <h2 id="s-review-title" className="s-display">Review your request</h2>
+        <p className="s-meta">Everything you have entered stays in place when you go back to change it.</p>
+        <ReviewRow title="What you would like made" onEdit={() => go(1)}>
+          <ul className="s-review-list">{f.items.map((i) => <li key={i.key}>{describeItem(i)}{i.color ? `, ${i.color}` : ''}{i.material ? `, ${i.material}` : ''}</li>)}</ul>
+        </ReviewRow>
+        <ReviewRow title="Your project" onEdit={() => go(2)}>
+          {f.description ? <p className="s-pre">{f.description}</p> : <p>No description added.</p>}
+          <p>{f.dueDate ? `Requested deadline: ${f.dueDate}. We will confirm what is possible.` : 'No deadline requested.'}</p>
+        </ReviewRow>
+        <ReviewRow title="Artwork" onEdit={() => go(3)}>
+          {files.length > 0 ? <ul className="s-review-list">{files.map((n, i) => <li key={`${n}-${i}`}>{n}</li>)}</ul> : <p>No files attached. That is fine, artwork is optional.</p>}
+          {f.designHelp && <p>You asked for help with the design.</p>}
+        </ReviewRow>
       </section>
       <p className="s-meta">By sending this, you agree that we use these details to reply and quote. See our <Link to="/privacy" target="_blank" rel="noopener">privacy page (opens in a new tab)</Link>.</p>
     </>
@@ -204,12 +252,11 @@ function OrderForm({ status, onClosed }: { status: Status; onClosed: () => void 
   const [params, setParams] = useSearchParams()
   const draft = useRef(loadDraft()).current
   const [form, setForm] = useState<Form>(() => {
-    if (draft?.form.product) return draft.form
-    const start = { ...EMPTY_FORM, ...draft?.form }
-    const product = PRODUCTS.find((p) => p.slug === params.get('product'))
-    const chosen = product ? chooseProduct(start, product.slug) : start
+    // A service link adds to what is already in progress; it never discards it.
     const method = params.get('method')
-    return method && method in METHOD_NAMES ? { ...chosen, method } : chosen
+    const seeded = { ...EMPTY_FORM, ...draft?.form, preferMethod: method && method in METHOD_NAMES ? method : '' }
+    const product = params.get('product')
+    return PRODUCTS.some((p) => p.slug === product) && !seeded.items.some((i) => i.product === product) ? toggleProduct(seeded, product!) : seeded
   })
   const [errors, setErrors] = useState<Errors>({})
   const [formError, setFormError] = useState('')
@@ -233,7 +280,7 @@ function OrderForm({ status, onClosed }: { status: Status; onClosed: () => void 
   useEffect(() => { void reconcile().catch(() => {}) }, [reconcile])
 
   const requested = Number(params.get('step')) || 1
-  const step = !form.product || !form.method ? 1 : Math.min(Math.max(requested, 1), STEP_COUNT)
+  const step = validateStep(1, form).product || form.items.some((i) => !i.method) ? 1 : Math.min(Math.max(requested, 1), STEP_COUNT)
   const lastStep = useRef(step)
   const dir = step >= lastStep.current ? 1 : -1
   const moved = lastStep.current !== step
@@ -252,7 +299,7 @@ function OrderForm({ status, onClosed }: { status: Status; onClosed: () => void 
 
   const failErrors = (e: Errors) => {
     setErrors(e)
-    requestAnimationFrame(() => document.querySelector<HTMLElement>('.s-step [role="radiogroup"][aria-invalid="true"] input, .s-step input[aria-invalid="true"], .s-step textarea[aria-invalid="true"], .s-step select[aria-invalid="true"]')?.focus())
+    requestAnimationFrame(() => document.querySelector<HTMLElement>('.s-step fieldset[data-invalid] input, .s-step [role="radiogroup"][aria-invalid="true"] input, .s-step input[aria-invalid="true"], .s-step textarea[aria-invalid="true"], .s-step select[aria-invalid="true"]')?.focus())
     if (Object.keys(e).length > 0) setFormError('Please check the highlighted fields.')
   }
 
@@ -299,7 +346,7 @@ function OrderForm({ status, onClosed }: { status: Status; onClosed: () => void 
       const { ref } = await submitInquiry(await ensureToken(), parsed.data)
       clearDraft()
       const sent: SentState = {
-        summary: summarize(form),
+        lines: form.items.map(describeItem), description: form.description.trim(), dueDate: form.dueDate,
         poAttached: uploads.rows.some((r) => r.purpose === 'po'),
         previews: uploads.rows.map((r) => ({ name: r.name, url: r.preview ?? null })),
       }
@@ -338,14 +385,14 @@ function OrderForm({ status, onClosed }: { status: Status; onClosed: () => void 
           {step > 1 && <button type="button" className="s-back" onClick={() => go(step - 1)}>Back</button>}
           <StepPanel step={step} dir={dir}>
             {step === 1 && <ProductStep f={form} set={set} errors={errors} focus={moved} />}
-            {step === 2 && <QuantityStep f={form} patch={patch} errors={errors} focus={moved} />}
+            {step === 2 && <QuantityStep f={form} set={set} patch={patch} errors={errors} focus={moved} />}
             {step === 3 && (
               <>
                 <StepHeading focus={moved}>Send us your artwork.</StepHeading>
                 <UploadStep form={form} set={patch} uploads={uploads} />
               </>
             )}
-            {step === 4 && <DetailsStep f={form} patch={patch} errors={errors} focus={moved} fileCount={uploads.rows.length} />}
+            {step === 4 && <DetailsStep f={form} patch={patch} errors={errors} focus={moved} files={uploads.rows.map((r) => r.name)} go={go} />}
           </StepPanel>
           <div id="turnstile-slot" className="s-turnstile" />
           {formError && <p role="alert" className="s-error-block">{formError}</p>}

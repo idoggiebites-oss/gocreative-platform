@@ -7,7 +7,7 @@ export default function PrivacyPage() {
   return (
     <main className="s-wrap s-prose">
       <h1 tabIndex={-1} className="s-display s-h-page">Privacy</h1>
-      <p className="s-notice"><strong>Draft.</strong> This wording is pending review before the site opens.</p>
+      {!business.storefront.launch.privacyReviewed && <p className="s-notice"><strong>Draft.</strong> This wording is pending review before the site opens.</p>}
       <h2 className="s-display">What we collect</h2>
       <p>When you send a request, we collect your name, your email or phone number, your organization if you give one, what you are asking for, and any files you upload.</p>
       <p>We do not ask for your address, date of birth or payment details on this site.</p>

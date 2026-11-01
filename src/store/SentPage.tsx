@@ -4,7 +4,7 @@ import { Check, Copy, FileText } from 'lucide-react'
 import { business } from '@shared/business'
 import { Contact, usePageTitle } from './StoreLayout'
 
-export type SentState = { summary: string; poAttached: boolean; previews: { name: string; url: string | null }[] }
+export type SentState = { lines: string[]; description: string; dueDate: string; poAttached: boolean; previews: { name: string; url: string | null }[] }
 
 function CopyRef({ value }: { value: string }) {
   const [copied, setCopied] = useState(false)
@@ -42,7 +42,7 @@ export default function SentPage() {
         </div>
         <h2 className="s-display s-h-next s-rise-3">What happens next</h2>
         <ol className="s-next s-rise-3">
-          <li><strong>We review your request</strong><p>We reply <Contact field="responseTime" label="response time to confirm" /> by email or phone.</p></li>
+          <li><strong>We review your request</strong><p>We will contact you by email or phone.</p></li>
           <li><strong>You get a quote and a proof</strong><p>Nothing is made until you approve both.</p></li>
           <li><strong>We make it, you pick it up</strong><p>We let you know when it is ready.</p></li>
         </ol>
@@ -56,7 +56,10 @@ export default function SentPage() {
                 ))}
               </ul>
             )}
-            <p>{state.summary}{state.poAttached ? ' PO attached, to be confirmed with you.' : ''}</p>
+            <ul className="s-sent-lines">{state.lines.map((l) => <li key={l}>{l}</li>)}</ul>
+            {state.description && <p className="s-pre">{state.description}</p>}
+            {state.dueDate && <p>Requested deadline: {state.dueDate}. We will confirm what is possible.</p>}
+            {state.poAttached && <p>PO attached, to be confirmed with you.</p>}
           </section>
         )}
         <p className="s-meta">Questions? Call <Contact field="phone" label="phone number" /> or email <Contact field="email" label="email address" />.</p>

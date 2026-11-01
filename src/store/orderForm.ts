@@ -10,49 +10,62 @@ export const METHOD_NAMES: Record<string, string> = {
   screen: 'Screen printing', embroidery: 'Embroidery', dtg: 'Direct to garment', laser_engrave: 'Laser engraving', laser_cut: 'Laser cutting', other: 'Other', help: 'Help me choose',
 }
 
+export type Item = {
+  key: string; product: string; method: string; quantity: string; sizes: Record<string, string>
+  color: string; material: string; personalization: string
+}
 export type Form = {
-  product: string; method: string; quantity: string; sizes: Record<string, string>
-  color: string; material: string; personalization: string; notes: string; dueDate: string
+  items: Item[]; preferMethod: string; description: string; dueDate: string
   designHelp: boolean; forOrganization: boolean; customerKind: 'district' | 'organization'
   organization: string; contactName: string; contactEmail: string; contactPhone: string; preferredContact: '' | 'email' | 'phone'
   website: string
 }
+export const MAX_ITEMS = 10 // the most lines the server takes on one request
 export const EMPTY_FORM: Form = {
-  product: '', method: '', quantity: '', sizes: {}, color: '', material: '', personalization: '', notes: '', dueDate: '',
+  items: [], preferMethod: '', description: '', dueDate: '',
   designHelp: false, forOrganization: false, customerKind: 'district', organization: '', contactName: '', contactEmail: '', contactPhone: '', preferredContact: '', website: '',
 }
 export type Errors = Partial<Record<string, string>>
 
-export const productOf = (f: Form) => PRODUCTS.find((p) => p.slug === f.product)
+export const productOf = (i: Item) => PRODUCTS.find((p) => p.slug === i.product)
 export const methodsFor = (slug: string) => [...(PRODUCTS.find((p) => p.slug === slug)?.methods ?? []), 'help']
-export const sizeTotal = (f: Form) => Object.values(f.sizes).reduce((n, v) => n + (Number(v) || 0), 0)
-export const totalQuantity = (f: Form) => (productOf(f)?.sized ? sizeTotal(f) : Number(f.quantity) || 0)
+export const sizeTotal = (i: Item) => Object.values(i.sizes).reduce((n, v) => n + (Number(v) || 0), 0)
+export const totalQuantity = (i: Item) => (productOf(i)?.sized ? sizeTotal(i) : Number(i.quantity) || 0)
+export const itemTitle = (i: Item) => `${productOf(i)?.name ?? ''}, ${i.method === 'help' ? 'method to be recommended' : (METHOD_NAMES[i.method] ?? '').toLowerCase()}`
 
-/** Changing the product keeps a method that still fits, and picks the only one if there is just one (you can't laser a shirt). */
-export function chooseProduct(f: Form, slug: string): Form {
+function newItem(slug: string, preferMethod: string): Item {
   const product = PRODUCTS.find((p) => p.slug === slug)!
-  const fits = f.method === 'help' || product.methods.includes(f.method)
-  return {
-    ...f, product: slug,
-    method: fits ? f.method : product.methods.length === 1 ? product.methods[0] : '',
-    sizes: product.sized ? f.sizes : {},
-    quantity: product.sized ? '' : f.quantity,
-    color: slug === 'trophies' || slug === 'engraved' ? '' : f.color,
-    material: slug === 'engraved' ? f.material : '',
-    personalization: slug === 'trophies' ? f.personalization : '',
-  }
+  const method = preferMethod === 'help' || product.methods.includes(preferMethod) ? preferMethod : product.methods.length === 1 ? product.methods[0] : ''
+  return { key: crypto.randomUUID(), product: slug, method, quantity: '', sizes: {}, color: '', material: '', personalization: '' }
 }
+
+/** Ticking a product adds a line; unticking removes every line of it. A method that doesn't fit is never carried over (you can't laser a shirt). */
+export function toggleProduct(f: Form, slug: string): Form {
+  return f.items.some((i) => i.product === slug)
+    ? { ...f, items: f.items.filter((i) => i.product !== slug) }
+    : { ...f, items: [...f.items, newItem(slug, f.preferMethod)] }
+}
+/** Another line of the same product, such as the same shirt in a second color. */
+export function duplicateItem(f: Form, key: string): Form {
+  const at = f.items.findIndex((i) => i.key === key)
+  if (at < 0 || f.items.length >= MAX_ITEMS) return f
+  const copy = { ...newItem(f.items[at].product, ''), method: f.items[at].method }
+  return { ...f, items: [...f.items.slice(0, at + 1), copy, ...f.items.slice(at + 1)] }
+}
+export const patchItem = (f: Form, key: string, change: Partial<Item>): Form => ({ ...f, items: f.items.map((i) => (i.key === key ? { ...i, ...change } : i)) })
 
 export function validateStep(step: number, f: Form): Errors {
   const e: Errors = {}
   if (step === 1) {
-    if (!f.product) e.product = 'Choose what you would like made.'
-    if (!f.method) e.method = 'Choose a method, or "Help me choose".'
+    if (f.items.length === 0) e.product = 'Choose at least one thing you would like made.'
+    for (const i of f.items) if (!i.method) e[`method-${i.key}`] = 'Choose a method, or "Help me choose".'
   }
   if (step === 2) {
-    const total = totalQuantity(f)
-    if (total < 1) e.quantity = productOf(f)?.sized ? 'Add a quantity to at least one size.' : 'Enter how many you need.'
-    if (total > 100_000) e.quantity = 'That is more than we can take online. Please call or email us.'
+    for (const i of f.items) {
+      const total = totalQuantity(i)
+      if (total < 1) e[`quantity-${i.key}`] = productOf(i)?.sized ? 'Add a quantity to at least one size.' : 'Enter how many you need.'
+      if (total > 100_000) e[`quantity-${i.key}`] = 'That is more than we can take online. Please call or email us.'
+    }
     if (f.dueDate && !/^\d{4}-\d{2}-\d{2}$/.test(f.dueDate)) e.dueDate = 'Enter a valid date.'
   }
   if (step === 4) {
@@ -73,8 +86,6 @@ const optional = (s: string) => s.trim() || undefined
 
 /** Exactly what the server's strict schema accepts; nothing else can leave the browser. */
 export function buildPayload(f: Form) {
-  const sized = productOf(f)?.sized
-  const sizes = Object.fromEntries(Object.entries(f.sizes).map(([k, v]) => [k, Number(v) || 0]).filter(([, v]) => Number(v) > 0))
   return inquirySubmitSchema.safeParse({
     customerKind: f.forOrganization ? f.customerKind : 'individual',
     organization: f.forOrganization ? optional(f.organization) : undefined,
@@ -84,28 +95,28 @@ export function buildPayload(f: Form) {
     preferredContact: f.preferredContact || undefined,
     dueDate: optional(f.dueDate),
     designHelp: f.designHelp || undefined,
-    lines: [{
-      product: f.product, method: f.method, quantity: totalQuantity(f), sizes: sized ? sizes : undefined,
-      color: optional(f.color), material: optional(f.material), personalization: optional(f.personalization), notes: optional(f.notes),
-    }],
+    description: optional(f.description),
+    lines: f.items.map((i) => ({
+      product: i.product, method: i.method, quantity: totalQuantity(i),
+      sizes: productOf(i)?.sized ? Object.fromEntries(Object.entries(i.sizes).map(([k, v]) => [k, Number(v) || 0]).filter(([, v]) => Number(v) > 0)) : undefined,
+      color: optional(i.color), material: optional(i.material), personalization: optional(i.personalization),
+    })),
     website: f.website || undefined,
   })
 }
 
-export function summarize(f: Form) {
-  const p = productOf(f)
-  const method = METHOD_NAMES[f.method] ?? ''
-  return `${p?.name ?? ''}, ${f.method === 'help' ? 'method to be recommended' : method.toLowerCase()}. ${totalQuantity(f)} total.`
-}
+export const describeItem = (i: Item) => `${itemTitle(i)}: ${totalQuantity(i)}`
+export const summarize = (f: Form) => f.items.map(describeItem).join('. ') + '.'
 
-// A phone can reload the page when the camera app opens, so the form survives in this tab only.
+// A phone can reload the page when leaving for its file picker, so the form survives in this tab only.
 const KEY = 'inquiry-draft'
 export type SavedFile = { id: string; name: string; bytes: number; purpose: 'artwork' | 'po' }
 export type Draft = { form: Form; token: string | null; files: SavedFile[] }
 export function loadDraft(): Draft | null {
   try {
     const raw = sessionStorage.getItem(KEY)
-    return raw ? { ...JSON.parse(raw) as Draft } : null
+    const draft = raw ? JSON.parse(raw) as Draft : null
+    return Array.isArray(draft?.form?.items) ? draft : null
   } catch {
     return null
   }
