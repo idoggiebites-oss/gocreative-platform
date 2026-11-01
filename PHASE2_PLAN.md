@@ -300,7 +300,7 @@ logic it can test, Claude for design, integration and verification).
       acceptance 1–17.
 - [x] Phase 1 carry-overs: the ES column overflow, focus after "Record approval" (`tests/e2e/polish.spec.ts`).
 - [x] Additive migration 0007: unconditional `BEFORE UPDATE` id guards on `quotes` (already covered by quotes_frozen) and `artwork` (their `UPDATE OF` triggers miss `rowid` aliases; direct-DB edits only — Codex, M3 review).
-- [ ] Whole-phase Codex security review *(ran separately; its fixes are 0007 and the request guards)*. Done in M6: [x] accessibility pass, [x] README setup,
+- [x] Whole-phase Codex security review ("Phase 2 security: ready"; its fixes are 0007 and the request guards). Done in M6: [x] accessibility pass, [x] README setup,
       [x] ARCHITECTURE schema section, [x] realistic seed for every new state. Still open: DECISIONS and notes entries.
 - [x] Deploy, migrate remote (anonymous/forged checks done; signed-in smoke test waits on Arturo signing in again); then the family starts entering real orders.
 
