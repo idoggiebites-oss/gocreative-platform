@@ -9,6 +9,8 @@ Update this whenever something deploys. History is in git and ROADMAP.md; this i
 - **Storefront:** not built. Mockups: https://claude.ai/artifact/CV2TZQvJGPwzhCVK4EwT4X
 - **Backups:** `~/gocreative-backups/` on Arturo's Mac only. No off-machine copy yet. Latest: 2026-11-01T04-47-45-031Z. Run weekly by hand and before every remote migration.
 
+- **Throwaway:** Worker `gocreative-access-drill` (no data), public until the S0c rehearsal finishes, then delete it.
+
 ## Open
 
 - Signed-in smoke test after Arturo signs in again (the Access session expired).

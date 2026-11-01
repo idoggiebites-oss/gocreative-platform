@@ -32,6 +32,8 @@ Adding or removing staff means editing the `GoCreative staff` policy AND the
 
 ## Reference: path-level setup for when the storefront ships (Phase 4)
 
+> Superseded for `workers.dev` by [access-rescope.md](access-rescope.md): Cloudflare's docs now confirm a path works there too.
+
 
 Employees log in through Cloudflare Access (email one-time PIN). Access guards
 `/app/*` (the dashboard) and `/api/app/*` (the employee API). The Worker does not
