@@ -77,7 +77,7 @@ function Detail({ d }: { d: InquiryDetailResponse }) {
   const status = useSend<unknown, { to: 'new' | 'declined' | 'spam'; reason?: string }>((b) => send('POST', `/inquiries/${d.id}/status`, { expectedVersion: d.version, ...b }))
   const remove = useSend<unknown, void>(() => send('DELETE', `/inquiries/${d.id}`, { expectedVersion: d.version }))
   const list = '/app/orders?view=inquiries'
-  const method = (x: string) => (x === 'help' ? t.helpMethod : (m.labels.method as Record<string, string>)[x] ?? x)
+  const method = (x: string) => (x === 'help' ? t.helpMethod : (Object.hasOwn(m.labels.method, x) ? (m.labels.method as Record<string, string>)[x] : x))
   const me = useMe()
   return (
     <div className={PAGE}>

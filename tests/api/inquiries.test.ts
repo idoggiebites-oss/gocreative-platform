@@ -239,11 +239,33 @@ test('an old request stays readable and convertible after the catalogue changes,
   expect(edit.status, await edit.clone().text()).toBe(200)
 })
 
+test('unusual stored values never make the order uneditable, and long text survives in the note', async () => {
+  const t = setup()
+  const { id } = await t.submit()
+  const manySizes = Object.fromEntries(Array.from({ length: 400 }, (_, i) => [`S${i}`, 1]))
+  const longColor = `Pantone ${'x'.repeat(150)} end`
+  t.sqlite.prepare('UPDATE inquiries SET payload = ? WHERE id = ?').run(JSON.stringify({ lines: [
+    { product: 'hats', method: '__proto__', quantity: 1, sizes: { '': 1 } },
+    { product: 'hats', method: 'embroidery', quantity: 1, sizes: { ' M': 1 } },
+    { product: 'tshirts', method: 'screen', quantity: 9, sizes: manySizes },
+    { product: 'polos', method: 'embroidery', quantity: 2, color: longColor },
+  ] }), id)
+  expect((await t.detail(id)).lines).toHaveLength(4)
+  const { number } = await (await t.convert(id, 1)).json() as { number: string }
+  const o = t.sqlite.prepare('SELECT id, version FROM orders WHERE number = ?').get(number) as { id: number; version: number }
+  const note = (t.sqlite.prepare("SELECT body FROM notes WHERE entity_type = 'order' AND entity_id = ?").get(o.id) as { body: string }).body
+  expect(note).toContain(longColor)
+  expect(note).toContain('S399')
+  const items = (await (await t.staff('GET', `/orders/${number}`)).json() as { items: Record<string, unknown>[] }).items
+  const edit = await t.staff('PUT', `/orders/${number}/items`, { expectedVersion: o.version, items: items.map((i) => ({ id: i.id, kind: i.kind, description: i.description, product: i.product, garmentColor: i.garmentColor, method: i.method, sizes: i.sizes, quantity: i.quantity, unitPriceCents: 500, notes: i.notes ?? null })) })
+  expect(edit.status, await edit.clone().text()).toBe(200)
+})
+
 test('a stored request with nothing usable is refused cleanly, never half converted', async () => {
   const t = setup()
   const { id } = await t.submit()
   const orders = t.n('orders')
-  for (const bad of ['{}', '{"lines":[]}', '{"lines":[{"product":"hats","method":"screen","quantity":"many"}]}', '{"lines":[{"product":"hats","method":"screen","quantity":-1}]}']) {
+  for (const bad of ['{}', '{"lines":[]}', '{"lines":[{"product":"hats","method":"screen","quantity":"many"}]}', '{"lines":[{"product":"hats","method":"screen","quantity":-1}]}', '{"lines":[{"product":"  ","method":"screen","quantity":1}]}', JSON.stringify({ lines: Array.from({ length: 201 }, () => ({ product: 'hats', method: 'screen', quantity: 1 })) })]) {
     t.sqlite.prepare('UPDATE inquiries SET payload = ? WHERE id = ?').run(bad, id)
     expect((await (await t.staff('GET', `/inquiries/${id}`)).json() as { convertible: boolean }).convertible, bad).toBe(false)
     expect((await t.convert(id, 1)).status, bad).toBe(409)
