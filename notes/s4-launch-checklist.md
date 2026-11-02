@@ -4,7 +4,7 @@ Present state only; update as items close. Intake, Access and customer prices ch
 
 ## Rehearsal site
 
-`https://gocreative-access-drill.idoggiebites.workers.dev`: the real code on its own database (`gocreative-drill`) and bucket (`gocreative-drill-files`), no cron, no customer data. Its pages are public but it can't accept requests: `intake_closed` is set and it has no `TURNSTILE_SECRET`. `/api/app/*` answers 500 because it has no Access settings, and holds nothing. Delete all three after S4: the Worker, the database, the bucket.
+`https://gocreative-access-drill.idoggiebites.workers.dev`: the real code on its own database (`gocreative-drill`) and bucket (`gocreative-drill-files`), no cron, no customer data. Its pages are public but it can't accept requests: `intake_closed` is set and it has no `TURNSTILE_SECRET`. `/app` and `/api/app` are behind the `Access drill` application, with the same staff emails as production. Delete all three after S4: the Worker, the database, the bucket.
 
 ## Turnstile
 
@@ -16,11 +16,11 @@ To test a real token on the rehearsal site: set the secret, remove its `intake_c
 
 ## Access
 
-**Blocked:** Zero Trust → Applications says "You need an active plan to continue", so the self-hosted application in notes/access-rescope.md can't be created. The Worker-wide protection and the `GoCreative staff` policy still work. Arturo chooses a plan; then the rehearsal, then the cut-over.
+Zero Trust Free activated by Arturo 2026-11-02. Rehearsal application `Access drill` created with the four paths and `GoCreative staff`; `scripts/access-check.ts` passed all 27 paths. Signing in on the rehearsal site still to be proved. The production cut-over needs Arturo's explicit go.
 
 ## Access: plan steps
 
-Dashboard confirmed 2026-11-02: Zero Trust Free, $0 per seat, 50-seat limit. Standard is $7 per seat. Arturo selects it; a payment method may be asked for.
+Done: Zero Trust Free, $0 per seat, 50-seat limit, activated by Arturo. Checkout authorizes charging the card on file for usage beyond the free limits.
 
 ## Content blockers (`npm run check:launch`, 9)
 

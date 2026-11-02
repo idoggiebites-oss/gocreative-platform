@@ -17,7 +17,12 @@ async function publish(page: Page) {
   expect((await page.request.post('/api/app/pricing/publish', { data: { draftId: draft.id, draftHash: draft.hash, expectedActiveId: null } })).status()).toBe(200)
 }
 /** A real PNG, drawn and encoded by the browser: two flat inks on white. */
-const twoInks = async (page: Page) => Buffer.from(await page.evaluate(`(() => { const c = document.createElement('canvas'); c.width = 400; c.height = 400; const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0,0,400,400); x.fillStyle = '#0000ff'; x.fillRect(40,40,140,320); x.fillStyle = '#ff0000'; x.fillRect(220,40,140,320); return c.toDataURL('image/png').split(',')[1] })()`) as string, 'base64')
+const twoInks = async (page: Page) => {
+  const blank = await page.context().newPage() // its own page: the app's page may still be settling, and a reload would destroy the drawing
+  const data = await blank.evaluate(`(() => { const c = document.createElement('canvas'); c.width = 400; c.height = 400; const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0,0,400,400); x.fillStyle = '#0000ff'; x.fillRect(40,40,140,320); x.fillStyle = '#ff0000'; x.fillRect(220,40,140,320); return c.toDataURL('image/png').split(',')[1] })()`) as string
+  await blank.close()
+  return Buffer.from(data, 'base64')
+}
 
 async function toReview(page: Page, name: string, withPrint = true) {
   await page.goto('/order')
