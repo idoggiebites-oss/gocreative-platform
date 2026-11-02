@@ -30,6 +30,8 @@ Done: Zero Trust Free, $0 per seat, 50-seat limit, activated by Arturo. Checkout
 
 Address; phone; email; hours; placeholder photos; photo component labels; privacy draft notice; privacy backup period; services confirmation.
 
+- The rehearsal site still runs the older form and analyzer; redeploy before any further device test (config is not in the repo).
+
 ## Before the first real customer submission
 
 - A verified encrypted off-machine backup and a recovery procedure (Arturo, 2026-11-02; not interrupting S4 testing).

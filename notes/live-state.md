@@ -3,7 +3,7 @@
 Update this whenever something deploys. History is in git and ROADMAP.md; this is only the present.
 
 - **Dashboard:** gocreative.idoggiebites.workers.dev, behind Cloudflare Access (reusable policy "GoCreative staff").
-- **Worker version:** 1cacaa9e (verified-specs fix on E3, behind Access).
+- **Worker version:** a85233e9 (analyzer 2, garment question, print question moved; behind Access, customer prices off).
 - **Remote migrations applied:** 0001–0012. Never edit these.
 - **Test data left in live on purpose:** customer "TEST – ignore" and cancelled order 2026-0001, so the next real order is 2026-0002.
 - **Public intake API:** deployed, but closed twice over: the Worker is still all behind Access, and the `intake_closed` row in `settings` refuses every public write. `TURNSTILE_SECRET` and `IP_HASH_SALT` aren't set; without them no session can open.
