@@ -76,6 +76,7 @@ export function estimateRoutes() {
       if (!b.success) return fail(c, 400, 'invalid_request', 'Invalid request')
       const row = await db.getInquiry(c.env.DB, i.data)
       if (!row || row.deleting_at) return notFound(c)
+      if (row.status !== 'new') return fail(c, 409, 'inquiry_not_new', 'Only a new inquiry can be reviewed. After conversion, correct the order')
       const lines = parsePayload(row.payload)?.lines ?? []
       if (lines.length === 0 || b.data.lines.length !== lines.length) return fail(c, 400, 'invalid_request', 'Invalid request')
 

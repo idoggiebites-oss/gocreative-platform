@@ -45,6 +45,8 @@ export type ConvertInput = {
   contact: { name: string; email: string | null; phone: string | null }
   poRequired: boolean; paymentTerms: PaymentTerms; artworkRequired: boolean; productionStatus: ProductionStatus
   items: ConvertedItem[]; description: string | null; files: InquiryFileRow[]
+  /** The latest estimate these items were built from: a review landing in between refuses the conversion. */
+  latestEstimateId: number | null
 }
 
 /** Null when nothing happened (not new any more, a stale version, or a customer or contact that moved). Otherwise the order number's sequence. */
@@ -55,8 +57,8 @@ export async function convertInquiry(db: D1Database, p: ConvertInput) {
     ? `AND EXISTS (SELECT 1 FROM customers WHERE id = ?)${existing.contactId !== null ? ' AND EXISTS (SELECT 1 FROM customer_contacts WHERE id = ? AND customer_id = ? AND archived_at IS NULL)' : ''}`
     : ''
   const customerB = existing ? [existing.existingId, ...(existing.contactId !== null ? [existing.contactId, existing.existingId] : [])] : []
-  const ok = `EXISTS (SELECT 1 FROM inquiries gi WHERE gi.id = ? AND gi.version = ? AND gi.status = 'new' AND gi.deleting_at IS NULL) ${customerOk}`
-  const okB = [p.inquiryId, p.version, ...customerB]
+  const ok = `EXISTS (SELECT 1 FROM inquiries gi WHERE gi.id = ? AND gi.version = ? AND gi.status = 'new' AND gi.deleting_at IS NULL AND COALESCE((SELECT MAX(e.id) FROM inquiry_estimates e WHERE e.inquiry_id = gi.id), 0) = ?) ${customerOk}`
+  const okB = [p.inquiryId, p.version, p.latestEstimateId ?? 0, ...customerB]
   const chosen = `(SELECT converted_customer_id FROM inquiries WHERE id = ?)`
   const chosenContact = `(SELECT converted_contact_id FROM inquiries WHERE id = ?)`
   const setCustomer = (sql: string, ...b: (string | number | null)[]) => db.prepare(`UPDATE inquiries SET ${sql} WHERE id = ? AND ${ok}`).bind(...b, p.inquiryId, ...okB)

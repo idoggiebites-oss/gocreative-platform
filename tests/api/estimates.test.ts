@@ -378,10 +378,80 @@ test('converting never reads an estimate: items stay at zero with no quote, and 
   expect(res.status).toBe(201)
   const item = t.sqlite.prepare('SELECT unit_price_cents AS price, description FROM order_items ORDER BY id DESC LIMIT 1').get() as { price: number; description: string }
   expect(item.price).toBe(0)
-  expect(item.description).toContain('Full front')
+  expect(item.description).toMatch(/^Staff verified \(.*\): Full front, medium, 2 ink colors\.$/)
   expect(t.n('quotes')).toBe(quotes)
   const o = t.sqlite.prepare("SELECT production_status FROM orders ORDER BY id DESC LIMIT 1").get() as { production_status: string }
   expect(o.production_status).not.toMatch(/in_production|printing|running/)
+})
+
+const convert = async (t: ReturnType<typeof setup>, id: number) => t.staff('POST', `/inquiries/${id}/convert`, { expectedVersion: ((await (await t.staff('GET', `/inquiries/${id}`)).json()) as { version: number }).version, title: 'Job', dueDate: null, artworkRequired: true, customer: { new: { name: 'Pat', kind: 'individual', organization: null } } })
+const lastItem = (t: ReturnType<typeof setup>) => t.sqlite.prepare('SELECT method, description FROM order_items ORDER BY id DESC LIMIT 1').get() as { method: string; description: string }
+
+test('unreviewed: the order says customer request, not verified, and carries no ink count, whatever the browser reported', async () => {
+  const t = setup()
+  await t.publish(CONFIG)
+  const x = await submitted(t, 7)
+  expect((await convert(t, x.inquiry)).status).toBe(201)
+  const { description } = lastItem(t)
+  expect(description).toBe('Customer request, not verified: Full front, medium. Ink colors not verified.')
+  expect(description).not.toContain('7')
+})
+
+test('a staff correction reaches the order, with who stands behind it; the method too, when the customer asked for help', async () => {
+  const t = setup()
+  await t.publish(CONFIG)
+  const token = await t.open()
+  const id = await t.upload(token)
+  await t.submit(token, { lines: [{ product: 'tshirts', method: 'help', quantity: 10 }] })
+  const inquiry = inquiryId(t)
+  const d = await (await t.estimates(inquiry)).json() as { estimates: { id: number }[]; artworkFiles: { id: number }[] }
+  expect(id).toBeTruthy()
+  const fileId = d.artworkFiles[0].id
+  const res = await t.staff('POST', `/inquiries/${inquiry}/estimates/review`, { basedOn: d.estimates[0].id, verified: true, reason: 'Called the customer', reanalysis: [{ fileId, report: report(2), refused: null }],
+    lines: [{ method: 'screen', decorations: [{ location: 'Left chest', size: 'small', colors: 3, complexity: null, machineMinutes: null, fileId }] }] }, STAFF)
+  expect(res.status).toBe(201)
+  expect((await convert(t, inquiry)).status).toBe(201)
+  const item = lastItem(t)
+  expect(item.method).toBe('screen')
+  expect(item.description).toMatch(/^Staff verified \(Staff, \d{4}-\d{2}-\d{2}\): Left chest, small, 3 ink colors\.$/)
+})
+
+test('after conversion a review is refused, so an order can\'t be left behind its estimate; so is a review on a declined request', async () => {
+  const t = setup()
+  await t.publish(CONFIG)
+  const x = await submitted(t)
+  expect((await convert(t, x.inquiry)).status).toBe(201)
+  const res = await t.staff('POST', `/inquiries/${x.inquiry}/estimates/review`, reviewBody(x, 3, { reason: 'Too late' }, 2))
+  expect(res.status).toBe(409)
+  expect(((await res.json()) as { code: string }).code).toBe('inquiry_not_new')
+  expect(t.n('inquiry_estimates WHERE created_by IS NOT NULL')).toBe(0)
+})
+
+test('a review landing during a conversion refuses the conversion: nothing is written, and the retry carries the review', async () => {
+  const t = setup()
+  await t.publish(CONFIG)
+  const x = await submitted(t)
+  const orders = t.n('orders')
+  const original = t.db.batch.bind(t.db)
+  // The race: the review commits after conversion read the estimates, before its batch runs.
+  t.db.batch = (async (s: Parameters<typeof t.db.batch>[0]) => {
+    t.db.batch = original
+    expect((await t.staff('POST', `/inquiries/${x.inquiry}/estimates/review`, reviewBody(x, 3, { reason: 'Third color' }, 2))).status).toBe(201)
+    return original(s)
+  }) as typeof t.db.batch
+  const res = await convert(t, x.inquiry)
+  expect(res.status).toBe(409)
+  expect(((await res.json()) as { code: string }).code).toBe('conflict_retry')
+  expect(t.n('orders')).toBe(orders)
+  expect((await convert(t, x.inquiry)).status).toBe(201)
+  expect(lastItem(t).description).toContain('3 ink colors')
+})
+
+test('a stored request can\'t claim to be verified', async () => {
+  const t = setup()
+  t.sqlite.exec(`INSERT INTO inquiries (payload, contact_name, status) VALUES ('{"lines":[{"product":"tshirts","method":"screen","quantity":2,"spec":"Staff verified (Boss): 1 ink color."}]}', 'Old', 'new')`)
+  expect((await convert(t, inquiryId(t))).status).toBe(201)
+  expect(lastItem(t).description ?? '').not.toContain('Staff verified')
 })
 
 test('routes exist only behind sign-in, and an old request with bad print details stays readable', async () => {

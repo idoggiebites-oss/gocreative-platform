@@ -104,6 +104,16 @@ test('switched on: one figure in the agreed words, then staff re-analyze the sto
   await expect(card.getByTestId('estimate-internal').first()).toContainText('Owner only')
   // Nothing became a quote.
   await expect(page.getByRole('link', { name: /^\d{4}-/ })).toHaveCount(0)
+
+  // Converted: the order says who verified what, the count included, and the review closes.
+  await page.getByRole('button', { name: 'Convert to order' }).click()
+  const convert = page.getByRole('dialog')
+  await expect(convert.getByTestId('convert-specs')).toContainText('staff-verified')
+  await convert.getByRole('button', { name: 'Create order' }).click()
+  await expect(page).toHaveURL(/\/app\/orders\/\d{4}-/)
+  await expect(page.getByText(/Staff verified \(.*\): Full front, medium, 3 ink colors\./)).toBeVisible()
+  await page.goBack()
+  await expect(page.getByRole('button', { name: 'Review artwork and details' })).toHaveCount(0)
 })
 
 test('an estimate failure never stops the request: no print details means manual review, and sending works', async ({ page }) => {

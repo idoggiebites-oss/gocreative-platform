@@ -515,6 +515,7 @@ export const en = {
     saved: { title: 'Saved artwork', empty: 'No artwork has been saved for this customer yet.', versions: (n: number) => `${n} ${n === 1 ? 'version' : 'versions'}`, onOrder: (n: string) => `Order ${n}` },
   },
   inquiries: {
+    specsVerified: 'The order will carry the staff-verified print details and ink colors from the latest review.', specsUnverified: 'No staff review yet. The order will label its print details as customer request, not verified, and carry no ink count.',
     printLabel: 'Print',
     back: 'Inquiries', statusLabel: 'Status', received: (d: string) => `Received ${d}`,
     request: 'What they asked for', qty: 'Qty', sizes: 'Sizes', color: 'Color', material: 'Material or item', personalization: 'Personalization', noteLabel: 'Notes',

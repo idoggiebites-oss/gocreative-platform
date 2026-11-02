@@ -8,7 +8,8 @@ import { printLocationName } from '../../shared/inquiry'
 import { requireRole, type AppEnv } from '../auth'
 import { customerDefaults } from '../domain/customerDefaults'
 import { readiness } from '../domain/readiness'
-import { conversionNote, lineToItem, parsePayload } from '../domain/inquiryConversion'
+import { conversionNote, lineToItem, parsePayload, withVerifiedFacts, type ReviewedLine } from '../domain/inquiryConversion'
+import { listEstimates, userNames } from '../db/pricing'
 import * as db from '../db/inquiries'
 import { getCustomerDefaults } from '../db/orders'
 import { processClaimed } from '../inquiryDeletion'
@@ -36,6 +37,17 @@ const statusOf = (artworkRequired: boolean, poRequired: boolean) => readiness({
   state: 'active', quote: null, itemsRevision: 0, artworkRequired, designs: [], poRequired, latestPo: null, authorizedAt: null,
   materialsRequired: true, purchases: [], prepStatus: 'not_started',
 }).preProductionStatus
+
+/** The latest estimate's facts, if staff reviewed them. Anything unreadable counts as not verified. */
+function verifiedFacts(e: Awaited<ReturnType<typeof listEstimates>>[number] | null, who: string | undefined) {
+  if (e?.facts_source !== 'staff_reviewed') return null
+  try {
+    const lines = (JSON.parse(e.inputs) as { request?: { lines?: ReviewedLine[] } }).request?.lines
+    return lines ? { lines, who: who ?? 'staff', on: e.created_at.slice(0, 10) } : null
+  } catch {
+    return null
+  }
+}
 
 export function inquiryRoutes() {
   return new Hono<AppEnv>()
@@ -82,8 +94,11 @@ export function inquiryRoutes() {
       if (done) return done
       if (row.status !== 'new') return fail(c, 409, 'inquiry_not_new', 'Only a new inquiry can be converted')
       if (row.version !== b.data.expectedVersion) return stale(c)
-      const payload = parsePayload(row.payload)
-      if (!payload || !row.contact_name) return fail(c, 409, 'inquiry_not_convertible', 'This inquiry has no request to convert')
+      const stored = parsePayload(row.payload)
+      if (!stored || !row.contact_name) return fail(c, 409, 'inquiry_not_convertible', 'This inquiry has no request to convert')
+      // Only the latest estimate counts: a customer's row after a review can't happen, and an older review may have been superseded.
+      const latest = (await listEstimates(c.env.DB, row.id)).at(-1) ?? null
+      const payload = withVerifiedFacts(stored, verifiedFacts(latest, latest?.created_by ? (await userNames(c.env.DB, [latest.created_by])).get(latest.created_by) : undefined))
 
       const d = b.data
       const files = await db.listInquiryFiles(c.env.DB, row.id)
@@ -107,13 +122,14 @@ export function inquiryRoutes() {
         inquiryId: row.id, version: d.expectedVersion, actorId: c.get('user').id, year, title: d.title, dueDate: d.dueDate,
         customer, contact: { name: row.contact_name, email: row.contact_email, phone: row.contact_phone },
         poRequired, paymentTerms: defaults.terms, artworkRequired: d.artworkRequired, productionStatus: status,
-        items: payload.lines.map(lineToItem), description: conversionNote(payload), files,
+        items: payload.lines.map(lineToItem), description: conversionNote(payload), files, latestEstimateId: latest?.id ?? null,
       })
       if (n === null) {
         const raced = await already()
         if (raced) return raced
         // Nothing was written. The customer or contact no longer fits, or the inquiry changed.
         const now = await db.getInquiry(c.env.DB, i.data)
+        if ((await listEstimates(c.env.DB, row.id)).at(-1)?.id !== latest?.id) return stale(c) // reviewed while converting: staff should see what changed
         return now?.version === d.expectedVersion ? fail(c, 400, 'contact_not_for_customer', 'That contact is not available on this customer') : stale(c)
       }
       const fresh = await db.getInquiry(c.env.DB, i.data)

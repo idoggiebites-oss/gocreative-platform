@@ -502,6 +502,7 @@ export const es: Messages = {
     saved: { title: 'Arte guardado', empty: 'Todavía no hay arte guardado para este cliente.', versions: (n: number) => `${n} ${n === 1 ? 'versión' : 'versiones'}`, onOrder: (n: string) => `Orden ${n}` },
   },
   inquiries: {
+    specsVerified: 'La orden llevará los detalles de impresión y colores de tinta verificados por el personal en la última revisión.', specsUnverified: 'Aún no hay revisión del personal. La orden marcará los detalles de impresión como solicitud del cliente, sin verificar, y no llevará conteo de tintas.',
     printLabel: 'Impresión',
     back: 'Solicitudes', statusLabel: 'Estado', received: (d: string) => `Recibida el ${d}`,
     request: 'Lo que pidieron', qty: 'Cant.', sizes: 'Tallas', color: 'Color', material: 'Material o artículo', personalization: 'Personalización', noteLabel: 'Notas',

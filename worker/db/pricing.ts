@@ -83,13 +83,14 @@ export async function saveEstimate(db: D1Database, e: NewEstimate) {
 
 /**
  * A staff review, in one batch: the new estimate, each correction beside it, and a counts-only audit row. Guarded on the estimate the reviewer was looking at
- * still being the latest, so a stale screen or a double-tap writes nothing. It touches no order, item or quote.
+ * still being the latest and the inquiry still being new, so a stale screen or a double-tap writes nothing. It touches no order, item or quote: once converted, the order is what staff correct,
+ * because a review arriving later would leave the order saying something else.
  */
 export async function saveReview(db: D1Database, e: NewEstimate & { basedOn: number | null; reviewKey: string; reason: string | null; overrides: { field: string; original: string | null; replacement: string | null }[]; actorId: number }) {
   const mine = `FROM inquiry_estimates e WHERE e.inquiry_id = ? AND json_extract(e.inputs, '$.reviewKey') = ?`
   const [inserted] = await db.batch([
     db.prepare(`INSERT INTO inquiry_estimates (${ESTIMATE_COLS}) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-      WHERE EXISTS (SELECT 1 FROM inquiries WHERE id = ? AND deleting_at IS NULL) AND COALESCE((SELECT MAX(id) FROM inquiry_estimates WHERE inquiry_id = ?), 0) = ?`)
+      WHERE EXISTS (SELECT 1 FROM inquiries WHERE id = ? AND status = 'new' AND deleting_at IS NULL) AND COALESCE((SELECT MAX(id) FROM inquiry_estimates WHERE inquiry_id = ?), 0) = ?`)
       .bind(e.inquiryId, ...estimateBinds(e), e.inquiryId, e.inquiryId, e.basedOn ?? 0),
     ...e.overrides.map((o) => db.prepare(`INSERT INTO estimate_overrides (estimate_id, field, original, replacement, reason, actor_id) SELECT e.id, ?, ?, ?, ?, ? ${mine}`)
       .bind(o.field, o.original, o.replacement, e.reason, e.actorId, e.inquiryId, e.reviewKey)),

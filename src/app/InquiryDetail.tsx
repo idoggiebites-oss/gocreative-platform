@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router'
 import type { InquiryConvertRequest, InquiryConvertResponse, InquiryDetailResponse } from '@shared/api'
 import { CUSTOMER_KINDS, type CustomerKind } from '@shared/enums'
 import { useI18n } from '@/i18n'
-import { send, useInquiry, useMe, useSend } from '@/lib/api'
+import { send, useInquiry, useInquiryEstimates, useMe, useSend } from '@/lib/api'
 import { BTN, BTN_PRIMARY, Check, Field, FormDialog, H2, INPUT, LINK, MutationError, SEC, TEXTAREA } from './form'
 import InquiryEstimates from './InquiryEstimates'
 import QueryBoundary from './QueryBoundary'
@@ -25,6 +25,7 @@ function ConvertDialog({ d, onClose }: { d: InquiryDetailResponse; onClose: () =
   const [title, setTitle] = useState(`${d.organization ?? d.contactName ?? ''} (${d.ref ?? `#${d.id}`})`.trim())
   const [due, setDue] = useState(d.dueDate ?? '')
   const [artwork, setArtwork] = useState(true) // a public upload never clears this by itself; staff may turn it off on purpose
+  const verified = useInquiryEstimates(d.id).data?.estimates.at(-1)?.factsSource === 'staff_reviewed'
   const convert = useSend<InquiryConvertResponse, InquiryConvertRequest>((b) => send('POST', `/inquiries/${d.id}/convert`, b))
   return (
     <FormDialog
@@ -38,6 +39,7 @@ function ConvertDialog({ d, onClose }: { d: InquiryDetailResponse; onClose: () =
         { onSuccess: (r) => void nav(`/app/orders/${r.number}`) },
       )}
     >
+      <p className="text-[13px]" data-testid="convert-specs">{verified ? t.specsVerified : t.specsUnverified}</p>
       <Field label={t.customer} hint={d.matches.length > 0 ? t.suggested : undefined}>
         <select className={INPUT} value={choice} onChange={(e) => { setChoice(e.target.value); setContact('new') }}>
           {d.matches.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -127,7 +129,7 @@ function Detail({ d }: { d: InquiryDetailResponse }) {
         </div>
       </section>
 
-      <InquiryEstimates inquiryId={d.id} canReview={d.status === 'new' || d.status === 'converted'} />
+      <InquiryEstimates inquiryId={d.id} canReview={d.status === 'new'} />
 
       <section className={CARD} aria-labelledby="inq-project">
         <div className={SEC}><h2 id="inq-project" className={H2}>{t.project}</h2></div>

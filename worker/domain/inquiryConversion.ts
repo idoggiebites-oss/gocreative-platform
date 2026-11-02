@@ -15,6 +15,7 @@ const storedLine = z.looseObject({
   quantity: z.number().int().min(1).max(1_000_000),
   sizes: z.record(z.string().max(20), z.number().int().min(0).max(1_000_000)).nullish().transform((v) => v ?? undefined),
   color: storedText, material: storedText, personalization: storedText, notes: storedText, prints: storedPrints,
+  spec: z.string().optional(), // set by withVerifiedFacts at conversion, never read from storage as truth
 })
 const payloadSchema = z.looseObject({ lines: z.array(storedLine).min(1).max(200), designHelp: z.boolean().nullish(), description: z.string().nullish() })
 export type InquiryPayload = z.infer<typeof payloadSchema>
@@ -38,8 +39,9 @@ export type ConvertedItem = {
 const DESCRIPTION_MAX = 500
 const COLOR_MAX = 100
 const NOTES_MAX = 2000
-const printsText = (l: InquiryPayload['lines'][number]) => (l.prints?.length ? `Print: ${l.prints.map((p) => [printLocationName(p.location), p.size].filter(Boolean).join(', ')).join('; ')}` : null)
-const details = (l: InquiryPayload['lines'][number]) => [printsText(l), l.personalization && `Personalization: ${l.personalization}`, l.material && `Material or item: ${l.material}`, l.notes].filter(Boolean).join('\n')
+// Says on the order whose word it is. A count a browser reported is deliberately left out: only staff-reviewed facts can put an ink count on an order.
+const printsText = (l: InquiryPayload['lines'][number]) => (l.prints?.length ? `Customer request, not verified: ${l.prints.map((p) => [printLocationName(p.location), p.size].filter(Boolean).join(', ')).join('; ')}. Ink colors not verified.` : null)
+const details = (l: InquiryPayload['lines'][number]) => [l.spec ?? printsText(l), l.personalization && `Personalization: ${l.personalization}`, l.material && `Material or item: ${l.material}`, l.notes].filter(Boolean).join('\n')
 const knownMethod = (m: string): Method | null => METHODS.find((x) => x === m) ?? null
 /** Sizes that don't add up to the quantity would make the item uneditable, so such a grid stays in the note rather than on the item. */
 const usableSizes = (l: InquiryPayload['lines'][number]) => {
@@ -52,6 +54,20 @@ const noteFor = (l: InquiryPayload['lines'][number]) => [
   l.method === 'help' ? 'Customer asked for help choosing the method.' : !knownMethod(l.method) ? `Customer asked for: ${l.method}.` : null, // kept in words, never passed to the constrained column
   l.sizes && Object.keys(l.sizes).length > 0 && !usableSizes(l) ? `Sizes as sent: ${JSON.stringify(l.sizes)}` : null,
 ].filter(Boolean).join(' ')
+export type ReviewedLine = { method: string; decorations: { location?: string; size?: string; colors?: number | null; complexity?: string; machineMinutes?: number }[] }
+const reviewedText = (l: ReviewedLine, who: string) => `Staff verified (${who}): ${l.decorations.length === 0 ? 'no print details' : l.decorations.map((d) => [
+  d.location, d.size, d.colors ? `${d.colors} ink color${d.colors === 1 ? '' : 's'}` : l.method === 'screen' ? 'ink colors not set' : null, d.complexity && `${d.complexity} complexity`, d.machineMinutes && `${d.machineMinutes} machine minutes per piece`,
+].filter(Boolean).join(', ') || 'print').join('; ')}.`
+
+/**
+ * The request as the order should carry it. With a staff-reviewed estimate, its facts and method replace the customer's on the order, and say who stands behind them; without one, lines stay labelled unverified.
+ * Facts only: an estimate's price is never read here, so items still convert at zero.
+ */
+export function withVerifiedFacts(p: InquiryPayload, reviewed: { lines: ReviewedLine[]; who: string; on: string } | null): InquiryPayload {
+  if (!reviewed) return { ...p, lines: p.lines.map(({ spec: _spec, ...l }) => l) } // a stored field can't claim to be verified
+  return { ...p, lines: p.lines.map((l, i) => (reviewed.lines[i] ? { ...l, method: reviewed.lines[i].method, spec: reviewedText(reviewed.lines[i], `${reviewed.who}, ${reviewed.on}`) } : l)) }
+}
+
 const fits = (text: string, max: number) => (text.length <= max ? text : `${text.slice(0, max - 28)}… (full text in order note)`)
 
 /** Prices stay 0 until staff quote. "Help me choose" has no method yet, so it becomes 'other' with a note saying why. */
