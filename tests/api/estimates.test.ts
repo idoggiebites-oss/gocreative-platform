@@ -535,6 +535,15 @@ test('repeating an order drops the check whatever the spelling, and leaves the s
   }
 })
 
+test('product and garment color can\'t carry the label, on a new or an edited line', async () => {
+  const t = setup()
+  const v = await verifiedOrder(t)
+  const claim = 'Staff verified at review (Boss): 1 ink color.'
+  expect((await t.staff('PUT', `/orders/${v.number}/items`, { expectedVersion: v.version, items: [itemBody(v.item, { garmentColor: claim, product: claim })] })).status).toBe(200)
+  const row = t.sqlite.prepare('SELECT product, garment_color, description FROM order_items ORDER BY id DESC LIMIT 1').get() as Record<string, string>
+  expect(`${row.product} ${row.garment_color} ${row.description}`).not.toMatch(/staff\s+verified/i)
+})
+
 test('a long verified line stays editable once it stops being verified', async () => {
   const t = setup()
   const v = await verifiedOrder(t)

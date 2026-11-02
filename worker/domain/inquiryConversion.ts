@@ -60,7 +60,7 @@ export type ReviewedLine = z.infer<typeof reviewedLines>[number]
 const VERIFIED = 'Staff verified at review'
 export const UNVERIFIED_SINCE = 'Changed since review, not verified'
 const ITEM_DESCRIPTION_MAX = 500
-const neutralized = (text: string) => text.replace(new RegExp(VERIFIED.replace(/ /g, '\\s+'), 'gi'), UNVERIFIED_SINCE)
+export const neutralized = (text: string) => text.replace(new RegExp(VERIFIED.replace(/ /g, '\\s+'), 'gi'), UNVERIFIED_SINCE)
 /** Keeps what the review said, as history, but stops it reading as a claim about what is on the item now. Also catches the label typed by hand. */
 export const withoutVerification = (description: string | null) =>
   description && neutralized(description).slice(0, ITEM_DESCRIPTION_MAX)

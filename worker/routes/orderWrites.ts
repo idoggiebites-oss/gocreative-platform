@@ -9,7 +9,7 @@ import { AUTHORIZATION_METHODS, ITEM_KINDS, METHODS, ORDER_SOURCES, PAYMENT_TERM
 import type { ProductionStatus } from '../../shared/enums'
 import { addDays, businessToday } from '../../shared/businessDate'
 import { formatOrderNumber } from '../domain/orderNumber'
-import { withoutVerification } from '../domain/inquiryConversion'
+import { neutralized, withoutVerification } from '../domain/inquiryConversion'
 import { checkQuoteAcceptable, checkQuoteTransition, itemsChangeRequiresReapproval, planNewVersion, restoreLines, snapshot, specificationChanged, validateItem } from '../domain/quotes'
 import { readiness } from '../domain/readiness'
 import * as db from '../db/orders'
@@ -92,8 +92,10 @@ const initialStatus = (artworkRequired: boolean, poRequired: boolean) => readine
   materialsRequired: true, purchases: [], prepStatus: 'not_started',
 }).preProductionStatus
 
+// Only a description, set at conversion, may say a line was verified. These short fields never can.
+const noClaim = (text: string | null, max: number) => text && neutralized(text).slice(0, max)
 const toWrite = (i: z.infer<typeof item>): db.ItemWrite => ({
-  id: i.id, kind: i.kind, description: i.description, product: i.product, garmentColor: i.garmentColor, method: i.method,
+  id: i.id, kind: i.kind, description: i.description, product: noClaim(i.product, 200), garmentColor: noClaim(i.garmentColor, 100), method: i.method,
   sizes: i.sizes, quantity: i.quantity, unitPriceCents: i.unitPriceCents, notes: i.notes,
 })
 const snapshotOr409 = <T extends db.ItemWrite>(c: C, from: T[]) => {
