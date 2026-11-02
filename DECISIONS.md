@@ -538,3 +538,10 @@ Migration 0006 (additive), `worker/db/{pickups,payments}.ts`, `worker/routes/{pi
 - **Backups: eight weeks is a provisional operational target,** unpublished until deletion really happens. A verified encrypted off-machine backup comes before the first real customer submission.
 - **Access: the lowest-cost plan that meets the need.** Zero Trust Free seen in the dashboard; Arturo activates it.
 
+### 2026-11-02 — Analyzer 2: a confident wrong count is the failure that matters (Arturo)
+
+- **No garment, no count.** The form asks white, light, dark or not sure. Dark or unsure goes to a person, because an underbase can't be read from a file. DTG on dark too, since the rates don't price it. Claude's call on how to apply Arturo's rule: strict, and easy to relax with real job data.
+- **White:** comes off the count on a white item, stays on a light one. White shut inside the art, on a white background, counts only on a white item.
+- **More than 4 inks, close shades, dropped details and colored backgrounds go to a person.**
+- **The print question is on screen without a tap and is never required.**
+

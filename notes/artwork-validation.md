@@ -3,11 +3,11 @@
 Customer prices stay off until this is done and Arturo approves. **Real artwork and job results never go in this repo**, which is public. `validation/` is ignored by git if you need a local folder.
 
 ## What to collect
-At least 30 past jobs, each with the original artwork file and the number of screens actually used. Include the hard ones on purpose: gradients, photos, transparent backgrounds, thin lines, low-quality JPEGs. Choosing only clean logos would flatter the result.
+At least 30 past jobs, each with the original artwork file, the number of screens actually used, the garment color, and whether an underbase was printed. Include the hard ones on purpose: gradients, photos, transparent backgrounds, thin lines, low-quality JPEGs. Choosing only clean logos would flatter the result.
 
 ## How to run it
 1. Settings → Pricing Management → Artwork check, as an owner. Files stay in the browser and are never uploaded.
-2. Choose the files, type each job's screens used.
+2. Choose the files, set each job's item color (white, light, dark), and type its screens used. A dark item never gets a count, so record the underbase in your own notes.
 3. Download results. The results are kept only in that browser until cleared, so keep the CSV somewhere private.
 
 ## How to read it
