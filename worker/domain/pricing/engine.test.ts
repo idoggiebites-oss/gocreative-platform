@@ -193,10 +193,8 @@ describe('money stays exact', () => {
     expect(r.lines[0].unitPriceCents).toBe((99_999_999 + 200) * 2)
   })
   test('a blank fee or size schedule is manual review for every service that has one; a typed zero prices', () => {
-    const { screenFee: _a, ...noFee } = CONFIG.services.screen!
-    const { sizeCostCents: _b, ...noSizes } = CONFIG.services.screen!
-    expect(one(shirt(10), withScreen(noFee)).reasons.join()).toMatch(/screen fee not set/)
-    expect(one(shirt(10), withScreen(noSizes)).reasons.join()).toMatch(/print size charges not set/)
+    expect(one(shirt(10), withScreen({ screenFee: undefined })).reasons.join()).toMatch(/screen fee not set/)
+    expect(one(shirt(10), withScreen({ sizeCostCents: undefined })).reasons.join()).toMatch(/print size charges not set/)
     const { digitizingFee: _c, ...noDigitizing } = CONFIG.services.embroidery!
     expect(one({ product: 'hats', method: 'embroidery', quantity: 5, decorations: [{ complexity: 'small' }] }, { ...CONFIG, services: { ...CONFIG.services, embroidery: noDigitizing } }).status).toBe('manual_review_required')
     const { setupFee: _d, ...noSetup } = CONFIG.services.engraving!
