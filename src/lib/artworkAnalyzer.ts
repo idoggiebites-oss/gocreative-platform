@@ -9,22 +9,54 @@ export const reportOf = (o: AnalyzerOutcome): ArtworkReport | null =>
 const TIMEOUT_MS = 20_000
 const SVG_MAX_BYTES = 1024 * 1024
 const SVG_MAX_ELEMENTS = 5000
-const SVG_ELEMENTS = new Set(['svg', 'g', 'path', 'rect', 'circle', 'ellipse', 'line', 'polygon', 'polyline', 'title', 'desc', 'metadata'])
-const SVG_ATTRIBUTES = /^(id|class|version|xmlns|xmlns:.*|width|height|viewbox|x|y|x1|x2|y1|y2|cx|cy|r|rx|ry|d|points|transform|fill|fill-opacity|fill-rule|stroke|stroke-width|stroke-opacity|stroke-linecap|stroke-linejoin|stroke-miterlimit|opacity)$/i
+const SVG_ELEMENTS = new Set(['svg', 'g', 'path', 'rect', 'circle', 'ellipse', 'line', 'polygon', 'polyline', 'title', 'desc', 'metadata', 'defs', 'style'])
+const SVG_ATTRIBUTES = /^(id|class|version|xmlns|xmlns:.*|xml:space|enable-background|style|width|height|viewbox|x|y|x1|x2|y1|y2|cx|cy|r|rx|ry|d|points|transform|fill|fill-opacity|fill-rule|clip-rule|stroke|stroke-width|stroke-opacity|stroke-linecap|stroke-linejoin|stroke-miterlimit|stroke-dasharray|stroke-dashoffset|opacity|display)$/i
+// Checked by namespace, not by prefix: a file can bind the prefix "inkscape" to SVG itself, to smuggle a real element past this.
+const EDITOR_NAMESPACES = new Set(['http://www.inkscape.org/namespaces/inkscape', 'http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd'])
+const STYLE_PROPERTIES = /^(fill|fill-opacity|fill-rule|clip-rule|stroke|stroke-width|stroke-opacity|stroke-linecap|stroke-linejoin|stroke-miterlimit|stroke-dasharray|stroke-dashoffset|opacity|display|enable-background|-inkscape-[a-z-]+)$/i
+const SAFE_VALUE = /^[#\w\s.,%()-]*$/
+
+/** Plain paint settings only. Anything that can fetch, run or filter is refused: url(), @rules, expressions, escapes and any property not listed. */
+export function isPlainStyle(declarations: string) {
+  return declarations.split(';').every((d) => {
+    if (!d.trim()) return true
+    const at = d.indexOf(':')
+    if (at < 0) return false
+    const value = d.slice(at + 1).trim()
+    return STYLE_PROPERTIES.test(d.slice(0, at).trim()) && SAFE_VALUE.test(value) && !/url|expression|image|var|attr|env/i.test(value)
+  })
+}
+/** A style block holding only simple class or id rules of plain paint. */
+export function isPlainStyleSheet(css: string) {
+  const text = css.replace(/^\s*<!\[CDATA\[|\]\]>\s*$/g, '').replace(/\/\*[^*]*\*\//g, '')
+  if (/[@\\<]/.test(text)) return false
+  const rest = text.replace(/\s*[.#]?[\w-]+(\s*,\s*[.#]?[\w-]+)*\s*\{([^{}]*)\}\s*/g, (_, _names, body: string) => (isPlainStyle(body) ? '' : '!'))
+  return rest.trim() === ''
+}
+// Illustrator's standard line. No internal subset, so it can't declare entities.
+const PLAIN_DOCTYPE = /<!DOCTYPE\s+svg\s+PUBLIC\s+"[^"[\]<>]*"\s+"[^"[\]<>]*"\s*>/gi
 
 /**
  * An allowlist over the parsed document, not a text search: character references like u&#114;l( are already decoded here, so they can't slip past.
- * Only plain shapes with plain paints get rendered. Filters, masks, images, styles, fonts and links are all work or requests we refuse; a person reviews those.
+ * Only plain shapes with plain paints get rendered. Filters, masks, images, gradients, fonts and links are all work or requests we refuse; a person reviews those.
  */
 export function isPlainSvg(text: string) {
+  if (/<!ENTITY|<!\[/i.test(text.replace(/<!\[CDATA\[/g, '')) || /<!DOCTYPE/i.test(text.replace(PLAIN_DOCTYPE, ''))) return false
   const doc = new DOMParser().parseFromString(text, 'image/svg+xml')
-  if (doc.querySelector('parsererror') || doc.documentElement.localName !== 'svg' || /<!DOCTYPE|<!ENTITY/i.test(text)) return false
+  if (doc.querySelector('parsererror') || doc.documentElement.localName !== 'svg') return false
   const all = doc.querySelectorAll('*')
   if (all.length > SVG_MAX_ELEMENTS) return false
+  const SVG_NS = 'http://www.w3.org/2000/svg'
   for (const el of all) {
     if (el.closest('metadata') && el.localName !== 'metadata') continue
-    if (!SVG_ELEMENTS.has(el.localName)) return false
-    for (const attr of el.attributes) if (!SVG_ATTRIBUTES.test(attr.name) || /url\s*\(|javascript:|expression/i.test(attr.value)) return false
+    if (el.namespaceURI && EDITOR_NAMESPACES.has(el.namespaceURI)) continue // a browser draws nothing for these
+    if (el.namespaceURI !== SVG_NS || !SVG_ELEMENTS.has(el.localName)) return false
+    if (el.localName === 'style' && (el.children.length > 0 || !isPlainStyleSheet(el.textContent ?? ''))) return false
+    for (const attr of el.attributes) {
+      if (attr.namespaceURI && EDITOR_NAMESPACES.has(attr.namespaceURI)) continue
+      if (!SVG_ATTRIBUTES.test(attr.name) || /url\s*\(|javascript:|expression/i.test(attr.value)) return false
+      if (attr.name.toLowerCase() === 'style' && !isPlainStyle(attr.value)) return false
+    }
   }
   return true
 }

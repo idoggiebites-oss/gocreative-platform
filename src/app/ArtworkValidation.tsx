@@ -1,7 +1,7 @@
 // Settings > Pricing: the check of the artwork analysis against real jobs. Files stay in this browser. Only the results are remembered here, and only on this computer.
 import { useEffect, useState } from 'react'
 import { MIN_JOBS, validationCsv, validationSummary, type ValidationRow } from '@shared/artworkValidation'
-import { defensibleColors } from '@shared/inquiry'
+import { GARMENTS, defensibleColors, type Garment } from '@shared/inquiry'
 import { analyzeFile, reportOf } from '@/lib/artworkAnalyzer'
 import { useI18n } from '@/i18n'
 import { BTN, H2, INPUT, SEC } from './form'
@@ -60,13 +60,14 @@ export default function ArtworkValidation() {
         {rows.length > 0 && (
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-[13px]">
-              <thead><tr className="bg-header"><th className={TH}>{t.file}</th><th className={TH}>{t.known}</th><th className={TH}>{t.detected}</th><th className={TH}>{t.flagsCol}</th></tr></thead>
+              <thead><tr className="bg-header"><th className={TH}>{t.file}</th><th className={TH}>{t.garmentCol}</th><th className={TH}>{t.known}</th><th className={TH}>{t.detected}</th><th className={TH}>{t.flagsCol}</th></tr></thead>
               <tbody>
                 {rows.map((r, i) => (
                   <tr key={i}>
                     <td className={`${TD} whitespace-normal`}>{r.name}</td>
+                    <td className={TD}><select aria-label={`${t.garmentCol}: ${r.name}`} className={`${INPUT} w-28`} value={r.garment ?? 'unsure'} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, garment: e.target.value as Garment } : x)))}>{GARMENTS.map((g) => <option key={g} value={g}>{t.garments[g]}</option>)}</select></td>
                     <td className={TD}><input aria-label={`${t.known}: ${r.name}`} className={`${INPUT} w-16`} inputMode="numeric" value={r.actual ?? ''} onChange={(e) => { const v = e.target.value.replace(/\D/g, '').slice(0, 3); setRows(rows.map((x, j) => (j === i ? { ...x, actual: v === '' ? null : Number(v) } : x))) }} /></td>
-                    <td className={`${TD} num`}>{!r.done ? t.analyzing : defensibleColors(r.report) ?? t.manual}</td>
+                    <td className={`${TD} num`}>{!r.done ? t.analyzing : defensibleColors(r.report, r.garment) ?? t.manual}</td>
                     <td className={`${TD} whitespace-normal`}>{(r.refused ? [r.refused] : r.report?.flags ?? []).map((f) => t.flags[f] ?? f).join(', ') || m.common.dash}</td>
                   </tr>
                 ))}

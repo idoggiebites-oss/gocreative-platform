@@ -114,6 +114,7 @@ function Detail({ d }: { d: InquiryDetailResponse }) {
                 <tr key={i}>
                   <td className={`${TD} whitespace-normal`}>
                     <strong>{l.product}</strong>, {method(l.method)}
+                    {l.garment && <p className={MUTED}>{m.estimates.garment}: {(m.estimates.garments as Record<string, string>)[l.garment] ?? l.garment}</p>}
                     {l.prints.map((p, k) => <p key={k} className={MUTED}>{t.printLabel}: {[p.location, p.size, p.filename].filter(Boolean).join(', ')}</p>)}
                     {l.personalization && <p className={MUTED}>{t.personalization}: {l.personalization}</p>}
                     {l.material && <p className={MUTED}>{t.material}: {l.material}</p>}

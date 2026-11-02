@@ -10,7 +10,7 @@ const METHOD_CHOICES = ['screen', 'embroidery', 'dtg', 'laser_engrave', 'laser_c
 export const FILE_PURPOSES = ['artwork', 'po'] as const
 const products: readonly { slug: string; methods: readonly string[]; sized: boolean }[] = business.storefront.products
 export const PRINT_SIZES = ['small', 'medium', 'large'] as const
-export const PRINT_METHODS: readonly string[] = ['screen', 'embroidery', 'dtg'] // what has a print location the customer can name; engraving needs a person
+export const PRINT_METHODS: readonly string[] = ['screen', 'embroidery', 'dtg', 'help'] // what has a print location the customer can name; engraving needs a person
 export const printLocationName = (slug: string) => (Object.hasOwn(business.storefront.printLocations, slug) ? business.storefront.printLocations[slug as keyof typeof business.storefront.printLocations] : slug)
 
 /** Where one design goes. `artwork` is this session's upload id, checked by the server: a customer can't point at someone else's file. */
@@ -31,13 +31,27 @@ export const artworkReportSchema = z.object({
 export type ArtworkReport = z.infer<typeof artworkReportSchema>
 const reportsSchema = z.record(z.uuid(), artworkReportSchema).refine((r) => Object.keys(r).length <= 5)
 
+/** The item's color group. A file can't tell us this, and it decides whether white prints and whether an underbase is needed. */
+export const GARMENTS = ['white', 'light', 'dark', 'unsure'] as const
+export type Garment = (typeof GARMENTS)[number]
 // None of these leaves a count anyone can defend, so a price built on one would be invented. They go to a person.
-const NO_COUNT: readonly string[] = ['gradient', 'photographic', 'too_little_flat_color', 'too_many_colors', 'partly_transparent', 'fully_transparent', 'too_large', 'too_small', 'thin_details']
-/** The ink count a report supports, or null when it supports none. Never a verified separation, whatever it says. */
-export function defensibleColors(r: ArtworkReport | null | undefined) {
+const NO_COUNT: readonly string[] = ['gradient', 'photographic', 'too_little_flat_color', 'too_many_colors', 'partly_transparent', 'fully_transparent', 'too_large', 'too_small', 'thin_details', 'small_details_dropped', 'similar_shades', 'complex_separation']
+/**
+ * The ink count a report supports on this garment, or null when it supports none. An estimate from pixels, never a verified separation or a screen count.
+ * A dark or unknown garment has no count: an underbase depends on the inks and the press, and only a person can decide it.
+ */
+export function defensibleColors(r: ArtworkReport | null | undefined, garment: Garment | null | undefined) {
   if (!r || r.analyzerVersion !== ANALYZER_VERSION || r.needsManualReview || r.confidence === 'low' || r.estimatedInkColors === null || r.estimatedInkColors < 1) return null
-  return r.flags.some((f) => NO_COUNT.includes(f)) ? null : r.estimatedInkColors
+  if (r.flags.some((f) => NO_COUNT.includes(f))) return null
+  if (garment !== 'white' && garment !== 'light') return null
+  // A colored background may be part of the design, and there is no telling. Only white can be assumed away.
+  if (r.flags.includes('likely_background') && !r.flags.includes('white_background')) return null
+  // White shut inside the art is the garment on a white shirt. On any other color it must print, but it may or may not have been meant.
+  if (r.flags.includes('background_inside') && garment !== 'white') return null
+  const count = r.estimatedInkColors - (garment === 'white' && r.flags.includes('white_ink') ? 1 : 0)
+  return count >= 1 ? count : null
 }
+
 
 export const inquiryLineSchema = z.object({
   product: z.string().max(40),
@@ -49,6 +63,7 @@ export const inquiryLineSchema = z.object({
   personalization: text(4000).optional(),
   notes: text(2000).optional(),
   prints: z.array(printSchema).max(4).optional(),
+  garment: z.enum(GARMENTS).optional(),
 }).strict().superRefine((l, ctx) => {
   const product = products.find((p) => p.slug === l.product)
   if (!product) return ctx.addIssue({ code: 'custom', message: 'unknown product' })

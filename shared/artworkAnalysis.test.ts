@@ -1,6 +1,7 @@
+import { defensibleColors } from './inquiry'
 // Representative artwork types, generated so the expected answer is known. These prove the behavior of the algorithm; only real shop artwork can measure its accuracy (plan §5).
 import { describe, expect, test } from 'vitest'
-import { ANALYSIS_DEFAULTS, analyzeArtwork, readImageSize, type Pixels } from './artworkAnalysis'
+import { ANALYSIS_DEFAULTS, ANALYZER_VERSION, analyzeArtwork, readImageSize, type Pixels } from './artworkAnalysis'
 
 type RGBA = [number, number, number, number]
 const image = (w: number, h: number, paint: (x: number, y: number) => RGBA): Pixels => {
@@ -189,7 +190,7 @@ describe('malformed input and limits', () => {
   })
   test('the result records its analyzer version and the settings used', () => {
     const r = analyzeArtwork(logo(WHITE, twoInks))
-    expect(r.analyzerVersion).toBe(1)
+    expect(r.analyzerVersion).toBe(ANALYZER_VERSION)
     expect(r.settings).toEqual(ANALYSIS_DEFAULTS)
   })
 })
@@ -203,5 +204,70 @@ describe('readImageSize reads dimensions without decoding', () => {
     expect(readImageSize(jpeg)).toEqual({ width: 600, height: 400 })
     expect(readImageSize(new Uint8Array([1, 2, 3]))).toBeNull()
     expect(readImageSize(new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0, 0, 0, 0, 0]))).toBeNull()
+  })
+})
+
+const reportOf = (a: ReturnType<typeof analyzeArtwork>) => ({ analyzerVersion: a.analyzerVersion, estimatedInkColors: a.estimatedInkColors, confidence: a.confidence, needsManualReview: a.needsManualReview, flags: a.flags })
+
+describe('what a file can and cannot say about background, white and shades', () => {
+  const paint = (w: number, h: number, at: (x: number, y: number) => readonly number[]) => {
+    const data = new Uint8ClampedArray(w * h * 4)
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) data.set(at(x, y), (y * w + x) * 4)
+    return { width: w, height: h, data }
+  }
+  const NAVY = [16, 11, 47, 255], RED = [204, 0, 0, 255], WHITE = [255, 255, 255, 255], CLEAR = [0, 0, 0, 0]
+
+  test('with real transparency no color is background, even one running along the border', () => {
+    // A navy frame around red, with see-through corners. Before, the frame was taken for background and one ink vanished.
+    const a = analyzeArtwork(paint(200, 200, (x, y) => (x < 20 && y < 20 ? CLEAR : x < 25 || y < 25 || x >= 175 || y >= 175 ? NAVY : RED)))
+    expect(a.estimatedInkColors).toBe(2)
+    expect(a.flags).not.toContain('likely_background')
+  })
+  test('white on transparency is flagged as counted white', () => {
+    const a = analyzeArtwork(paint(200, 200, (x, y) => (x < 20 || y < 20 ? CLEAR : x < 100 ? NAVY : WHITE)))
+    expect(a.estimatedInkColors).toBe(2)
+    expect(a.flags).toContain('white_ink')
+  })
+  test('white inside art on a white background is reported, because it may be ink', () => {
+    const a = analyzeArtwork(paint(200, 200, (x, y) => (x > 60 && x < 140 && y > 60 && y < 140 ? WHITE : x > 30 && x < 170 && y > 30 && y < 170 ? NAVY : WHITE)))
+    expect(a.flags).toEqual(expect.arrayContaining(['likely_background', 'white_background', 'background_inside']))
+    expect(defensibleColors(reportOf(a), 'white')).toBe(1)
+    expect(defensibleColors(reportOf(a), 'light')).toBeNull()
+  })
+  test('a colored background is never assumed away', () => {
+    const a = analyzeArtwork(paint(200, 200, (x, y) => (x > 50 && x < 150 && y > 50 && y < 150 ? WHITE : NAVY)))
+    expect(a.flags).toContain('likely_background')
+    expect(a.flags).not.toContain('white_background')
+    expect(defensibleColors(reportOf(a), 'white')).toBeNull()
+  })
+  test('close shades that could be one ink go to a person', () => {
+    const a = analyzeArtwork(paint(200, 200, (x) => (x < 100 ? [0, 51, 102, 255] : [0, 25, 51, 255])))
+    expect(a.flags).toContain('similar_shades')
+    expect(a.needsManualReview).toBe(true)
+  })
+  test('more than four inks is a complex separation, not a count', () => {
+    const inks = [[200, 0, 0, 255], [0, 150, 0, 255], [0, 0, 200, 255], [230, 200, 0, 255], [150, 0, 150, 255]]
+    const a = analyzeArtwork(paint(250, 200, (x) => inks[Math.floor(x / 50)]))
+    expect(a.flags).toContain('complex_separation')
+    expect(a.estimatedInkColors).toBeNull()
+  })
+  test('soft edges on transparency are not translucent art; a real translucent area is', () => {
+    const edged = analyzeArtwork(paint(200, 200, (x, y) => {
+      const stripe = y % 12 < 6 && x > 10 && x < 190
+      if (!stripe) return CLEAR
+      return y % 12 === 0 || y % 12 === 5 ? [0, 72, 81, 128] : [0, 72, 81, 255]
+    }))
+    expect(edged.flags).not.toContain('partly_transparent')
+    const glassy = analyzeArtwork(paint(200, 200, (x) => (x < 100 ? NAVY : [204, 0, 0, 128])))
+    expect(glassy.flags).toContain('partly_transparent')
+  })
+  test('garment rules: dark or unknown never has a count, whatever the art; white-only art on a white item has none', () => {
+    const r = { analyzerVersion: ANALYZER_VERSION, estimatedInkColors: 2, confidence: 'high' as const, needsManualReview: false, flags: [] }
+    expect(defensibleColors(r, 'white')).toBe(2)
+    expect(defensibleColors(r, 'light')).toBe(2)
+    for (const g of ['dark', 'unsure', null, undefined] as const) expect(defensibleColors(r, g)).toBeNull()
+    expect(defensibleColors({ ...r, estimatedInkColors: 1, flags: ['white_ink'] }, 'white')).toBeNull()
+    expect(defensibleColors({ ...r, flags: ['white_ink'] }, 'white')).toBe(1)
+    expect(defensibleColors({ ...r, flags: ['white_ink'] }, 'light')).toBe(2)
   })
 })

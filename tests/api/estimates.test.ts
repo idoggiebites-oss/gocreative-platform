@@ -44,7 +44,7 @@ function setup(on = true) {
   const estimates = (id: number, as = OWNER) => staff('GET', `/inquiries/${id}/estimates`, undefined, as)
   return { sqlite, db, env, pub, staff, open, upload, preview, submit, publish, n, estimates }
 }
-const line = (artwork: string | undefined, quantity = 10) => ({ product: 'tshirts', method: 'screen', quantity, prints: [{ location: 'front', size: 'medium', artwork }] })
+const line = (artwork: string | undefined, quantity = 10) => ({ product: 'tshirts', method: 'screen', quantity, garment: 'light', prints: [{ location: 'front', size: 'medium', artwork }] })
 const inquiryId = (t: ReturnType<typeof setup>) => (t.sqlite.prepare('SELECT id FROM inquiries ORDER BY id DESC LIMIT 1').get() as { id: number }).id
 
 beforeEach(() => { vi.stubGlobal('fetch', vi.fn(async () => new Response('{}'))) })
@@ -134,9 +134,20 @@ test('no defensible count means manual review: gradients, photos, transparency, 
     [{ product: 'tshirts', method: 'embroidery', quantity: 10, prints: [{ location: 'front', size: 'medium', artwork: id }] }, { [id]: report(2) }],
     [{ product: 'tshirts', method: 'screen', quantity: 10, prints: [{ location: 'front', artwork: id }] }, { [id]: report(2) }],
     [{ product: 'trophies', method: 'laser_engrave', quantity: 10 }, {}],
+    [{ ...line(id), garment: undefined }, { [id]: report(2) }],
+    [{ ...line(id), garment: 'unsure' }, { [id]: report(2) }],
+    [{ ...line(id), garment: 'dark' }, { [id]: report(2) }],
+    [line(id), { [id]: report(2, { flags: ['small_details_dropped'] }) }],
+    [line(id), { [id]: report(5, { flags: ['complex_separation'] }) }],
+    [line(id), { [id]: report(2, { flags: ['similar_shades'] }) }],
+    [line(id), { [id]: report(2, { flags: ['likely_background'] }) }],
+    [line(id), { [id]: report(2, { flags: ['likely_background', 'white_background', 'background_inside'] }) }],
+    [{ ...line(id), garment: 'white' }, { [id]: report(1, { flags: ['white_ink'] }) }],
+    [{ product: 'tshirts', method: 'dtg', quantity: 10, garment: 'dark', prints: [{ location: 'front', size: 'small', artwork: id }] }, {}],
     [{ product: 'hoodies', method: 'screen', quantity: 10, prints: [{ location: 'front', size: 'medium', artwork: id }] }, { [id]: report(2) }],
   ]
   for (const [l, reports] of cases) {
+    t.sqlite.exec('UPDATE inquiry_submissions SET estimate_calls = 0') // the quota has its own test
     const r = await (await t.preview(token, { lines: [l], reports })).json() as { estimate: { status: string; totalCents: null; assumptions: string[] } }
     expect(r.estimate, JSON.stringify(l)).toEqual({ status: 'manual_review_required', totalCents: null, assumptions: [] })
   }
@@ -192,6 +203,32 @@ test('adding an empty print is a change, so it needs a reason too', async () => 
   const b = reviewBody(x, 2)
   const res = await t.staff('POST', `/inquiries/${x.inquiry}/estimates/review`, { ...b, lines: [{ method: 'screen', decorations: [...b.lines[0].decorations, empty] }] })
   expect(((await res.json()) as { code: string }).code).toBe('estimate_reason_required')
+})
+
+test('the garment changes the figure, and says so: white ink comes off on a white item and stays on a light one', async () => {
+  const t = setup()
+  await t.publish(CONFIG)
+  const token = await t.open()
+  const id = await t.upload(token)
+  const ask = async (garment: string) => ((await (await t.preview(token, { lines: [{ ...line(id), garment }], reports: { [id]: report(3, { flags: ['white_ink'] }) } })).json()) as { estimate: { totalCents: number | null; assumptions: string[] } }).estimate
+  const white = await ask('white')
+  const light = await ask('light')
+  expect(white.totalCents).toBe(12000) // 2 inks
+  expect(light.totalCents).toBe(15000) // 3 inks
+  expect(white.assumptions.join()).toMatch(/white item/i)
+  expect(light.assumptions.join()).toMatch(/no underbase/i)
+  expect((await ask('dark')).totalCents).toBeNull()
+})
+
+test('a garment that isn\'t one of the four is refused, and the note on the order says what it was', async () => {
+  const t = setup()
+  await t.publish(CONFIG)
+  const x = await submitted(t)
+  const token = await t.open()
+  const id = await t.upload(token)
+  expect((await t.preview(token, { lines: [{ ...line(id), garment: 'free' }] })).status).toBe(400)
+  await convert(t, x.inquiry)
+  expect(lastItem(t).description).toContain('Light item.')
 })
 
 test('a link to another session\'s file is never stored, and does not resolve for staff', async () => {
@@ -378,7 +415,7 @@ test('converting never reads an estimate: items stay at zero with no quote, and 
   expect(res.status).toBe(201)
   const item = t.sqlite.prepare('SELECT unit_price_cents AS price, description FROM order_items ORDER BY id DESC LIMIT 1').get() as { price: number; description: string }
   expect(item.price).toBe(0)
-  expect(item.description).toMatch(/^Staff verified at review \(.*\): Full front, medium, 2 ink colors\.$/)
+  expect(item.description).toMatch(/^Staff verified at review \(.*\): Full front, medium, 2 ink colors\. Light item\.$/)
   expect(t.n('quotes')).toBe(quotes)
   const o = t.sqlite.prepare("SELECT production_status FROM orders ORDER BY id DESC LIMIT 1").get() as { production_status: string }
   expect(o.production_status).not.toMatch(/in_production|printing|running/)
@@ -393,7 +430,7 @@ test('unreviewed: the order says customer request, not verified, and carries no 
   const x = await submitted(t, 7)
   expect((await convert(t, x.inquiry)).status).toBe(201)
   const { description } = lastItem(t)
-  expect(description).toBe('Customer request, not verified: Full front, medium. Ink colors not verified.')
+  expect(description).toBe('Customer request, not verified: Full front, medium. Ink colors not verified. Light item.')
   expect(description).not.toContain('7')
 })
 

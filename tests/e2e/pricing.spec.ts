@@ -138,7 +138,11 @@ test('the artwork check measures locally: no upload, counts and refusals shown',
     { name: 'broken.png', mimeType: 'image/png', buffer: Buffer.from('not a png at all') },
   ])
   const row = (name: string) => page.getByRole('row').filter({ hasText: name })
-  await expect(row('two-inks.svg')).toContainText('2')
+  // No garment chosen means no count, on purpose; choosing one brings it.
+  await expect(row('two-inks.svg')).toContainText('Manual review')
+  await page.getByLabel('Item color: two-inks.svg').selectOption('white')
+  await expect(row('two-inks.svg').getByRole('cell').nth(3)).toHaveText('2')
+  await page.getByLabel('Item color: job.pdf').selectOption('white')
   await expect(row('two-inks.svg')).toContainText('Background assumed not printed')
   await expect(row('scripted.svg')).toContainText('Format not analyzed')
   await expect(row('sneaky.svg')).toContainText('Format not analyzed')
@@ -164,5 +168,40 @@ test('a real PNG goes through the worker in the browser', async ({ page }) => {
   await page.goto('/app/settings/pricing')
   const bytes = await page.evaluate(`(() => { const c = document.createElement('canvas'); c.width = 400; c.height = 400; const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0,0,400,400); x.fillStyle = '#142870'; x.beginPath(); x.arc(200,200,120,0,7); x.fill(); return [...atob(c.toDataURL().split(',')[1])].map((ch) => ch.charCodeAt(0)) })()`) as number[]
   await page.locator('input[type=file]').setInputFiles({ name: 'circle.png', mimeType: 'image/png', buffer: Buffer.from(bytes) })
-  await expect(page.getByRole('row').filter({ hasText: 'circle.png' }).getByRole('cell').nth(2)).toHaveText('1')
+  await page.getByLabel('Item color: circle.png').selectOption('light')
+  await expect(page.getByRole('row').filter({ hasText: 'circle.png' }).getByRole('cell').nth(3)).toHaveText('1')
+})
+
+test('SVG: harmless editor output is analyzed; anything that can fetch, run or filter is still refused', async ({ page }, info) => {
+  test.skip(info.project.name === 'phone', 'the same code on both')
+  await page.goto('/app/settings/pricing')
+  const X = 'xmlns="http://www.w3.org/2000/svg"'
+  const body = '<rect width="400" height="400" fill="#102040"/>'
+  const open = `<svg ${X} width="400" height="400"`
+  const files: [string, string][] = [
+    ['ok-xmlspace.svg', `${open} xml:space="preserve" enable-background="new 0 0 400 400">${body}</svg>`],
+    ['ok-doctype.svg', `<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">${open}>${body}</svg>`],
+    ['ok-editor.svg', `${open} xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd" inkscape:version="1"><defs/><sodipodi:namedview pagecolor="#ffffff"/>${body}</svg>`],
+    ['ok-style.svg', `${open}><rect width="400" height="400" style="fill:#102040;stroke:none"/></svg>`],
+    ['ok-block.svg', `${open}><defs><style>.a{fill:#102040}</style></defs><rect class="a" width="400" height="400"/></svg>`],
+    ['bad-entity.svg', `<!DOCTYPE svg [<!ENTITY x "y">]>${open}>${body}</svg>`],
+    ['bad-subset.svg', `<!DOCTYPE svg PUBLIC "a" "b" [<!ENTITY x "y">]>${open}>${body}</svg>`],
+    ['bad-style-filter.svg', `${open}><rect width="9" height="9" style="filter:url(#f)"/></svg>`],
+    ['bad-style-url.svg', `${open}><rect width="9" height="9" style="fill:url(https://example.com/x)"/></svg>`],
+    ['bad-style-escape.svg', `${open}><rect width="9" height="9" style="fill:\\75rl(#f)"/></svg>`],
+    ['bad-block-import.svg', `${open}><style>@import url(https://example.com/x.css);</style>${body}</svg>`],
+    ['bad-block-bg.svg', `${open}><style>.a{background:url(https://example.com/x)}</style>${body}</svg>`],
+    ['bad-block-selector.svg', `${open}><style>rect[fill]{fill:#102040}</style>${body}</svg>`],
+    ['bad-prefix.svg', `<svg ${X} xmlns:inkscape="http://www.w3.org/2000/svg" width="9" height="9"><inkscape:filter id="f"/>${body}</svg>`],
+    ['bad-foreign.svg', `${open}><foreignObject width="9" height="9"><div xmlns="http://www.w3.org/1999/xhtml">x</div></foreignObject></svg>`],
+    ['bad-image.svg', `${open}><image href="https://example.com/x.png" width="9" height="9"/></svg>`],
+    ['bad-gradient.svg', `${open}><defs><linearGradient id="g"><stop offset="0"/></linearGradient></defs>${body}</svg>`],
+    ['bad-handler.svg', `${open} onload="alert(1)">${body}</svg>`],
+  ]
+  await page.locator('input[type=file]').setInputFiles(files.map(([name, text]) => ({ name, mimeType: 'image/svg+xml', buffer: Buffer.from(text) })))
+  for (const [name] of files) {
+    const row = page.getByRole('row').filter({ hasText: name })
+    if (name.startsWith('ok-')) await expect(row.getByRole('cell').nth(4), name).not.toContainText('Format not analyzed')
+    else await expect(row.getByRole('cell').nth(4), name).toContainText('Format not analyzed')
+  }
 })

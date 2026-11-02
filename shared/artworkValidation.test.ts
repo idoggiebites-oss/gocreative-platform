@@ -4,7 +4,7 @@ import { validationCsv, validationSummary, wilson } from './artworkValidation'
 import type { ArtworkReport } from './inquiry'
 
 const report = (n: number | null, flags: ArtworkReport['flags'] = []): ArtworkReport => ({ analyzerVersion: ANALYZER_VERSION, estimatedInkColors: n, confidence: 'high', needsManualReview: n === null, flags })
-const row = (actual: number | null, r: ArtworkReport | null, refused: string | null = null) => ({ name: 'a.png', actual, report: r, refused })
+const row = (actual: number | null, r: ArtworkReport | null, refused: string | null = null) => ({ name: 'a.png', actual, report: r, refused, garment: 'light' as const })
 
 test('only jobs with a known count are measured, by the same rule customers would get', () => {
   const s = validationSummary([row(2, report(2)), row(3, report(2)), row(5, report(3)), row(2, report(2, ['gradient'])), row(4, null, 'unsupported'), row(null, report(1))])
@@ -27,7 +27,14 @@ test('one file chosen thirty times is one job', () => {
 })
 
 test('the download can\'t carry a spreadsheet formula, and names no one but the file', () => {
-  const csv = validationCsv([{ name: '=HYPERLINK("x")', actual: 2, report: report(2), refused: null }])
+  const csv = validationCsv([{ name: '=HYPERLINK("x")', actual: 2, report: report(2), refused: null, garment: 'light' }])
   expect(csv).toContain(`"'=HYPERLINK(""x"")"`)
   expect(csv.split('\n')).toHaveLength(2)
+})
+
+test('the same art and job counts differently by garment, and no garment means no count', () => {
+  const white = report(3, ['white_ink'])
+  expect(validationSummary([{ ...row(2, white), garment: 'white' }])).toMatchObject({ counted: 1, exact: 1 })
+  expect(validationSummary([{ ...row(3, white), garment: 'light' }])).toMatchObject({ counted: 1, exact: 1 })
+  for (const garment of ['dark', 'unsure', null, undefined] as const) expect(validationSummary([{ ...row(3, white), garment }])).toMatchObject({ counted: 0, manual: 1 })
 })

@@ -66,7 +66,7 @@ export function inquiryRoutes() {
         orderNumber: await db.orderNumberOf(c.env.DB, row.order_id),
         lines: (payload?.lines ?? []).map((l) => ({
           product: business.storefront.products.find((p) => p.slug === l.product)?.name ?? l.product, method: l.method, quantity: l.quantity, sizes: l.sizes ?? null,
-          color: l.color ?? null, material: l.material ?? null, personalization: l.personalization ?? null, notes: l.notes ?? null,
+          color: l.color ?? null, material: l.material ?? null, personalization: l.personalization ?? null, notes: l.notes ?? null, garment: l.garment ?? null,
           // An id resolves only through this inquiry's own files, so it can't name anyone else's.
           prints: (l.prints ?? []).map((p) => ({ location: printLocationName(p.location), size: p.size ?? null, filename: files.find((f) => f.upload_id === p.artwork)?.filename ?? null })),
         })),

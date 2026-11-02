@@ -1,7 +1,7 @@
 // The order form's data and rules. The server's schema (shared/inquiry.ts) stays the authority: this builds what it
 // expects and gives friendly per-field messages first.
 import { business } from '@shared/business'
-import { PRINT_METHODS, estimatePreviewSchema, inquirySubmitSchema, type ArtworkReport } from '@shared/inquiry'
+import { PRINT_METHODS, estimatePreviewSchema, inquirySubmitSchema, type ArtworkReport, type Garment } from '@shared/inquiry'
 
 export type Product = { slug: string; name: string; hint: string; methods: readonly string[]; sized: boolean }
 export const PRODUCTS: readonly Product[] = business.storefront.products
@@ -16,6 +16,7 @@ export type Item = {
   key: string; product: string; method: string; quantity: string; sizes: Record<string, string>
   color: string; material: string; personalization: string
   prints?: Print[] // absent on a draft saved before this field existed
+  garment?: Garment | ''
 }
 export type Form = {
   items: Item[]; preferMethod: string; description: string; dueDate: string
@@ -86,24 +87,27 @@ export function validateStep(step: number, f: Form): Errors {
 
 const optional = (s: string) => s.trim() || undefined
 
-const lineOf = (i: Item, uploads: ReadonlySet<string>) => ({
+// With one file there is nothing to choose, whether or not the customer touched the list.
+const artworkOf = (p: Print, uploads: ReadonlySet<string>, artwork: readonly string[]) => (uploads.has(p.artwork) ? p.artwork : artwork.length === 1 ? artwork[0] : undefined)
+const lineOf = (i: Item, uploads: ReadonlySet<string>, artwork: readonly string[]) => ({
   product: i.product, method: i.method, quantity: totalQuantity(i),
   sizes: productOf(i)?.sized ? Object.fromEntries(Object.entries(i.sizes).map(([k, v]) => [k, Number(v) || 0]).filter(([, v]) => Number(v) > 0)) : undefined,
   color: optional(i.color), material: optional(i.material), personalization: optional(i.personalization),
   prints: PRINT_METHODS.includes(i.method) && i.prints?.some((p) => p.location)
-    ? i.prints.filter((p) => p.location).map((p) => ({ location: p.location, size: (i.method !== 'embroidery' && p.size) || undefined, artwork: uploads.has(p.artwork) ? p.artwork : undefined }))
+    ? i.prints.filter((p) => p.location).map((p) => ({ location: p.location, size: (i.method !== 'embroidery' && p.size) || undefined, artwork: artworkOf(p, uploads, artwork) }))
     : undefined,
+  garment: PRINT_METHODS.includes(i.method) && i.garment ? i.garment : undefined,
 })
 const someReports = (r: Record<string, ArtworkReport>) => (Object.keys(r).length > 0 ? r : undefined)
 
 /** Asking for a figure sends only the lines and the analysis reports. Null means the form can't be priced yet. */
-export function buildPreview(f: Form, uploads: ReadonlySet<string>, reports: Record<string, ArtworkReport>) {
-  const parsed = estimatePreviewSchema.safeParse({ lines: f.items.map((i) => lineOf(i, uploads)), reports: someReports(reports) })
+export function buildPreview(f: Form, uploads: ReadonlySet<string>, reports: Record<string, ArtworkReport>, artwork: readonly string[] = []) {
+  const parsed = estimatePreviewSchema.safeParse({ lines: f.items.map((i) => lineOf(i, uploads, artwork)), reports: someReports(reports) })
   return parsed.success ? parsed.data : null
 }
 
 /** Exactly what the server's strict schema accepts; nothing else can leave the browser. */
-export function buildPayload(f: Form, uploads: ReadonlySet<string> = new Set(), reports: Record<string, ArtworkReport> = {}) {
+export function buildPayload(f: Form, uploads: ReadonlySet<string> = new Set(), reports: Record<string, ArtworkReport> = {}, artwork: readonly string[] = []) {
   return inquirySubmitSchema.safeParse({
     customerKind: f.forOrganization ? f.customerKind : 'individual',
     organization: f.forOrganization ? optional(f.organization) : undefined,
@@ -114,10 +118,25 @@ export function buildPayload(f: Form, uploads: ReadonlySet<string> = new Set(), 
     dueDate: optional(f.dueDate),
     designHelp: f.designHelp || undefined,
     description: optional(f.description),
-    lines: f.items.map((i) => lineOf(i, uploads)),
+    lines: f.items.map((i) => lineOf(i, uploads, artwork)),
     reports: someReports(reports),
     website: f.website || undefined,
   })
+}
+
+/** What a customer could still tell us for a figure. Only ever advice: leaving these out sends the request to a person, it never stops it. */
+export function estimateNeeds(f: Form, artwork: readonly string[]) {
+  const needs = new Set<string>()
+  for (const i of f.items) {
+    if (i.method !== 'screen' && i.method !== 'dtg') { needs.add('someone to look at it: this kind of work is priced by a person'); continue }
+    const prints = (i.prints ?? []).filter((p) => p.location)
+    if (prints.length === 0) needs.add('where the print goes')
+    if (prints.some((p) => !p.size)) needs.add('the print size')
+    if (artwork.length === 0) needs.add('your artwork')
+    else if (artwork.length > 1 && prints.some((p) => !artwork.includes(p.artwork))) needs.add('which artwork goes where')
+    if (i.garment !== 'white' && i.garment !== 'light') needs.add('a white or light-colored item: dark items need a person to check the underbase')
+  }
+  return [...needs]
 }
 
 /** A date for people to read. Noon keeps it on the same day in every time zone. */

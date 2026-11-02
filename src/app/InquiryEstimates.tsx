@@ -43,7 +43,7 @@ function ReviewDialog({ inquiryId, data, onClose }: { inquiryId: number; data: I
     void data.artworkFiles.reduce(async (prev, f) => [...(await prev), await analyzeStored(f)], Promise.resolve<Analysis[]>([])).then((all) => {
       setAnalyses(all)
       // Start from what the stored file shows, not what a browser reported. Keeping this is not an override; changing it is.
-      setLines((ls) => ls.map((l) => (l.method !== 'screen' ? l : { ...l, decorations: l.decorations.map((d) => (d.fileId === null ? d : { ...d, colors: defensibleColors(all.find((a) => a.fileId === d.fileId)?.report) })) })))
+      setLines((ls) => ls.map((l) => (l.method !== 'screen' ? l : { ...l, decorations: l.decorations.map((d) => (d.fileId === null ? d : { ...d, colors: defensibleColors(all.find((a) => a.fileId === d.fileId)?.report, l.garment) })) })))
     })
   }, [data.artworkFiles])
   const patchLine = (i: number, c: Partial<EstimateSeedLine>) => setLines(lines.map((l, j) => (j === i ? { ...l, ...c } : l)))
@@ -65,7 +65,7 @@ function ReviewDialog({ inquiryId, data, onClose }: { inquiryId: number; data: I
         {data.artworkFiles.length === 0 && <p className={MUTED}>{t.noArtwork}</p>}
         {data.artworkFiles.map((f) => {
           const a = analyses?.find((x) => x.fileId === f.id)
-          const colors = defensibleColors(a?.report)
+          const colors = data.seed.map((l) => defensibleColors(a?.report, l.garment)).find((n) => n !== null) ?? null
           return (
             <div key={f.id}>
               <a className={LINK} href={`/api/app/files/${f.id}`} target="_blank" rel="noopener">{f.filename ?? `#${f.id}`}</a>
@@ -79,6 +79,7 @@ function ReviewDialog({ inquiryId, data, onClose }: { inquiryId: number; data: I
       {lines.map((l, i) => (
         <fieldset key={i} className="flex flex-col gap-2 border-t border-line pt-2" aria-label={`${l.product}, ${l.quantity}`}>
           <legend className="text-[13px] font-semibold">{l.product}, {l.quantity}</legend>
+          <p className={MUTED} data-testid={`garment-${i}`}>{t.garment}: {t.garments[l.garment ?? 'unsure']}. {l.garment === 'white' || l.garment === 'light' ? t.garmentCounted : t.garmentUnderbase}</p>
           <Field label={t.method}>
             <select className={INPUT} value={l.method} onChange={(e) => patchLine(i, { method: e.target.value })}>{METHODS.map((x) => <option key={x} value={x}>{method(x)}</option>)}</select>
           </Field>
@@ -89,7 +90,7 @@ function ReviewDialog({ inquiryId, data, onClose }: { inquiryId: number; data: I
                 <Field label={t.artwork}>
                   <select className={INPUT} value={d.fileId ?? ''} onChange={(e) => {
                     const fileId = e.target.value ? Number(e.target.value) : null
-                    patchDec(i, k, { fileId, colors: fileId === null ? d.colors : defensibleColors(analyses?.find((a) => a.fileId === fileId)?.report) })
+                    patchDec(i, k, { fileId, colors: fileId === null ? d.colors : defensibleColors(analyses?.find((a) => a.fileId === fileId)?.report, l.garment) })
                   }}>
                     <option value="">{t.noFile}</option>
                     {data.artworkFiles.map((f) => <option key={f.id} value={f.id}>{fileName(f.id)}</option>)}

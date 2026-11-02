@@ -1,10 +1,10 @@
 // Measures the color count against real jobs, by the rule customers would get (defensibleColors). It says nothing about rates, limits or margin checks, which can still send a job to a person. Pure: no file ever reaches it.
-import type { ArtworkReport } from './inquiry'
+import type { ArtworkReport, Garment } from './inquiry'
 import { defensibleColors } from './inquiry'
 
 export const MIN_JOBS = 30
 /** `hash` identifies the file's bytes, so choosing one file thirty times can't look like thirty jobs. */
-export type ValidationRow = { name: string; actual: number | null; report: ArtworkReport | null; refused: string | null; hash?: string | null }
+export type ValidationRow = { name: string; actual: number | null; report: ArtworkReport | null; refused: string | null; hash?: string | null; garment?: Garment | null }
 
 /** Wilson 95% interval: with 30 jobs a single percentage hides how little is known. Null with nothing to measure. */
 export function wilson(hits: number, n: number): [number, number] | null {
@@ -27,15 +27,15 @@ export function validationSummary(rows: readonly ValidationRow[]) {
     seen.add(r.hash)
     return true
   })
-  const counted = jobs.filter((r) => defensibleColors(r.report) !== null)
-  const off = (r: ValidationRow) => Math.abs(defensibleColors(r.report)! - r.actual!)
+  const counted = jobs.filter((r) => defensibleColors(r.report, r.garment) !== null)
+  const off = (r: ValidationRow) => Math.abs(defensibleColors(r.report, r.garment)! - r.actual!)
   const exact = counted.filter((r) => off(r) === 0).length
   const notes = new Map<string, { jobs: number; manual: number; wrong: number }>()
   for (const r of jobs) {
     for (const note of r.refused ? [r.refused] : r.report?.flags ?? []) {
       const n = notes.get(note) ?? { jobs: 0, manual: 0, wrong: 0 }
       n.jobs++
-      if (defensibleColors(r.report) === null) n.manual++
+      if (defensibleColors(r.report, r.garment) === null) n.manual++
       else if (off(r) !== 0) n.wrong++
       notes.set(note, n)
     }
@@ -53,6 +53,6 @@ const cell = (v: string | number | null) => {
   return `"${(/^[=+\-@\t\r]/.test(s) ? `'${s}` : s).replace(/"/g, '""')}"`
 }
 export const validationCsv = (rows: readonly ValidationRow[]) => [
-  ['file', 'screens_used', 'analyzer_version', 'count_given', 'estimated_ink_colors', 'confidence', 'notes'].join(','),
-  ...rows.map((r) => [cell(r.name), cell(r.actual), cell(r.report?.analyzerVersion ?? null), cell(defensibleColors(r.report)), cell(r.report?.estimatedInkColors ?? null), cell(r.report?.confidence ?? null), cell((r.refused ? [r.refused] : r.report?.flags ?? []).join(' '))].join(',')),
+  ['file', 'garment', 'screens_used', 'analyzer_version', 'count_given', 'estimated_ink_colors', 'confidence', 'notes'].join(','),
+  ...rows.map((r) => [cell(r.name), cell(r.garment ?? null), cell(r.actual), cell(r.report?.analyzerVersion ?? null), cell(defensibleColors(r.report, r.garment)), cell(r.report?.estimatedInkColors ?? null), cell(r.report?.confidence ?? null), cell((r.refused ? [r.refused] : r.report?.flags ?? []).join(' '))].join(',')),
 ].join('\n')

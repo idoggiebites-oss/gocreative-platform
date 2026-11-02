@@ -3,10 +3,10 @@ import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { Check } from 'lucide-react'
 import { Link, useNavigate, useSearchParams } from 'react-router'
 import { business } from '@shared/business'
-import type { ArtworkReport, CustomerEstimate } from '@shared/inquiry'
+import { PRINT_METHODS, type ArtworkReport, type CustomerEstimate } from '@shared/inquiry'
 import { EstimateNotice } from './EstimateNotice'
 import { PrintDetails } from './PrintDetails'
-import { EMPTY_FORM, MAX_ITEMS, METHOD_NAMES, PRODUCTS, SIZES, buildPayload, buildPreview, clearDraft, describeItem, duplicateItem, itemTitle, loadDraft, methodsFor, patchItem, productOf, readableDate, saveDraft, sizeTotal, toggleProduct, validateStep, type Errors, type Form, type Item } from './orderForm'
+import { EMPTY_FORM, MAX_ITEMS, METHOD_NAMES, PRODUCTS, SIZES, buildPayload, buildPreview, clearDraft, estimateNeeds, describeItem, duplicateItem, itemTitle, loadDraft, methodsFor, patchItem, productOf, readableDate, saveDraft, sizeTotal, toggleProduct, validateStep, type Errors, type Form, type Item } from './orderForm'
 import { PublicError, SESSION_ENDED, fetchStatus, openSession, previewEstimate, submitInquiry, type Status } from './publicApi'
 import type { SentState } from './SentPage'
 import { Contact, usePageTitle } from './StoreLayout'
@@ -160,7 +160,7 @@ function ReviewRow({ title, onEdit, children }: { title: string; onEdit: () => v
   )
 }
 
-function DetailsStep({ f, patch, errors, focus, files, go, estimate }: { f: Form; patch: (c: Partial<Form>) => void; errors: Errors; focus: boolean; files: string[]; go: (n: number) => void; estimate: CustomerEstimate | null }) {
+function DetailsStep({ f, patch, errors, focus, files, go, estimate, needs }: { f: Form; patch: (c: Partial<Form>) => void; errors: Errors; focus: boolean; files: string[]; go: (n: number) => void; estimate: CustomerEstimate | null; needs: string[] }) {
   return (
     <>
       <StepHeading focus={focus}>How can we reach you?</StepHeading>
@@ -217,8 +217,18 @@ function DetailsStep({ f, patch, errors, focus, files, go, estimate }: { f: Form
           {files.length > 0 ? <ul className="s-review-list">{files.map((n, i) => <li key={`${n}-${i}`}>{n}</li>)}</ul> : <p>No files attached. That is fine, artwork is optional.</p>}
           {f.designHelp && <p>You asked for help with the design.</p>}
         </ReviewRow>
+        {f.items.some((i) => PRINT_METHODS.includes(i.method)) && (
+          <ReviewRow title="Where it goes" onEdit={() => go(3)}>
+            <ul className="s-review-list">
+              {f.items.filter((i) => PRINT_METHODS.includes(i.method)).map((i) => {
+                const prints = (i.prints ?? []).filter((p) => p.location)
+                return <li key={i.key}>{productOf(i)?.name}: {prints.length > 0 ? prints.map((p) => business.storefront.printLocations[p.location as keyof typeof business.storefront.printLocations]).join(', ') : 'not sure yet'}. {i.garment === 'white' ? 'White item.' : i.garment === 'light' ? 'Light item.' : i.garment === 'dark' ? 'Dark item.' : 'Item color not sure yet.'}</li>
+              })}
+            </ul>
+          </ReviewRow>
+        )}
       </section>
-      <EstimateNotice estimate={estimate} />
+      <EstimateNotice estimate={estimate} needs={needs} />
       <p className="s-meta">By sending this, you agree that we use these details to reply and quote. See our <Link to="/privacy" target="_blank" rel="noopener">privacy page (opens in a new tab)</Link>.</p>
     </>
   )
@@ -317,9 +327,10 @@ function OrderForm({ status, onClosed }: { status: Status; onClosed: () => void 
 
   const held = uploads.rows.filter((r) => r.state === 'done' && r.id)
   const heldIds = new Set(held.map((r) => r.id!))
+  const artworkIds = held.filter((r) => r.purpose === 'artwork').map((r) => r.id!)
   const reports: Record<string, ArtworkReport> = Object.fromEntries(held.flatMap((r) => (r.report && r.purpose === 'artwork' ? [[r.id!, r.report]] : [])))
   // Nothing to price without artwork, so a request with no files never spends a Turnstile check or a call on it. Off means off: no request at all.
-  const previewBody = step === STEP_COUNT && status.estimates && held.some((r) => r.purpose === 'artwork') ? JSON.stringify(buildPreview(form, heldIds, reports)) : null
+  const previewBody = step === STEP_COUNT && status.estimates && held.some((r) => r.purpose === 'artwork') ? JSON.stringify(buildPreview(form, heldIds, reports, artworkIds)) : null
   const [estimate, setEstimate] = useState<CustomerEstimate | null>(MANUAL)
   const shown = useRef<number | null>(null)
   useEffect(() => {
@@ -360,7 +371,7 @@ function OrderForm({ status, onClosed }: { status: Status; onClosed: () => void 
     if (Object.keys(e).length > 0) return failErrors(e)
     if (uploading) return setFormError('Your files are still uploading. Please wait a moment.')
     if (failed) { go(3); return setFormError('Some files did not upload. Retry or remove them to continue.') }
-    const parsed = buildPayload(form, heldIds, reports)
+    const parsed = buildPayload(form, heldIds, reports, artworkIds)
     if (!parsed.success) return setFormError('Something in the form needs another look. Please go back and check each step.')
     setSending(true)
     setFormError('')
@@ -427,11 +438,10 @@ function OrderForm({ status, onClosed }: { status: Status; onClosed: () => void 
             {step === 3 && (
               <>
                 <StepHeading focus={moved}>Send us your artwork.</StepHeading>
-                <UploadStep form={form} set={patch} uploads={uploads} />
-                <PrintDetails form={form} set={set} rows={uploads.rows} />
+                <UploadStep form={form} set={patch} uploads={uploads}><PrintDetails form={form} set={set} rows={uploads.rows} /></UploadStep>
               </>
             )}
-            {step === 4 && <DetailsStep f={form} patch={patch} errors={errors} focus={moved} files={uploads.rows.map((r) => r.name)} go={go} estimate={estimate} />}
+            {step === 4 && <DetailsStep f={form} patch={patch} errors={errors} focus={moved} files={uploads.rows.map((r) => r.name)} go={go} estimate={estimate} needs={status.estimates ? estimateNeeds(form, artworkIds) : []} />}
           </StepPanel>
           <div id="turnstile-slot" className="s-turnstile" />
           {formError && <p role="alert" className="s-error-block">{formError}</p>}

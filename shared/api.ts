@@ -577,7 +577,7 @@ export type InquiryDetailResponse = {
   /** What the customer asked for. A request, never a commitment. */
   dueDate: string | null
   declineReason: string | null; convertedAt: string | null; orderNumber: string | null
-  lines: { product: string; method: string; quantity: number; sizes: Record<string, number> | null; color: string | null; material: string | null; personalization: string | null; notes: string | null; prints: { location: string; size: string | null; filename: string | null }[] }[]
+  lines: { product: string; method: string; quantity: number; sizes: Record<string, number> | null; color: string | null; material: string | null; personalization: string | null; notes: string | null; garment: string | null; prints: { location: string; size: string | null; filename: string | null }[] }[]
   description: string | null; designHelp: boolean; convertible: boolean
   files: { id: number; kind: 'artwork' | 'po'; filename: string | null; mime: string; bytes: number }[]
   matches: { id: number; name: string; kind: CustomerKind; contacts: { id: number; name: string; email: string | null; phone: string | null }[] }[]
@@ -585,7 +585,7 @@ export type InquiryDetailResponse = {
 
 // ---- preliminary estimates: never a quote ----
 export type EstimateDecoration = { location: string | null; size: 'small' | 'medium' | 'large' | null; colors: number | null; complexity: 'small' | 'medium' | 'large' | null; machineMinutes: number | null; fileId: number | null }
-export type EstimateSeedLine = { product: string; method: string; quantity: number; decorations: EstimateDecoration[] }
+export type EstimateSeedLine = { product: string; method: string; quantity: number; garment: 'white' | 'light' | 'dark' | 'unsure' | null; decorations: EstimateDecoration[] }
 export type EstimateView = {
   id: number; status: 'available' | 'assumption_based' | 'manual_review_required'; factsSource: 'none' | 'customer_reported' | 'staff_reviewed'
   pricingVersionId: number | null; createdAt: string; createdBy: string | null

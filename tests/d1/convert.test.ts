@@ -141,8 +141,8 @@ test('on real D1: the estimate quota holds under parallel calls, submit stores t
   const up = await fetch(`${base()}/public/submissions/files`, { method: 'POST', body: PNG, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'image/png', 'X-File-Purpose': 'artwork', 'Content-Length': String(PNG.byteLength) } })
   expect(up.status).toBe(201)
   const fileUpload = ((await up.json()) as { id: string }).id
-  const report = { analyzerVersion: 1, estimatedInkColors: 2, confidence: 'high', needsManualReview: false, flags: [] }
-  const body = { lines: [{ product: 'tshirts', method: 'screen', quantity: 10, sizes: { M: 10 }, prints: [{ location: 'front', size: 'medium', artwork: fileUpload }] }], reports: { [fileUpload]: report } }
+  const report = { analyzerVersion: 2, estimatedInkColors: 2, confidence: 'high', needsManualReview: false, flags: [] }
+  const body = { lines: [{ product: 'tshirts', method: 'screen', quantity: 10, sizes: { M: 10 }, garment: 'light', prints: [{ location: 'front', size: 'medium', artwork: fileUpload }] }], reports: { [fileUpload]: report } }
   const calls = await Promise.all(Array.from({ length: 25 }, () => fetch(`${base()}/public/estimate`, j('POST', body, token))))
   expect(calls.filter((r) => r.status === 200)).toHaveLength(20)
   expect(calls.filter((r) => r.status === 429)).toHaveLength(5)

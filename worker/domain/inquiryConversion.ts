@@ -15,6 +15,7 @@ const storedLine = z.looseObject({
   quantity: z.number().int().min(1).max(1_000_000),
   sizes: z.record(z.string().max(20), z.number().int().min(0).max(1_000_000)).nullish().transform((v) => v ?? undefined),
   color: storedText, material: storedText, personalization: storedText, notes: storedText, prints: storedPrints,
+  garment: z.string().max(20).nullish().catch(null),
 })
 const payloadSchema = z.looseObject({ lines: z.array(storedLine).min(1).max(200), designHelp: z.boolean().nullish(), description: z.string().nullish() })
 export type InquiryPayload = z.infer<typeof payloadSchema>
@@ -40,7 +41,8 @@ const DESCRIPTION_MAX = 500
 const COLOR_MAX = 100
 const NOTES_MAX = 2000
 // Says on the order whose word it is. A count a browser reported is deliberately left out: only staff-reviewed facts can put an ink count on an order.
-const printsText = (l: InquiryPayload['lines'][number]) => (l.prints?.length ? `Customer request, not verified: ${l.prints.map((p) => [printLocationName(p.location), p.size].filter(Boolean).join(', ')).join('; ')}. Ink colors not verified.` : 'Customer request, not verified.')
+const garmentNote = (g: unknown) => (g === 'dark' ? ' Dark item: underbase to confirm.' : g === 'white' || g === 'light' ? ` ${g === 'white' ? 'White' : 'Light'} item.` : g === 'unsure' ? ' Item color not given.' : '')
+const printsText = (l: InquiryPayload['lines'][number]) => (l.prints?.length ? `Customer request, not verified: ${l.prints.map((p) => [printLocationName(p.location), p.size].filter(Boolean).join(', ')).join('; ')}. Ink colors not verified.${garmentNote(l.garment)}` : `Customer request, not verified.${garmentNote(l.garment)}`)
 // A customer's own words can't claim a staff check, whatever they typed: only the spec line can say it.
 const details = (l: InquiryPayload['lines'][number]) => [typeof l.spec === 'string' ? l.spec : printsText(l), ...[l.personalization && `Personalization: ${l.personalization}`, l.material && `Material or item: ${l.material}`, l.notes].map((x) => x && neutralized(x))].filter(Boolean).join('\n')
 const knownMethod = (m: string): Method | null => METHODS.find((x) => x === m) ?? null
@@ -77,7 +79,7 @@ export function withVerifiedFacts(p: InquiryPayload, reviewed: { lines: unknown;
   const facts = reviewedLines.safeParse(reviewed?.lines)
   // A review that doesn't cover every line, or can't be read, verifies nothing.
   if (!reviewed || !facts.success || facts.data.length !== p.lines.length) return p
-  return { ...p, lines: p.lines.map((l, i) => ({ ...l, method: facts.data[i].method, spec: reviewedText(facts.data[i], `${reviewed.who}, ${reviewed.on}`) })) }
+  return { ...p, lines: p.lines.map((l, i) => ({ ...l, method: facts.data[i].method, spec: reviewedText(facts.data[i], `${reviewed.who}, ${reviewed.on}`) + garmentNote(l.garment) })) }
 }
 
 const fits = (text: string, max: number) => (text.length <= max ? text : `${text.slice(0, max - 28)}… (full text in order note)`)

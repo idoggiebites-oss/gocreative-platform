@@ -1,4 +1,4 @@
-import { useState, type DragEvent } from 'react'
+import { useState, type DragEvent, type ReactNode } from 'react'
 import { FileText, RotateCcw, Upload, X } from 'lucide-react'
 import type { Form } from './orderForm'
 import type { Row, useUploads } from './useUploads'
@@ -33,7 +33,7 @@ function FileRow({ row, uploads }: { row: Row; uploads: ReturnType<typeof useUpl
   )
 }
 
-export function UploadStep({ form, set, uploads }: { form: Form; set: (c: Partial<Form>) => void; uploads: ReturnType<typeof useUploads> }) {
+export function UploadStep({ form, set, uploads, children }: { form: Form; set: (c: Partial<Form>) => void; uploads: ReturnType<typeof useUploads>; children?: ReactNode }) {
   const [dragging, setDragging] = useState(false)
   const pick = (purpose: 'artwork' | 'po') => (e: React.ChangeEvent<HTMLInputElement>) => {
     uploads.add([...(e.target.files ?? [])], purpose)
@@ -74,6 +74,8 @@ export function UploadStep({ form, set, uploads }: { form: Form; set: (c: Partia
         </figure>
       )}
       {visible.length > 0 && <ul aria-label="Your files" className="s-files">{visible.map((r) => <FileRow key={r.key} row={r} uploads={uploads} />)}</ul>}
+
+      {children}
 
       <label className="s-check"><input type="checkbox" checked={form.designHelp} onChange={(e) => set({ designHelp: e.target.checked })} /><span><strong>I need help with the design.</strong></span></label>
 
