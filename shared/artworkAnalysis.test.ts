@@ -218,10 +218,11 @@ describe('what a file can and cannot say about background, white and shades', ()
   const NAVY = [16, 11, 47, 255], RED = [204, 0, 0, 255], WHITE = [255, 255, 255, 255], CLEAR = [0, 0, 0, 0]
 
   test('with real transparency no color is background, even one running along the border', () => {
-    // A navy frame around red, with see-through corners. Before, the frame was taken for background and one ink vanished.
-    const a = analyzeArtwork(paint(200, 200, (x, y) => (x < 20 && y < 20 ? CLEAR : x < 25 || y < 25 || x >= 175 || y >= 175 ? NAVY : RED)))
+    // Navy art touching one side of a see-through frame, as logos do. Before, the navy was taken for background and an ink vanished.
+    const a = analyzeArtwork(paint(200, 200, (x, y) => (x < 80 ? NAVY : x < 160 && y > 40 && y < 160 ? RED : CLEAR)))
     expect(a.estimatedInkColors).toBe(2)
     expect(a.flags).not.toContain('likely_background')
+    expect(a.flags).not.toContain('uncertain_background')
   })
   test('white on transparency is flagged as counted white', () => {
     const a = analyzeArtwork(paint(200, 200, (x, y) => (x < 20 || y < 20 ? CLEAR : x < 100 ? NAVY : WHITE)))
@@ -260,6 +261,32 @@ describe('what a file can and cannot say about background, white and shades', ()
     expect(edged.flags).not.toContain('partly_transparent')
     const glassy = analyzeArtwork(paint(200, 200, (x) => (x < 100 ? NAVY : [204, 0, 0, 128])))
     expect(glassy.flags).toContain('partly_transparent')
+  })
+  test('thin translucent strokes and a small translucent patch can\'t vanish from a confident count', () => {
+    const SOLID = [204, 0, 0, 255], GLASS = [0, 0, 204, 128]
+    const inSolid = (x: number, y: number) => x >= 50 && x < 150 && y >= 50 && y < 150
+    const strokes = analyzeArtwork(paint(200, 200, (x, y) => (inSolid(x, y) ? SOLID : x % 5 < 2 ? GLASS : CLEAR)))
+    expect(strokes.flags).toContain('partly_transparent')
+    expect(defensibleColors(reportOf(strokes), 'light')).toBeNull()
+    const patch = analyzeArtwork(paint(200, 200, (x, y) => (inSolid(x, y) ? SOLID : x < 20 && y < 20 ? GLASS : CLEAR)))
+    expect(patch.flags).toContain('partly_transparent')
+  })
+  test('a small white detail inside art on white is not silently lost', () => {
+    const a = analyzeArtwork(paint(200, 200, (x, y) => (x >= 90 && x < 104 && y >= 90 && y < 104 ? WHITE : x >= 50 && x < 150 && y >= 50 && y < 150 ? RED : WHITE)))
+    expect(a.flags).toContain('background_inside')
+    expect(defensibleColors(reportOf(a), 'light')).toBeNull()
+    expect(defensibleColors(reportOf(a), 'white')).toBe(1)
+  })
+  test('one see-through pixel more or less can\'t flip a count: a cut corner on an opaque picture goes to a person', () => {
+    for (const cut of [1, 199, 200, 400]) {
+      const a = analyzeArtwork(paint(200, 200, (x, y) => (y * 200 + x < cut ? CLEAR : x >= 50 && x < 150 && y >= 50 && y < 150 ? RED : WHITE)))
+      expect(a.flags, String(cut)).toContain('uncertain_background')
+      expect(defensibleColors(reportOf(a), 'light'), String(cut)).toBeNull()
+    }
+  })
+  test('the four-ink limit holds with the flags removed', () => {
+    expect(defensibleColors({ analyzerVersion: ANALYZER_VERSION, estimatedInkColors: 5, confidence: 'high', needsManualReview: false, flags: [] }, 'light')).toBeNull()
+    expect(defensibleColors({ analyzerVersion: ANALYZER_VERSION, estimatedInkColors: 4, confidence: 'high', needsManualReview: false, flags: [] }, 'light')).toBe(4)
   })
   test('garment rules: dark or unknown never has a count, whatever the art; white-only art on a white item has none', () => {
     const r = { analyzerVersion: ANALYZER_VERSION, estimatedInkColors: 2, confidence: 'high' as const, needsManualReview: false, flags: [] }

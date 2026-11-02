@@ -19,15 +19,16 @@ export type AnalysisSettings = {
   unexplainedShare: number // this share of opaque pixels unexplained means thin artwork, so no count can be defended
   semiManualShare: number // this share of visible pixels partly transparent means no solid inks can be assumed
   backgroundEdgeShare: number // this share of the border in one color suggests a background
-  realTransparencyShare: number // this share of pixels fully see-through means the file already has no background, so no color can be one
+  translucentShare: number // this share of visible pixels translucent, away from any solid ink, means the art has no solid inks to count there
+  enclosedMinPixels: number // this many flat pixels of the background color shut inside the art may be ink
   maxConfidentInks: number // above this, a separation is complicated enough that a person decides
   similarShadeDeltaE: number // two inks closer than this may be shading of one ink, not two screens
 }
 export const ANALYSIS_DEFAULTS: AnalysisSettings = {
-  maxPixels: 4_000_000, alphaOpaque: 255, flatTolerance: 30, mergeDeltaE: 14, minCoverage: 0.004, minFlatShare: 0.4, maxSpotColors: 8, gradientBinShare: 6, gradientMinBins: 48, softBoundaryShare: 0.002, rampCellDeltaE: 5, edgeColorDistance: 45, unexplainedShare: 0.002, semiManualShare: 0.25, backgroundEdgeShare: 0.6, realTransparencyShare: 0.005, maxConfidentInks: 4, similarShadeDeltaE: 25,
+  maxPixels: 4_000_000, alphaOpaque: 255, flatTolerance: 30, mergeDeltaE: 14, minCoverage: 0.004, minFlatShare: 0.4, maxSpotColors: 8, gradientBinShare: 6, gradientMinBins: 48, softBoundaryShare: 0.002, rampCellDeltaE: 5, edgeColorDistance: 45, unexplainedShare: 0.002, semiManualShare: 0.25, backgroundEdgeShare: 0.6, translucentShare: 0.002, enclosedMinPixels: 16, maxConfidentInks: 4, similarShadeDeltaE: 25,
 }
 
-export const ANALYSIS_FLAGS = ['gradient', 'photographic', 'too_little_flat_color', 'too_many_colors', 'small_details_dropped', 'likely_background', 'partly_transparent', 'fully_transparent', 'too_large', 'too_small', 'thin_details', 'white_ink', 'white_background', 'background_inside', 'similar_shades', 'complex_separation'] as const
+export const ANALYSIS_FLAGS = ['gradient', 'photographic', 'too_little_flat_color', 'too_many_colors', 'small_details_dropped', 'likely_background', 'partly_transparent', 'fully_transparent', 'too_large', 'too_small', 'thin_details', 'white_ink', 'white_background', 'background_inside', 'similar_shades', 'complex_separation', 'uncertain_background'] as const
 export type AnalysisFlag = (typeof ANALYSIS_FLAGS)[number]
 export type AnalysisColor = { hex: string; coverage: number; likelyBackground: boolean }
 export type ArtworkAnalysis = {
@@ -84,9 +85,12 @@ export function analyzeArtwork(px: Pixels, settings: AnalysisSettings = ANALYSIS
       if (a < settings.alphaOpaque) {
         if (a > 15) {
           semi++
-          // A soft edge is a pixel or two wide. Only partly see-through pixels surrounded by the same are really translucent artwork.
-          const inside = (nx: number, ny: number) => { if (nx < 0 || ny < 0 || nx >= w || ny >= h) return false; const v = data[(ny * w + nx) * 4 + 3]; return v > 15 && v < settings.alphaOpaque }
-          if (inside(x + 1, y) && inside(x - 1, y) && inside(x, y + 1) && inside(x, y - 1)) translucent++
+          // A soft edge sits right beside solid ink. Anything partly see-through with no solid ink next to it is translucent artwork, however thin: narrowness proves nothing.
+          let beside = false
+          for (let ny = Math.max(0, y - 2); ny <= Math.min(h - 1, y + 2) && !beside; ny++) {
+            for (let nx = Math.max(0, x - 2); nx <= Math.min(w - 1, x + 2); nx++) if (data[(ny * w + nx) * 4 + 3] >= settings.alphaOpaque) { beside = true; break }
+          }
+          if (!beside) translucent++
         }
         continue
       }
@@ -113,7 +117,7 @@ export function analyzeArtwork(px: Pixels, settings: AnalysisSettings = ANALYSIS
   if (opaque === 0) return semi > 0 ? refuse('partly_transparent') : refuse('fully_transparent')
 
   const flags: AnalysisFlag[] = []
-  if (translucent / total > 0.02) flags.push('partly_transparent')
+  if (translucent / (opaque + semi) > settings.translucentShare) flags.push('partly_transparent')
   const flatShare = flat / opaque
   // Many distinct shades spread across the flat pixels mean a smooth ramp: neighbors match, yet there is no small set of inks.
   const binsPerK = flat > 0 ? (bins.size / flat) * 1000 : 0
@@ -244,8 +248,11 @@ export function analyzeArtwork(px: Pixels, settings: AnalysisSettings = ANALYSIS
 
   const borderTotal = kept.reduce((n, c) => n + c.border, 0)
   // A file with real transparency already said what its background is: nothing, so every color in it is meant to be there.
+  // Unless one solid color still runs round most of the frame: a cut corner on an opaque picture doesn't settle what the rest is, so that goes to a person.
   const seeThrough = total - opaque - semi
-  const background = borderTotal > 0 && seeThrough / total < settings.realTransparencyShare ? kept.find((c) => c.border / borderTotal >= settings.backgroundEdgeShare) : undefined
+  const framePixels = w * 2 + h * 2 - 4
+  if (seeThrough > 0 && kept.some((c) => c.border / framePixels >= settings.backgroundEdgeShare)) flags.push('uncertain_background')
+  const background = borderTotal > 0 && seeThrough === 0 ? kept.find((c) => c.border / borderTotal >= settings.backgroundEdgeShare) : undefined
   const palette = kept.map((c) => ({ hex: hexOf(c.r / c.n, c.g / c.n, c.b / c.n), coverage: Math.round((c.n / flat) * 10000) / 10000, likelyBackground: c === background && kept.length > 1 }))
   const hasBackground = palette.some((c) => c.likelyBackground)
   if (hasBackground) flags.push('likely_background')
@@ -273,7 +280,7 @@ export function analyzeArtwork(px: Pixels, settings: AnalysisSettings = ANALYSIS
     }
     let enclosed = 0
     for (let p = 0; p < total; p++) if (!seen[p] && inBackground.has(flatKey[p])) enclosed++
-    if (enclosed / flat >= settings.minCoverage) flags.push('background_inside')
+    if (enclosed >= settings.enclosedMinPixels) flags.push('background_inside')
   }
   for (let a = 0; a < printed.length && !flags.includes('similar_shades'); a++) {
     for (let b = a + 1; b < printed.length; b++) if (deltaE(center(printed[a]), center(printed[b])) < settings.similarShadeDeltaE) { flags.push('similar_shades'); break }
@@ -282,7 +289,7 @@ export function analyzeArtwork(px: Pixels, settings: AnalysisSettings = ANALYSIS
 
   const tooMany = flags.includes('too_many_colors')
   const mostlySemi = translucent / (opaque + semi) >= settings.semiManualShare
-  const unsure = tooMany || thin || mostlySemi || flags.includes('complex_separation') || flags.includes('similar_shades')
+  const unsure = tooMany || thin || mostlySemi || flags.includes('complex_separation') || flags.includes('similar_shades') || flags.includes('uncertain_background')
   const confidence = unsure ? 'low' : flatShare >= 0.7 && !flags.includes('small_details_dropped') && !flags.includes('partly_transparent') ? 'high' : 'medium'
   return { ...base, detectedColors: palette.length, estimatedInkColors: unsure || inks < 1 ? null : inks, confidence, needsManualReview: unsure || inks < 1, flags, palette }
 }

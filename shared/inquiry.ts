@@ -1,7 +1,7 @@
 // The public inquiry form's fields: an allowlist shared by the form and POST /api/public/submissions/submit. `.strict()`
 // refuses anything else, so a browser can't send a customer id, status, price or note.
 import { z } from 'zod'
-import { ANALYSIS_FLAGS, ANALYZER_VERSION } from './artworkAnalysis'
+import { ANALYSIS_DEFAULTS, ANALYSIS_FLAGS, ANALYZER_VERSION } from './artworkAnalysis'
 import { business } from './business'
 import { CUSTOMER_KINDS } from './enums'
 
@@ -35,7 +35,7 @@ const reportsSchema = z.record(z.uuid(), artworkReportSchema).refine((r) => Obje
 export const GARMENTS = ['white', 'light', 'dark', 'unsure'] as const
 export type Garment = (typeof GARMENTS)[number]
 // None of these leaves a count anyone can defend, so a price built on one would be invented. They go to a person.
-const NO_COUNT: readonly string[] = ['gradient', 'photographic', 'too_little_flat_color', 'too_many_colors', 'partly_transparent', 'fully_transparent', 'too_large', 'too_small', 'thin_details', 'small_details_dropped', 'similar_shades', 'complex_separation']
+const NO_COUNT: readonly string[] = ['gradient', 'photographic', 'too_little_flat_color', 'too_many_colors', 'partly_transparent', 'fully_transparent', 'too_large', 'too_small', 'thin_details', 'small_details_dropped', 'similar_shades', 'complex_separation', 'uncertain_background']
 /**
  * The ink count a report supports on this garment, or null when it supports none. An estimate from pixels, never a verified separation or a screen count.
  * A dark or unknown garment has no count: an underbase depends on the inks and the press, and only a person can decide it.
@@ -43,6 +43,7 @@ const NO_COUNT: readonly string[] = ['gradient', 'photographic', 'too_little_fla
 export function defensibleColors(r: ArtworkReport | null | undefined, garment: Garment | null | undefined) {
   if (!r || r.analyzerVersion !== ANALYZER_VERSION || r.needsManualReview || r.confidence === 'low' || r.estimatedInkColors === null || r.estimatedInkColors < 1) return null
   if (r.flags.some((f) => NO_COUNT.includes(f))) return null
+  if (r.estimatedInkColors > ANALYSIS_DEFAULTS.maxConfidentInks) return null // a limit of ours, so it doesn't rely on a flag a browser could leave out
   if (garment !== 'white' && garment !== 'light') return null
   // A colored background may be part of the design, and there is no telling. Only white can be assumed away.
   if (r.flags.includes('likely_background') && !r.flags.includes('white_background')) return null
