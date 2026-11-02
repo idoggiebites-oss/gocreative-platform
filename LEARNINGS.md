@@ -138,3 +138,7 @@ Editing `reasonHint` by regex overwrote the hint on Cancel order and replace PO 
 
 `withScreen(configWithoutFee)` spreads over a config that has the fee, so the "blank fee" test never blanked it. Rule: pass the key explicitly as undefined. And run the target test before launching the gate, as the earlier learning already says.
 
+### 2026-11-02 — A screenshot of a key page captures the secret too
+
+Cloudflare's new-widget page shows the secret beside the site key, and a full screenshot put it in the session. Rotated at once. Rule: on pages that can show secrets, use a zoom on the exact public field or an element search, never a full screenshot, and have a person run `wrangler secret put`.
+
