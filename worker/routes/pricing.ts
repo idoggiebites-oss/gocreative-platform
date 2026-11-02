@@ -4,16 +4,13 @@ import { z } from 'zod'
 import type { ApiErrorCode } from '../../shared/api'
 import { requireRole, type AppEnv } from '../auth'
 import * as db from '../db/pricing'
-import { calculateEstimate, customerView, estimateRequestSchema, pricingConfigSchema, type PricingConfig } from '../domain/pricing/engine'
+import { calculateEstimate, customerView, estimateRequestSchema, parseConfig, pricingConfigSchema } from '../domain/pricing/engine'
 
 const fail = (c: Context, status: 400 | 404 | 409, code: ApiErrorCode, error: string) => c.json({ error, code }, status)
 const json = (c: Context) => c.req.json().catch(() => null)
 const invalid = (c: Context) => fail(c, 400, 'pricing_invalid', 'Pricing values are not valid')
 const changed = (c: Context) => fail(c, 409, 'pricing_changed', 'Prices changed, reload and retry')
-const parseStored = (raw: string): PricingConfig | null => {
-  const p = pricingConfigSchema.safeParse(JSON.parse(raw))
-  return p.success ? p.data : null
-}
+const parseStored = parseConfig
 const hash = z.string().regex(/^[0-9a-f]{64}$/)
 const view = (r: ReturnType<typeof calculateEstimate>) => ({
   ...customerView(r), status: r.status, reasons: r.reasons, costCents: r.status === 'manual_review_required' ? null : r.internal.costCents, marginBps: r.internal.marginBps,

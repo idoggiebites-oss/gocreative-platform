@@ -24,7 +24,7 @@ beforeAll(async () => {
     name: 'gocreative-convert-test', main: resolve('worker/index.ts'), compatibility_date: '2026-10-01',
     d1_databases: [{ binding: 'DB', database_name: 'gocreative', database_id: 'local-test', migrations_dir: resolve('migrations') }],
     r2_buckets: [{ binding: 'FILES', bucket_name: 'gocreative-files' }],
-    vars: { IP_HASH_SALT: 'salt', DEV_TURNSTILE_PASS: '1', DEV_AUTH_EMAIL: 'owner1@example.com' },
+    vars: { IP_HASH_SALT: 'salt', DEV_TURNSTILE_PASS: '1', DEV_AUTH_EMAIL: 'owner1@example.com', DEV_CUSTOMER_ESTIMATES: '1' },
   }))
   wrangler('migrations', 'apply', 'gocreative')
   wrangler('execute', 'gocreative', '--file', resolve('scripts/seed.sql'))
@@ -127,3 +127,34 @@ test('pricing on real D1: publishDraft itself, in parallel, with stale guards; o
     await proxy.dispose()
   }
 }, 90_000)
+
+test('on real D1: the estimate quota holds under parallel calls, submit stores the server\'s figure, and parallel reviews write one row', async () => {
+  const j = (method: string, body: unknown, token?: string) => ({ method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(body) })
+  const config = { productCostCents: { tshirts: 300 }, services: { screen: { adjustmentBps: 0, pricing: { mode: 'markup', rateBps: 10000 }, colorCostTiers: [{ minQty: 1, costCents: 100 }] } } }
+  const state = async () => (await (await fetch(`${base()}/app/pricing`)).json()) as { active: { id: number } | null; draft: { id: number; hash: string } | null }
+  const was = await state()
+  expect((await fetch(`${base()}/app/pricing/draft`, j('PUT', { config, expectedHash: was.draft?.hash ?? null }))).status).toBe(200)
+  const draft = (await state()).draft!
+  expect((await fetch(`${base()}/app/pricing/publish`, j('POST', { draftId: draft.id, draftHash: draft.hash, expectedActiveId: was.active?.id ?? null }))).status).toBe(200)
+
+  const token = plant('estimates-e3')
+  const up = await fetch(`${base()}/public/submissions/files`, { method: 'POST', body: PNG, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'image/png', 'X-File-Purpose': 'artwork', 'Content-Length': String(PNG.byteLength) } })
+  expect(up.status).toBe(201)
+  const fileUpload = ((await up.json()) as { id: string }).id
+  const report = { analyzerVersion: 1, estimatedInkColors: 2, confidence: 'high', needsManualReview: false, flags: [] }
+  const body = { lines: [{ product: 'tshirts', method: 'screen', quantity: 10, sizes: { M: 10 }, prints: [{ location: 'front', artwork: fileUpload }] }], reports: { [fileUpload]: report } }
+  const calls = await Promise.all(Array.from({ length: 25 }, () => fetch(`${base()}/public/estimate`, j('POST', body, token))))
+  expect(calls.filter((r) => r.status === 200)).toHaveLength(20)
+  expect(calls.filter((r) => r.status === 429)).toHaveLength(5)
+
+  const sent = await fetch(`${base()}/public/submissions/submit`, j('POST', { customerKind: 'individual', contactName: 'Pat', contactPhone: '555-010-0000', ...body }, token))
+  expect(sent.status).toBe(201)
+  expect(((await sent.json()) as { estimate: { totalCents: number } }).estimate.totalCents).toBe(10000)
+  const inquiry = Number(sql("SELECT id FROM inquiries WHERE submission_id = 'estimates-e3'")[0].id)
+  const seen = (await (await fetch(`${base()}/app/inquiries/${inquiry}/estimates`)).json()) as { estimates: { id: number }[]; seed: { decorations: object[] }[]; artworkFiles: { id: number }[] }
+  const review = { basedOn: seen.estimates[0].id, verified: true, reason: 'Counted by hand', reanalysis: [{ fileId: seen.artworkFiles[0].id, report, refused: null }], lines: [{ method: 'screen', decorations: [{ ...seen.seed[0].decorations[0], colors: 3 }] }] }
+  const raced = await Promise.all([1, 2, 3].map(() => fetch(`${base()}/app/inquiries/${inquiry}/estimates/review`, j('POST', review))))
+  expect(raced.map((r) => r.status).sort()).toEqual([201, 409, 409])
+  expect(sql(`SELECT COUNT(*) AS n FROM inquiry_estimates WHERE inquiry_id = ${inquiry}`)[0].n).toBe(2)
+  expect(sql(`SELECT o.field, o.original, o.replacement FROM estimate_overrides o JOIN inquiry_estimates e ON e.id = o.estimate_id WHERE e.inquiry_id = ${inquiry}`)).toEqual([{ field: 'line1.print1.colors', original: '2', replacement: '3' }])
+}, 120_000)

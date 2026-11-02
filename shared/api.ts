@@ -1,5 +1,6 @@
 // Request/response types for /api/app order screens. Dates are returned as stored
 // (due_date YYYY-MM-DD, timestamps ISO UTC text); money is integer cents.
+import type { ArtworkReport } from './inquiry'
 import type { InquiryStatus,
   ArtworkApproval, AuthorizationMethod, CheckStatus, CustomerKind, FinancialStatus, FulfilmentStatus, ItemKind, Method, NotificationMethod,
   OrderArtworkStatus, OrderSource, OrderState, PaymentMethod, PaymentNextAction, PaymentTerms, PoStatus, PrepStatus,
@@ -461,7 +462,7 @@ export type PrepRequest = { prepStatus: PrepStatus; expectedVersion: number }
 
 // `error` is English text for logs; the UI shows a translation of `code` (and of each gate reason code in `reasons`).
 export const API_ERROR_CODES = [
-  'pricing_invalid', 'pricing_changed',
+  'pricing_invalid', 'pricing_changed', 'estimate_stale', 'estimate_review_incomplete', 'estimate_reason_required',
   'inquiry_not_new', 'inquiry_not_convertible',
   'transition_not_allowed', 'gate_failed', 'conflict_retry', 'po_transition_not_allowed', 'not_found', 'invalid_request',
   'contact_archived', 'contact_not_for_customer', 'confirmation_required', 'order_not_active', 'production_started', 'quote_stale',
@@ -576,10 +577,36 @@ export type InquiryDetailResponse = {
   /** What the customer asked for. A request, never a commitment. */
   dueDate: string | null
   declineReason: string | null; convertedAt: string | null; orderNumber: string | null
-  lines: { product: string; method: string; quantity: number; sizes: Record<string, number> | null; color: string | null; material: string | null; personalization: string | null; notes: string | null }[]
+  lines: { product: string; method: string; quantity: number; sizes: Record<string, number> | null; color: string | null; material: string | null; personalization: string | null; notes: string | null; prints: { location: string; size: string | null; filename: string | null }[] }[]
   description: string | null; designHelp: boolean; convertible: boolean
   files: { id: number; kind: 'artwork' | 'po'; filename: string | null; mime: string; bytes: number }[]
   matches: { id: number; name: string; kind: CustomerKind; contacts: { id: number; name: string; email: string | null; phone: string | null }[] }[]
+}
+
+// ---- preliminary estimates: never a quote ----
+export type EstimateDecoration = { location: string | null; size: 'small' | 'medium' | 'large' | null; colors: number | null; complexity: 'small' | 'medium' | 'large' | null; machineMinutes: number | null; fileId: number | null }
+export type EstimateSeedLine = { product: string; method: string; quantity: number; decorations: EstimateDecoration[] }
+export type EstimateView = {
+  id: number; status: 'available' | 'assumption_based' | 'manual_review_required'; factsSource: 'none' | 'customer_reported' | 'staff_reviewed'
+  pricingVersionId: number | null; createdAt: string; createdBy: string | null
+  /** The calculation. Selling prices only: costs and margins are in `internal`, for owners. */
+  totalCents: number | null; lines: { label: string; quantity: number; unitPriceCents: number; lineTotalCents: number }[]; assumptions: string[]; reasons: string[]
+  /** What the customer was told, when this row is their submission. While customer prices are off that is manual review, whatever was calculated. */
+  shownToCustomer: { totalCents: number | null } | null
+  reanalysis: { fileId: number; filename: string | null; refused: string | null; estimatedInkColors: number | null; confidence: string | null; flags: string[] }[]
+  overrides: { field: string; original: string | null; replacement: string | null; reason: string; by: string | null; at: string }[]
+  internal?: { costCents: number; marginBps: number | null }
+}
+export type InquiryEstimatesResponse = {
+  estimates: EstimateView[]
+  /** The starting point for a review: the latest estimate's facts, on the request's lines. */
+  seed: EstimateSeedLine[]
+  artworkFiles: { id: number; filename: string | null; mime: string }[]
+}
+export type EstimateReviewRequest = {
+  basedOn: number | null; verified: true; reason: string | null
+  reanalysis: { fileId: number; report: ArtworkReport | null; refused: string | null }[]
+  lines: { method: string; decorations: EstimateDecoration[] }[]
 }
 export type InquiryConvertRequest = {
   expectedVersion: number; title: string; dueDate: string | null; artworkRequired: boolean

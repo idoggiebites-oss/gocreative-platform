@@ -13,6 +13,7 @@ import { paymentRoutes } from './payments'
 import { fileRoutes } from '../files'
 import { inquiryRoutes } from './inquiries'
 import { pricingRoutes } from './pricing'
+import { estimateRoutes } from './estimates'
 import { sameOriginWrites } from '../sameOrigin'
 
 // Every body except the two streamed uploads is capped before it is read (uploads stream under their own 50 MB limit
@@ -43,4 +44,5 @@ export function appRoutes(getKeys?: GetKeys) {
     .route('/', fileRoutes())
     .route('/', inquiryRoutes())
     .route('/', pricingRoutes())
+    .route('/', estimateRoutes())
 }

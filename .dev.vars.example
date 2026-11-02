@@ -5,4 +5,6 @@
 DEV_AUTH_EMAIL=owner1@example.com
 # Public intake locally. DEV_TURNSTILE_PASS is honoured only on localhost; never set it in production.
 DEV_TURNSTILE_PASS=1
+# Tests of the switched-on customer estimate path. Honoured only on localhost; never set it in production.
+DEV_CUSTOMER_ESTIMATES=1
 IP_HASH_SALT=local-only

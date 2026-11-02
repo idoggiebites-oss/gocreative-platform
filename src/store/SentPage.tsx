@@ -2,9 +2,11 @@ import { useState } from 'react'
 import { Link, Navigate, useLocation, useParams } from 'react-router'
 import { Check, Copy, FileText } from 'lucide-react'
 import { business } from '@shared/business'
+import type { CustomerEstimate } from '@shared/inquiry'
+import { EstimateNotice } from './EstimateNotice'
 import { Contact, usePageTitle } from './StoreLayout'
 
-export type SentState = { lines: string[]; description: string; dueDate: string; poAttached: boolean; previews: { name: string; url: string | null }[] }
+export type SentState = { lines: string[]; description: string; dueDate: string; poAttached: boolean; previews: { name: string; url: string | null }[]; estimate?: CustomerEstimate; estimateChanged?: boolean }
 
 function CopyRef({ value }: { value: string }) {
   const [copied, setCopied] = useState(false)
@@ -40,6 +42,7 @@ export default function SentPage() {
           <div className="s-ref-row"><strong className="s-display">{ref}</strong><CopyRef value={ref} /></div>
           <span>Mention it if you call or email us.</span>
         </div>
+        {state?.estimate && <EstimateNotice estimate={state.estimate} changed={state.estimateChanged} />}
         <h2 className="s-display s-h-next s-rise-3">What happens next</h2>
         <ol className="s-next s-rise-3">
           <li><strong>We review your request</strong><p>We will contact you by email or phone.</p></li>

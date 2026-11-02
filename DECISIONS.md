@@ -517,3 +517,14 @@ Migration 0006 (additive), `worker/db/{pickups,payments}.ts`, `worker/routes/{pi
 ## 2026-11-01 — Automated estimating: confirmed requirements (Arturo); plan awaiting approval
 - No LLMs or paid AI. Deterministic analysis and rules. Estimates are never binding; staff issue every final quote. Versioned pricing with Draft → Preview → Publish → Active. Full list: AUTOMATED_ESTIMATING_PLAN.md §1.
 - E1 to E3 do not start without his go. Phase 3's S4 install work stays paused on branch `s4-install`.
+
+### 2026-11-01 — E3: what shows customer prices, and what doesn't exist
+
+- **Customer prices are a code flag, `customerEstimates` in `shared/business.ts`, default false.** Turning them on takes a code change and a deploy, so nothing in the dashboard can do it by accident. Published rates alone change nothing for customers. Claude's call, under Arturo's rule that dollar estimates stay disabled until rates are configured and validation passes.
+- **While off, the browser doesn't analyse artwork or ask for a price.** Submit still stores an estimate row for staff, with what the customer was told (manual review) kept apart from what was calculated.
+- **Customers can only reach a figure with screen printing or DTG, a print location and their own uploaded artwork.** Embroidery complexity and engraving machine time aren't things a customer can know, so those always go to a person.
+- **Colours are never typed by a customer.** The server derives them from an analysis report (`defensibleColors`), which stays labelled `customer_reported`.
+- **Staff review adds a row; it never edits one, and writes to no order, item or quote.** It reads the stored original, requires every stored artwork file to be re-analysed, and needs a reason for any change. One reason per review, stored on each changed field.
+- **"Start draft quote from this estimate" not built.** Optional in the plan, not in Arturo's E3 list, and leaving it out keeps conversion and quotes untouched.
+- **Staff see "needs an owner to review the price" rather than a margin refusal,** because whether a job clears the margin is owner-only.
+

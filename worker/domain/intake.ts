@@ -17,6 +17,7 @@ export const ORPHAN_GRACE_HOURS = 24
 export const CLEANUP_BATCH = 500
 export const ORPHAN_PAGES_PER_RUN = 10
 export const USAGE_KEEP_DAYS = 7
+export const SESSION_MAX_ESTIMATES = 20 // slows walking the price list; it doesn't hide what any one answer shows (plan §8)
 
 // No 0/O or 1/I: this gets read aloud over the phone.
 const REF_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ'

@@ -50,6 +50,15 @@ export const pricingConfigSchema = z.object({
   review: z.object({ maxQuantity: z.number().int().min(1).optional(), maxTotalCents: cents.optional() }).strict().optional(),
 }).strict()
 export type PricingConfig = z.infer<typeof pricingConfigSchema>
+/** A stored config, or null if the engine can't read it, which means manual review and never a guess. */
+export const parseConfig = (raw: string | null | undefined): PricingConfig | null => {
+  try {
+    const p = pricingConfigSchema.safeParse(JSON.parse(raw ?? ''))
+    return p.success ? p.data : null
+  } catch {
+    return null
+  }
+}
 export type ServiceKey = keyof PricingConfig['services']
 
 export type DecorationInput = {
@@ -161,7 +170,7 @@ function costLine(cfg: PricingConfig, service: ServiceKey, line: EstimateLineInp
   return { unitCost: unit, fees }
 }
 
-const manual = (reasons: string[], assumptions: string[] = []): EstimateResult => ({
+export const manual = (reasons: string[], assumptions: string[] = []): EstimateResult => ({
   engineVersion: ENGINE_VERSION, status: 'manual_review_required', totalCents: null, lines: [], assumptions, reasons, internal: { costCents: 0, marginBps: null, lines: [] },
 })
 

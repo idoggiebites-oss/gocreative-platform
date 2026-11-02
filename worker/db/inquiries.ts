@@ -14,9 +14,9 @@ export type InquiryRow = {
 const COLS = `id, payload, contact_name, contact_email, contact_phone, status, order_id, created_at, ref, customer_kind, organization, preferred_contact, due_date, decline_reason, converted_at, version, deleting_at`
 export const getInquiry = (db: D1Database, id: number) => db.prepare(`SELECT ${COLS} FROM inquiries WHERE id = ?`).bind(id).first<InquiryRow>()
 
-export type InquiryFileRow = { file_id: number; kind: 'artwork' | 'po'; filename: string | null; mime: string; bytes: number }
+export type InquiryFileRow = { upload_id: string; file_id: number; kind: 'artwork' | 'po'; filename: string | null; mime: string; bytes: number }
 export const listInquiryFiles = async (db: D1Database, inquiryId: number) =>
-  (await db.prepare(`SELECT i.file_id, i.kind, f.filename, f.mime, f.bytes FROM inquiry_files i JOIN files f ON f.id = i.file_id
+  (await db.prepare(`SELECT i.id AS upload_id, i.file_id, i.kind, f.filename, f.mime, f.bytes FROM inquiry_files i JOIN files f ON f.id = i.file_id
     WHERE i.inquiry_id = ? AND i.status = 'linked' ORDER BY f.id`).bind(inquiryId).all<InquiryFileRow>()).results
 
 export const orderNumberOf = async (db: D1Database, orderId: number | null) =>

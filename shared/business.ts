@@ -16,6 +16,9 @@ export const business = {
     contact: { address: null, phone: null, email: null, hours: null } as Record<'address' | 'phone' | 'email' | 'hours', string | null>,
     // Both stay false until the real thing exists. scripts/launch-check.ts refuses a launch while they are.
     launch: { photosSupplied: false as boolean, privacyReviewed: false as boolean, servicesConfirmed: false as boolean },
+    // Off until real rates are published AND real jobs have validated the artwork analysis (Arturo). A code change and a deploy on purpose: nothing in the dashboard can turn customer prices on.
+    customerEstimates: false as boolean,
+    printLocations: { front: 'Full front', back: 'Full back', left_chest: 'Left chest', sleeve: 'Sleeve', other: 'Somewhere else' },
     services: [
       {
         id: 'screen', name: 'Screen printing', short: 'Bold color for team shirts and events.', card: 'Bold, durable color for team shirts, events and spirit wear. Great for larger runs.',

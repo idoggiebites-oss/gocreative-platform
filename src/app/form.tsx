@@ -128,7 +128,7 @@ export function FormDialog({ open, onOpenChange, title, description, submitLabel
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="sm:max-w-md"
+        className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-md"
         onCloseAutoFocus={(e) => {
           e.preventDefault()
           const restore = () => {

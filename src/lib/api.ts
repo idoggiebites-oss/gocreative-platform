@@ -10,7 +10,7 @@ import type {
   ProductionChangeRequest, ProductionResponse, QueueReorderRequest, QueueReorderResponse, UnitsRequest,
 } from '@shared/api'
 import type { CustomerKind, InquiryStatus, PoStatus, ProductionStatus, Role } from '@shared/enums'
-import type { ApiError as ApiErrorBody, InquiryDetailResponse } from '@shared/api'
+import type { ApiError as ApiErrorBody, InquiryDetailResponse, InquiryEstimatesResponse } from '@shared/api'
 
 /** A non-2xx answer from /api/app. `body.error` is the server's message; 409 means a business rule refused it. */
 export class ApiError extends Error {
@@ -41,6 +41,7 @@ const retry = (n: number, e: Error) => !(e instanceof ApiError) && n < 2
 export const useDashboard = () => useQuery({ queryKey: ['dashboard'], queryFn: () => call<DashboardResponse>('/dashboard'), retry })
 
 export const usePricing = <T,>(enabled: boolean) => useQuery({ queryKey: ['pricing'], queryFn: () => call<T>('/pricing'), enabled, retry })
+export const useInquiryEstimates = (id: number) => useQuery({ queryKey: ['inquiry-estimates', id], queryFn: () => call<InquiryEstimatesResponse>(`/inquiries/${id}/estimates`), retry })
 export const useInquiry = (id: string) => useQuery({ queryKey: ['inquiry', id], queryFn: () => call<InquiryDetailResponse>(`/inquiries/${id}`), retry })
 export const useOrders = (view: OrderView, q: string, inquiryStatus?: InquiryStatus) =>
   useQuery({

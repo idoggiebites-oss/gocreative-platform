@@ -3,8 +3,11 @@ import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { Check } from 'lucide-react'
 import { Link, useNavigate, useSearchParams } from 'react-router'
 import { business } from '@shared/business'
-import { EMPTY_FORM, MAX_ITEMS, METHOD_NAMES, PRODUCTS, SIZES, buildPayload, clearDraft, describeItem, duplicateItem, itemTitle, loadDraft, methodsFor, patchItem, productOf, readableDate, saveDraft, sizeTotal, toggleProduct, validateStep, type Errors, type Form, type Item } from './orderForm'
-import { PublicError, SESSION_ENDED, fetchStatus, openSession, submitInquiry, type Status } from './publicApi'
+import type { ArtworkReport, CustomerEstimate } from '@shared/inquiry'
+import { EstimateNotice } from './EstimateNotice'
+import { PrintDetails } from './PrintDetails'
+import { EMPTY_FORM, MAX_ITEMS, METHOD_NAMES, PRODUCTS, SIZES, buildPayload, buildPreview, clearDraft, describeItem, duplicateItem, itemTitle, loadDraft, methodsFor, patchItem, productOf, readableDate, saveDraft, sizeTotal, toggleProduct, validateStep, type Errors, type Form, type Item } from './orderForm'
+import { PublicError, SESSION_ENDED, fetchStatus, openSession, previewEstimate, submitInquiry, type Status } from './publicApi'
 import type { SentState } from './SentPage'
 import { Contact, usePageTitle } from './StoreLayout'
 import { UploadStep } from './UploadStep'
@@ -13,6 +16,7 @@ import { useUploads } from './useUploads'
 const EASE_OUT = [0.23, 1, 0.32, 1] as const
 const STEP_COUNT = 4
 const TITLES = ['What', 'How many', 'Artwork', 'You']
+const MANUAL: CustomerEstimate = { status: 'manual_review_required', totalCents: null, assumptions: [] }
 
 function Field({ id, label, error, help, children }: { id: string; label: string; error?: string; help?: string; children: (a: { id: string; 'aria-invalid'?: true; 'aria-describedby'?: string }) => ReactNode }) {
   const describedBy = [error && `${id}-error`, help && `${id}-help`].filter(Boolean).join(' ') || undefined
@@ -156,7 +160,7 @@ function ReviewRow({ title, onEdit, children }: { title: string; onEdit: () => v
   )
 }
 
-function DetailsStep({ f, patch, errors, focus, files, go }: { f: Form; patch: (c: Partial<Form>) => void; errors: Errors; focus: boolean; files: string[]; go: (n: number) => void }) {
+function DetailsStep({ f, patch, errors, focus, files, go, estimate }: { f: Form; patch: (c: Partial<Form>) => void; errors: Errors; focus: boolean; files: string[]; go: (n: number) => void; estimate: CustomerEstimate | null }) {
   return (
     <>
       <StepHeading focus={focus}>How can we reach you?</StepHeading>
@@ -214,6 +218,7 @@ function DetailsStep({ f, patch, errors, focus, files, go }: { f: Form; patch: (
           {f.designHelp && <p>You asked for help with the design.</p>}
         </ReviewRow>
       </section>
+      <EstimateNotice estimate={estimate} />
       <p className="s-meta">By sending this, you agree that we use these details to reply and quote. See our <Link to="/privacy" target="_blank" rel="noopener">privacy page (opens in a new tab)</Link>.</p>
     </>
   )
@@ -278,7 +283,7 @@ function OrderForm({ status, onClosed }: { status: Status; onClosed: () => void 
   }, [status.turnstileSiteKey])
 
   const currentToken = useCallback(() => token.current, [])
-  const uploadsConfig = useMemo(() => ({ initial: draft?.files ?? [], ensureToken, currentToken, dropToken, onClosed }), [draft, ensureToken, currentToken, dropToken, onClosed])
+  const uploadsConfig = useMemo(() => ({ initial: draft?.files ?? [], ensureToken, currentToken, dropToken, onClosed, analyze: status.estimates }), [draft, ensureToken, currentToken, dropToken, onClosed, status.estimates])
   const uploads = useUploads(uploadsConfig)
   // After a reload, the server knows what got through: an upload whose reply never arrived, or a session that ended.
   const { reconcile } = uploads
@@ -297,7 +302,7 @@ function OrderForm({ status, onClosed }: { status: Status; onClosed: () => void 
   }, [step])
 
   useEffect(() => {
-    saveDraft({ form, token: token.current, files: uploads.rows.filter((r) => r.state === 'done' && r.id).map((r) => ({ id: r.id!, name: r.name, bytes: r.bytes, purpose: r.purpose })) })
+    saveDraft({ form, token: token.current, files: uploads.rows.filter((r) => r.state === 'done' && r.id).map((r) => ({ id: r.id!, name: r.name, bytes: r.bytes, purpose: r.purpose, report: r.report })) })
   }, [form, uploads.rows])
 
   const set = useCallback((fn: (f: Form) => Form) => setForm(fn), [])
@@ -309,6 +314,31 @@ function OrderForm({ status, onClosed }: { status: Status; onClosed: () => void 
     requestAnimationFrame(() => document.querySelector<HTMLElement>('.s-step fieldset[data-invalid] input, .s-step [role="radiogroup"][aria-invalid="true"] input, .s-step input[aria-invalid="true"], .s-step textarea[aria-invalid="true"], .s-step select[aria-invalid="true"]')?.focus())
     if (Object.keys(e).length > 0) setFormError('Please check the highlighted fields.')
   }
+
+  const held = uploads.rows.filter((r) => r.state === 'done' && r.id)
+  const heldIds = new Set(held.map((r) => r.id!))
+  const reports: Record<string, ArtworkReport> = Object.fromEntries(held.flatMap((r) => (r.report && r.purpose === 'artwork' ? [[r.id!, r.report]] : [])))
+  // Nothing to price without artwork, so a request with no files never spends a Turnstile check or a call on it. Off means off: no request at all.
+  const previewBody = step === STEP_COUNT && status.estimates && held.some((r) => r.purpose === 'artwork') ? JSON.stringify(buildPreview(form, heldIds, reports)) : null
+  const [estimate, setEstimate] = useState<CustomerEstimate | null>(MANUAL)
+  const shown = useRef<number | null>(null)
+  useEffect(() => {
+    const t = currentToken()
+    if (!previewBody || previewBody === 'null' || !t) {
+      setEstimate(MANUAL)
+      shown.current = null
+      return
+    }
+    let live = true
+    setEstimate(null)
+    // A failure here costs the customer nothing: a person prices it.
+    previewEstimate(t, JSON.parse(previewBody)).then((r) => r.estimate, () => MANUAL).then((e) => {
+      if (!live) return
+      setEstimate(e)
+      shown.current = e.totalCents
+    })
+    return () => { live = false }
+  }, [previewBody, currentToken])
 
   const uploading = uploads.rows.some((r) => r.state === 'uploading' || r.state === 'removing')
   const failed = uploads.rows.some((r) => r.state === 'failed')
@@ -330,7 +360,7 @@ function OrderForm({ status, onClosed }: { status: Status; onClosed: () => void 
     if (Object.keys(e).length > 0) return failErrors(e)
     if (uploading) return setFormError('Your files are still uploading. Please wait a moment.')
     if (failed) { go(3); return setFormError('Some files did not upload. Retry or remove them to continue.') }
-    const parsed = buildPayload(form)
+    const parsed = buildPayload(form, heldIds, reports)
     if (!parsed.success) return setFormError('Something in the form needs another look. Please go back and check each step.')
     setSending(true)
     setFormError('')
@@ -350,12 +380,13 @@ function OrderForm({ status, onClosed }: { status: Status; onClosed: () => void 
         go(3)
         return setFormError('We found a difference in your files. Please check them, then continue.')
       }
-      const { ref } = await submitInquiry(await ensureToken(), parsed.data)
+      const { ref, estimate: final } = await submitInquiry(await ensureToken(), parsed.data)
       clearDraft()
       const sent: SentState = {
         lines: form.items.map(describeItem), description: form.description.trim(), dueDate: form.dueDate ? readableDate(form.dueDate) : '',
         poAttached: uploads.rows.some((r) => r.purpose === 'po'),
         previews: uploads.rows.map((r) => ({ name: r.name, url: r.preview ?? null })),
+        estimate: final, estimateChanged: Boolean(final) && shown.current !== null && final!.totalCents !== shown.current, // the server's figure at the moment of sending is the one that stands
       }
       void navigate(`/order/sent/${ref}`, { replace: true, state: sent, viewTransition: true })
     } catch (err) {
@@ -397,9 +428,10 @@ function OrderForm({ status, onClosed }: { status: Status; onClosed: () => void 
               <>
                 <StepHeading focus={moved}>Send us your artwork.</StepHeading>
                 <UploadStep form={form} set={patch} uploads={uploads} />
+                <PrintDetails form={form} set={set} rows={uploads.rows} />
               </>
             )}
-            {step === 4 && <DetailsStep f={form} patch={patch} errors={errors} focus={moved} files={uploads.rows.map((r) => r.name)} go={go} />}
+            {step === 4 && <DetailsStep f={form} patch={patch} errors={errors} focus={moved} files={uploads.rows.map((r) => r.name)} go={go} estimate={estimate} />}
           </StepPanel>
           <div id="turnstile-slot" className="s-turnstile" />
           {formError && <p role="alert" className="s-error-block">{formError}</p>}

@@ -16,3 +16,8 @@ Arturo's item 12: the site must show what GoCreative actually does. The notes co
 | Process | "A quote and a proof", "nothing is made until you approve both" | Matches the workflow for quotes and artwork; a job with no artwork has no proof. **To confirm wording** |
 | Schools | "We confirm every PO with you before anything goes into production" | Matches the production gate; **confirm wording** |
 | Pickup | "Approve, then pick up": no delivery or shipping mentioned | **To confirm** |
+
+## Print details on the order form (E3)
+
+Placeholders until the family confirms them, in `shared/business.ts` and `src/store/PrintDetails.tsx`: print locations (full front, full back, left chest, sleeve, somewhere else) and print size wording (small "about a left-chest logo", medium, large "a full front or back"). The customer-facing assumption "Based on our standard item" (`worker/domain/pricing/facts.ts`) also needs their check. None is a price.
+

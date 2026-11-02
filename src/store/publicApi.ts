@@ -1,7 +1,9 @@
 // The browser's side of /api/public. Every failure becomes a typed PublicError with a message a customer can act on.
 import { runTurnstile } from './turnstile'
 
-export type Status = { open: boolean; turnstileSiteKey: string | null }
+import type { CustomerEstimate } from '@shared/inquiry'
+
+export type Status = { open: boolean; turnstileSiteKey: string | null; estimates: boolean }
 export type FilePurpose = 'artwork' | 'po'
 export type UploadAck = { id: string; filename: string | null; bytes: number }
 
@@ -90,5 +92,7 @@ export const listFiles = (token: string) => json<{ files: StoredFile[] }>('/subm
 export const removeFile = (token: string, id: string) => json<{ ok: true }>(`/submissions/files/${encodeURIComponent(id)}`, { method: 'DELETE', headers: bearer(token) })
 
 export const submitInquiry = (token: string, form: unknown) =>
-  json<{ ref: string }>('/submissions/submit', { method: 'POST', headers: { ...bearer(token), 'Content-Type': 'application/json' }, body: JSON.stringify(form) })
+  json<{ ref: string; estimate?: CustomerEstimate }>('/submissions/submit', { method: 'POST', headers: { ...bearer(token), 'Content-Type': 'application/json' }, body: JSON.stringify(form) })
 
+export const previewEstimate = (token: string, body: unknown) =>
+  json<{ estimate: CustomerEstimate }>('/estimate', { method: 'POST', headers: { ...bearer(token), 'Content-Type': 'application/json' }, body: JSON.stringify(body) })

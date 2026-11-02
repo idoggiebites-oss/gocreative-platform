@@ -22,6 +22,7 @@ export function reseed() {
 export function prepare() {
   if (!existsSync('.dev.vars')) copyFileSync('.dev.vars.example', '.dev.vars')
   if (!readFileSync('.dev.vars', 'utf8').includes('DEV_TURNSTILE_PASS')) appendFileSync('.dev.vars', '\nDEV_TURNSTILE_PASS=1\nIP_HASH_SALT=local-only\n')
+  if (!readFileSync('.dev.vars', 'utf8').includes('DEV_CUSTOMER_ESTIMATES')) appendFileSync('.dev.vars', '\nDEV_CUSTOMER_ESTIMATES=1\n') // lets a test exercise customer prices; off with no published pricing, and ignored off localhost
   // Start from an empty database every run: wrangler won't re-run a migration it has already
   // applied, so an edited migration would otherwise leave this state on the old schema.
   rmSync('.wrangler/e2e', { recursive: true, force: true })

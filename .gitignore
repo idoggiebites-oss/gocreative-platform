@@ -8,3 +8,5 @@ playwright-report
 .DS_Store
 .claude/worktrees
 !.dev.vars.example
+# Real customer artwork and job results for the validation: never in this public repo.
+validation

@@ -1,17 +1,20 @@
 // Pure rules for turning an inquiry into an order. Nothing the customer sent is dropped: each line becomes one order item.
 import { z } from 'zod'
 import { business } from '../../shared/business'
+import { printLocationName } from '../../shared/inquiry'
 import { METHODS, type Method, type ProductionStatus } from '../../shared/enums'
 
 // Reading a stored request is not validating a new one. The catalogue changes over time and later versions add fields, so a stored line
 // needs only to be safe to show and convert: submit-time rules (shared/inquiry.ts) stay strict, and are deliberately not used here.
 const storedText = z.string().nullish().transform((v) => v || undefined)
+// Bad print details on an old row lose the print details, never the request.
+const storedPrints = z.array(z.looseObject({ location: z.string().max(60), size: z.string().max(20).nullish(), artwork: z.string().max(60).nullish() })).max(20).nullish().catch(null)
 const storedLine = z.looseObject({
   product: z.string().trim().min(1).max(200),
   method: z.string().min(1).max(40),
   quantity: z.number().int().min(1).max(1_000_000),
   sizes: z.record(z.string().max(20), z.number().int().min(0).max(1_000_000)).nullish().transform((v) => v ?? undefined),
-  color: storedText, material: storedText, personalization: storedText, notes: storedText,
+  color: storedText, material: storedText, personalization: storedText, notes: storedText, prints: storedPrints,
 })
 const payloadSchema = z.looseObject({ lines: z.array(storedLine).min(1).max(200), designHelp: z.boolean().nullish(), description: z.string().nullish() })
 export type InquiryPayload = z.infer<typeof payloadSchema>
@@ -35,7 +38,8 @@ export type ConvertedItem = {
 const DESCRIPTION_MAX = 500
 const COLOR_MAX = 100
 const NOTES_MAX = 2000
-const details = (l: InquiryPayload['lines'][number]) => [l.personalization && `Personalization: ${l.personalization}`, l.material && `Material or item: ${l.material}`, l.notes].filter(Boolean).join('\n')
+const printsText = (l: InquiryPayload['lines'][number]) => (l.prints?.length ? `Print: ${l.prints.map((p) => [printLocationName(p.location), p.size].filter(Boolean).join(', ')).join('; ')}` : null)
+const details = (l: InquiryPayload['lines'][number]) => [printsText(l), l.personalization && `Personalization: ${l.personalization}`, l.material && `Material or item: ${l.material}`, l.notes].filter(Boolean).join('\n')
 const knownMethod = (m: string): Method | null => METHODS.find((x) => x === m) ?? null
 /** Sizes that don't add up to the quantity would make the item uneditable, so such a grid stays in the note rather than on the item. */
 const usableSizes = (l: InquiryPayload['lines'][number]) => {

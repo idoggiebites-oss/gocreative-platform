@@ -13,6 +13,7 @@ interface Env {
   TURNSTILE_SITE_KEY?: string
   /** Local dev and e2e only: skips Turnstile, honoured solely on localhost/127.0.0.1. Never set in production. */
   DEV_TURNSTILE_PASS?: string
+  DEV_CUSTOMER_ESTIMATES?: string
   /** Salt for hashing visitor IPs. Without it public intake refuses to open sessions. */
   IP_HASH_SALT?: string
 }

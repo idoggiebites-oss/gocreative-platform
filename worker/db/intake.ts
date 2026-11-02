@@ -2,6 +2,7 @@
 import type { InquirySubmit } from '../../shared/inquiry'
 import * as limits from '../domain/intake'
 import type { NewFile } from './files'
+import { estimateForSubmission, type NewEstimate } from './pricing'
 
 const NOW = `strftime('%Y-%m-%dT%H:%M:%fZ','now')`
 const OPEN = `status = 'open' AND expires_at > ${NOW}`
@@ -89,6 +90,10 @@ export const saveOrphanCursor = (db: D1Database, cursor: string | undefined) => 
 export const sessionFileKinds = async (db: D1Database, submissionId: string) =>
   (await db.prepare(`SELECT kind, status, ${LIVE} AS live FROM inquiry_files WHERE submission_id = ?`).bind(submissionId).all<{ kind: string; status: string; live: number }>()).results
 
+/** One more priced answer for this session, atomically. False once its allowance is spent. */
+export const countEstimateCall = async (db: D1Database, submissionId: string) =>
+  ((await db.prepare(`UPDATE inquiry_submissions SET estimate_calls = estimate_calls + 1 WHERE id = ? AND ${OPEN} AND estimate_calls < ?`).bind(submissionId, limits.SESSION_MAX_ESTIMATES).run()).meta.changes ?? 0) > 0
+
 export const findRef = async (db: D1Database, submissionId: string) =>
   (await db.prepare(`SELECT ref FROM inquiries WHERE submission_id = ?`).bind(submissionId).first<{ ref: string }>())?.ref ?? null
 
@@ -96,7 +101,7 @@ export const findRef = async (db: D1Database, submissionId: string) =>
  * One batch: the inquiry, its files linked, the audit row, and the session closed last. Everything is guarded on the
  * session being open with no upload in flight, so false means nothing happened and the caller works out why.
  */
-export async function submitInquiry(db: D1Database, p: { submissionId: string; ref: string; ipHash: string; input: Omit<InquirySubmit, 'website'>; spam: boolean }) {
+export async function submitInquiry(db: D1Database, p: { submissionId: string; ref: string; ipHash: string; input: Omit<InquirySubmit, 'website' | 'reports'>; spam: boolean; estimate: Omit<NewEstimate, 'inquiryId'> }) {
   const i = p.input
   const payload = JSON.stringify({ lines: i.lines, designHelp: i.designHelp ?? false, description: i.description ?? null })
   const sid = p.submissionId
@@ -117,6 +122,9 @@ export async function submitInquiry(db: D1Database, p: { submissionId: string; r
     // Counts only: the audit trail outlives retention, so no submitted personal data.
     db.prepare(`INSERT INTO activity_log (actor_kind, entity_type, entity_id, action, after)
       SELECT 'portal', 'inquiry', id, 'inquiry_received', json_object('files', (SELECT COUNT(*) FROM inquiry_files WHERE submission_id = ? AND status = 'linked')) FROM inquiries WHERE submission_id = ? AND EXISTS (SELECT 1 FROM inquiry_submissions WHERE id = ? AND status = 'open')`).bind(sid, sid, sid),
+    // The price it stores is the server's, worked out for this batch. The submission's one calculation counts against the session like any other, but can't be refused: the request matters more.
+    estimateForSubmission(db, sid, p.estimate),
+    db.prepare(`UPDATE inquiry_submissions SET estimate_calls = estimate_calls + 1 WHERE id = ? AND status = 'open' AND EXISTS (SELECT 1 FROM inquiries WHERE submission_id = ?)`).bind(sid, sid),
     db.prepare(`UPDATE inquiry_submissions SET status = 'submitted' WHERE id = ? AND status = 'open' AND EXISTS (SELECT 1 FROM inquiries WHERE submission_id = ?)`).bind(sid, sid),
   ])
   return inserted.meta.changes > 0

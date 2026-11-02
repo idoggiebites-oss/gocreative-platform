@@ -4,6 +4,7 @@ import { z } from 'zod'
 import type { ApiErrorCode, InquiryConvertResponse, InquiryDetailResponse } from '../../shared/api'
 import { business } from '../../shared/business'
 import { CUSTOMER_KINDS } from '../../shared/enums'
+import { printLocationName } from '../../shared/inquiry'
 import { requireRole, type AppEnv } from '../auth'
 import { customerDefaults } from '../domain/customerDefaults'
 import { readiness } from '../domain/readiness'
@@ -44,6 +45,7 @@ export function inquiryRoutes() {
       const row = await db.getInquiry(c.env.DB, i.data)
       if (!row || row.deleting_at) return notFound(c)
       const payload = parsePayload(row.payload)
+      const files = await db.listInquiryFiles(c.env.DB, row.id)
       const body: InquiryDetailResponse = {
         id: row.id, ref: row.ref, status: row.status, version: row.version, receivedAt: row.created_at,
         customerKind: row.customer_kind, organization: row.organization,
@@ -53,9 +55,11 @@ export function inquiryRoutes() {
         lines: (payload?.lines ?? []).map((l) => ({
           product: business.storefront.products.find((p) => p.slug === l.product)?.name ?? l.product, method: l.method, quantity: l.quantity, sizes: l.sizes ?? null,
           color: l.color ?? null, material: l.material ?? null, personalization: l.personalization ?? null, notes: l.notes ?? null,
+          // An id resolves only through this inquiry's own files, so it can't name anyone else's.
+          prints: (l.prints ?? []).map((p) => ({ location: printLocationName(p.location), size: p.size ?? null, filename: files.find((f) => f.upload_id === p.artwork)?.filename ?? null })),
         })),
         description: payload?.description ?? null, designHelp: payload?.designHelp === true, convertible: payload !== null,
-        files: (await db.listInquiryFiles(c.env.DB, row.id)).map((f) => ({ id: f.file_id, kind: f.kind, filename: f.filename, mime: f.mime, bytes: f.bytes })),
+        files: files.map((f) => ({ id: f.file_id, kind: f.kind, filename: f.filename, mime: f.mime, bytes: f.bytes })),
         matches: row.status === 'new' ? await db.matchCustomers(c.env.DB, row.contact_email, row.contact_phone) : [],
       }
       return c.json(body)

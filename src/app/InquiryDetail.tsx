@@ -5,6 +5,7 @@ import { CUSTOMER_KINDS, type CustomerKind } from '@shared/enums'
 import { useI18n } from '@/i18n'
 import { send, useInquiry, useMe, useSend } from '@/lib/api'
 import { BTN, BTN_PRIMARY, Check, Field, FormDialog, H2, INPUT, LINK, MutationError, SEC, TEXTAREA } from './form'
+import InquiryEstimates from './InquiryEstimates'
 import QueryBoundary from './QueryBoundary'
 import { CARD, Chip, MUTED, PAGE, TD, TH, type Tone } from './ui'
 
@@ -111,6 +112,7 @@ function Detail({ d }: { d: InquiryDetailResponse }) {
                 <tr key={i}>
                   <td className={`${TD} whitespace-normal`}>
                     <strong>{l.product}</strong>, {method(l.method)}
+                    {l.prints.map((p, k) => <p key={k} className={MUTED}>{t.printLabel}: {[p.location, p.size, p.filename].filter(Boolean).join(', ')}</p>)}
                     {l.personalization && <p className={MUTED}>{t.personalization}: {l.personalization}</p>}
                     {l.material && <p className={MUTED}>{t.material}: {l.material}</p>}
                     {l.notes && <p className={MUTED}>{t.noteLabel}: {l.notes}</p>}
@@ -124,6 +126,8 @@ function Detail({ d }: { d: InquiryDetailResponse }) {
           </table>
         </div>
       </section>
+
+      <InquiryEstimates inquiryId={d.id} canReview={d.status === 'new' || d.status === 'converted'} />
 
       <section className={CARD} aria-labelledby="inq-project">
         <div className={SEC}><h2 id="inq-project" className={H2}>{t.project}</h2></div>

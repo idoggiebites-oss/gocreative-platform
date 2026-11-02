@@ -4,9 +4,13 @@
 import { Hono, type Context, type MiddlewareHandler } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import type { AppEnv } from '../auth'
+import { ANALYZER_VERSION } from '../../shared/artworkAnalysis'
 import { business } from '../../shared/business'
-import { FILE_PURPOSES, inquirySubmitSchema } from '../../shared/inquiry'
+import { FILE_PURPOSES, estimatePreviewSchema, inquirySubmitSchema, type CustomerEstimate } from '../../shared/inquiry'
 import * as db from '../db/intake'
+import { customerResultOf, getActivePricing } from '../db/pricing'
+import { customerEstimate, MANUAL_VIEW } from '../domain/pricing/facts'
+import { ENGINE_VERSION, customerView, parseConfig } from '../domain/pricing/engine'
 import { isIntakeClosed } from '../db/settings'
 import { FILE_MAX_BYTES, JSON_MAX_BYTES, SESSION_HOURS, newRef, usageDay } from '../domain/intake'
 import { isDefiniteRollback, storeUpload, type FileKind } from '../files'
@@ -31,6 +35,8 @@ const clientIp = (c: Context) => c.req.header('cf-connecting-ip') ?? 'unknown'
 
 /** Local dev and e2e only, like DEV_AUTH_EMAIL: never honoured on a real hostname. */
 const skipsTurnstile = (c: Context<Env_>) => Boolean(c.env.DEV_TURNSTILE_PASS) && isLocalHost(c.req.url)
+/** Customer prices need the owner's flag; the local override exists for tests of the switched-on path and is never honoured on a real hostname. */
+const pricesOn = (c: Context<Env_>) => business.storefront.customerEstimates || (Boolean(c.env.DEV_CUSTOMER_ESTIMATES) && isLocalHost(c.req.url))
 const ready = (c: Context<Env_>) => Boolean(c.env.IP_HASH_SALT && (skipsTurnstile(c) || (c.env.TURNSTILE_SECRET && c.env.TURNSTILE_SITE_KEY)))
 
 const intakeOpen: MiddlewareHandler<Env_> = async (c, next) =>
@@ -74,7 +80,24 @@ export function publicRoutes() {
     .get('/status', async (c) => c.json({
       open: !(await isIntakeClosed(c.env.DB)) && ready(c),
       turnstileSiteKey: c.env.TURNSTILE_SITE_KEY ?? null,
+      estimates: pricesOn(c) && Boolean(await getActivePricing(c.env.DB)),
     }))
+
+    // A figure before sending. Calculated here from the published rates and never stored: what counts is the recalculation at submit.
+    .post('/estimate', intakeOpen, jsonCap, async (c) => {
+      const s = await session(c)
+      if (!s) return badSession(c)
+      if (s.status !== 'open') return fail(c, 409, 'session_closed', 'This request has already been sent.')
+      if (s.expired) return fail(c, 410, 'session_expired', 'Your session has ended. Please start again.')
+      const parsed = estimatePreviewSchema.safeParse(await readJson(c))
+      if (!parsed.success) return fail(c, 400, 'invalid_request', 'Please check the form and try again.')
+      const active = pricesOn(c) ? await getActivePricing(c.env.DB) : null
+      if (!active) return c.json<{ estimate: CustomerEstimate }>({ estimate: MANUAL_VIEW }) // nothing was priced, so nothing to count
+      if (!(await db.countEstimateCall(c.env.DB, s.id))) return fail(c, 429, 'estimate_limit', 'Our team will price this when they review your request.')
+      const own = (await db.listStoredFiles(c.env.DB, s.id)).filter((f) => f.purpose === 'artwork').map((f) => f.id)
+      const { result } = customerEstimate(parseConfig(active.config), parsed.data.lines, parsed.data.reports ?? {}, new Set(own))
+      return c.json<{ estimate: CustomerEstimate }>({ estimate: customerView(result) })
+    })
 
     .post('/submissions', intakeOpen, jsonCap, async (c) => {
       const secret = c.env.TURNSTILE_SECRET
@@ -163,31 +186,43 @@ export function publicRoutes() {
       const s = await session(c)
       if (!s) return badSession(c)
       // A retry after a lost response or a double-tap: same answer, nothing new.
+      const answer = async (ref: string, status: 200 | 201 = 200) => c.json({ ref, estimate: JSON.parse(await customerResultOf(c.env.DB, s.id) ?? 'null') as CustomerEstimate ?? MANUAL_VIEW }, status)
       const already = s.status === 'submitted' ? await db.findRef(c.env.DB, s.id) : null
-      if (already) return c.json({ ref: already })
+      if (already) return answer(already)
       if (s.status !== 'open' || s.expired) return fail(c, 410, 'session_expired', 'Your session has ended. Please start again.')
 
       const parsed = inquirySubmitSchema.safeParse(await readJson(c))
       if (!parsed.success) return fail(c, 400, 'invalid_request', 'Please check the form and try again.') // no echo of what was sent
-      const { website, ...input } = parsed.data
+      const { website, reports, ...form } = parsed.data
       if (!c.env.IP_HASH_SALT) return fail(c, 503, 'intake_closed', 'We are not taking online requests right now. Please call or email us.')
       const ipHash = await hashIp(clientIp(c), c.env.IP_HASH_SALT)
 
+      // The browser's total is never read, because it never sends one. Its reports stay labelled as the customer's, and only count while customer prices are on.
+      const on = pricesOn(c)
+      const active = await getActivePricing(c.env.DB)
+      const own = new Set((await db.listStoredFiles(c.env.DB, s.id)).filter((f) => f.purpose === 'artwork').map((f) => f.id))
+      const facts = customerEstimate(parseConfig(active?.config), form.lines, on ? reports ?? {} : {}, own)
+      const input = { ...form, lines: facts.lines } // a link to a file that isn't this session's is never stored
+      const estimate = {
+        pricingVersionId: active?.id ?? null, analyzerVersion: facts.reportsUsed ? ANALYZER_VERSION : null, factsSource: facts.reportsUsed ? 'customer_reported' as const : 'none' as const,
+        inputs: { engine: ENGINE_VERSION, request: facts.request, blockers: facts.blockers, links: facts.links, reports: facts.reports }, result: facts.result,
+        customerResult: on && active ? customerView(facts.result) : MANUAL_VIEW, createdBy: null,
+      }
       const ref = newRef()
       let submitted: boolean
       try {
-        submitted = await db.submitInquiry(c.env.DB, { submissionId: s.id, ref, ipHash, input, spam: Boolean(website) }) // a filled honeypot looks accepted
+        submitted = await db.submitInquiry(c.env.DB, { submissionId: s.id, ref, ipHash, input, spam: Boolean(website), estimate }) // a filled honeypot looks accepted
       } catch (e) {
         if (!isDefiniteRollback(e)) throw e
         // A parallel submit got there first, or (one in a billion) the ref collided. The retry answers either way.
         const raced = await db.findRef(c.env.DB, s.id)
-        if (raced) return c.json({ ref: raced })
+        if (raced) return answer(raced)
         throw e
       }
-      if (submitted) return c.json({ ref }, 201)
+      if (submitted) return answer(ref, 201)
       // Nothing committed. Work out why, for the customer: the conditions were checked atomically above.
       const raced = await db.findRef(c.env.DB, s.id)
-      if (raced) return c.json({ ref: raced })
+      if (raced) return answer(raced)
       const files = await db.sessionFileKinds(c.env.DB, s.id)
       if (files.some((f) => f.live)) return fail(c, 409, 'uploads_in_progress', 'Your files are still uploading.')
       if (input.customerKind === 'individual' && files.some((f) => f.kind === 'po' && f.status === 'stored')) {

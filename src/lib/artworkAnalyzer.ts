@@ -1,7 +1,11 @@
 // The browser side of artwork analysis, for staff tools and later the storefront. Any failure, timeout or unsupported format is a refusal, which means manual review.
 import { analyzeArtwork, type ArtworkAnalysis } from '@shared/artworkAnalysis'
+import type { ArtworkReport } from '@shared/inquiry'
 
 export type AnalyzerOutcome = { analysis: ArtworkAnalysis } | { refused: 'unreadable' | 'too_large' | 'timed_out' | 'unsupported' }
+/** The part of a result sent to the server. Null means it was refused, so a person looks. */
+export const reportOf = (o: AnalyzerOutcome): ArtworkReport | null =>
+  ('analysis' in o ? { analyzerVersion: o.analysis.analyzerVersion, estimatedInkColors: o.analysis.estimatedInkColors, confidence: o.analysis.confidence, needsManualReview: o.analysis.needsManualReview, flags: o.analysis.flags } : null)
 const TIMEOUT_MS = 20_000
 const SVG_MAX_BYTES = 1024 * 1024
 const SVG_MAX_ELEMENTS = 5000

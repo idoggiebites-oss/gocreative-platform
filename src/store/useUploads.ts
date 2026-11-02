@@ -1,6 +1,7 @@
 // The upload rows: what the customer sees for each file, in step with the server's reserved -> stored states.
 import { useCallback, useRef, useState } from 'react'
 import { PublicError, SESSION_ENDED, listFiles, removeFile, uploadFile, type FilePurpose, type StoredFile } from './publicApi'
+import type { ArtworkReport } from '@shared/inquiry'
 import type { SavedFile } from './orderForm'
 
 export type Row = {
@@ -8,6 +9,7 @@ export type Row = {
   state: 'uploading' | 'done' | 'failed' | 'removing'
   progress: number; error?: string; id?: string; file?: File; preview?: string
   ambiguous?: boolean // the attempt may have reached the server: check before posting it again
+  report?: ArtworkReport | null // what this browser's analysis found; the server treats it as a claim
 }
 
 const MB = 2 ** 20
@@ -22,8 +24,8 @@ const ACCEPTED_TYPE: Record<FilePurpose, string[]> = { artwork: ['image/png', 'i
 const fits = (file: File, purpose: FilePurpose) => ACCEPTED_TYPE[purpose].includes(file.type) || (!file.type && ACCEPTED[purpose].test(file.name))
 const previewOf = (file: File) => (file.type === 'image/png' || file.type === 'image/jpeg' ? URL.createObjectURL(file) : undefined)
 
-export function useUploads(p: { initial: SavedFile[]; ensureToken: () => Promise<string>; currentToken: () => string | null; dropToken: () => void; onClosed: () => void }) {
-  const [rows, setRows] = useState<Row[]>(() => p.initial.map((f) => ({ key: f.id, id: f.id, name: f.name, bytes: f.bytes, purpose: f.purpose, state: 'done', progress: 1 })))
+export function useUploads(p: { initial: SavedFile[]; ensureToken: () => Promise<string>; currentToken: () => string | null; dropToken: () => void; onClosed: () => void; analyze: boolean }) {
+  const [rows, setRows] = useState<Row[]>(() => p.initial.map((f) => ({ key: f.id, id: f.id, name: f.name, bytes: f.bytes, purpose: f.purpose, state: 'done', progress: 1, report: f.report })))
   const [notice, setNotice] = useState('')
   const [announcement, setAnnouncement] = useState('')
   const [canRestart, setCanRestart] = useState(false)
@@ -111,6 +113,8 @@ export function useUploads(p: { initial: SavedFile[]; ensureToken: () => Promise
       }
       patch(key, { state: 'done', progress: 1, id: ack.id })
       setAnnouncement(`${file.name} uploaded.`)
+      // Only while customer prices are on, and loaded only then: without a report a person simply prices it, so a failure here is never the customer's problem.
+      if (p.analyze && purpose === 'artwork') void import('@/lib/artworkAnalyzer').then(async ({ analyzeFile, reportOf }) => patch(key, { report: reportOf(await analyzeFile(file)) })).catch(() => {})
     } catch (e) {
       const err = e as PublicError
       if (err.code === 'aborted') return

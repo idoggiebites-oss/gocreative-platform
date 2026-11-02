@@ -1,7 +1,7 @@
 // The order form's data and rules. The server's schema (shared/inquiry.ts) stays the authority: this builds what it
 // expects and gives friendly per-field messages first.
 import { business } from '@shared/business'
-import { inquirySubmitSchema } from '@shared/inquiry'
+import { PRINT_METHODS, estimatePreviewSchema, inquirySubmitSchema, type ArtworkReport } from '@shared/inquiry'
 
 export type Product = { slug: string; name: string; hint: string; methods: readonly string[]; sized: boolean }
 export const PRODUCTS: readonly Product[] = business.storefront.products
@@ -10,9 +10,12 @@ export const METHOD_NAMES: Record<string, string> = {
   screen: 'Screen printing', embroidery: 'Embroidery', dtg: 'Direct to garment', laser_engrave: 'Laser engraving', laser_cut: 'Laser cutting', other: 'Other', help: 'Help me choose',
 }
 
+export type Print = { key: string; location: string; size: string; artwork: string }
+export const newPrint = (artwork?: string): Print => ({ key: crypto.randomUUID(), location: '', size: '', artwork: artwork ?? '' })
 export type Item = {
   key: string; product: string; method: string; quantity: string; sizes: Record<string, string>
   color: string; material: string; personalization: string
+  prints?: Print[] // absent on a draft saved before this field existed
 }
 export type Form = {
   items: Item[]; preferMethod: string; description: string; dueDate: string
@@ -36,7 +39,7 @@ export const itemTitle = (i: Item) => `${productOf(i)?.name ?? ''}, ${i.method =
 function newItem(slug: string, preferMethod: string): Item {
   const product = PRODUCTS.find((p) => p.slug === slug)!
   const method = preferMethod === 'help' || product.methods.includes(preferMethod) ? preferMethod : product.methods.length === 1 ? product.methods[0] : ''
-  return { key: crypto.randomUUID(), product: slug, method, quantity: '', sizes: {}, color: '', material: '', personalization: '' }
+  return { key: crypto.randomUUID(), product: slug, method, quantity: '', sizes: {}, color: '', material: '', personalization: '', prints: [] }
 }
 
 /** Ticking a product adds a line; unticking removes every line of it. A method that doesn't fit is never carried over (you can't laser a shirt). */
@@ -83,8 +86,24 @@ export function validateStep(step: number, f: Form): Errors {
 
 const optional = (s: string) => s.trim() || undefined
 
+const lineOf = (i: Item, uploads: ReadonlySet<string>) => ({
+  product: i.product, method: i.method, quantity: totalQuantity(i),
+  sizes: productOf(i)?.sized ? Object.fromEntries(Object.entries(i.sizes).map(([k, v]) => [k, Number(v) || 0]).filter(([, v]) => Number(v) > 0)) : undefined,
+  color: optional(i.color), material: optional(i.material), personalization: optional(i.personalization),
+  prints: PRINT_METHODS.includes(i.method) && i.prints?.some((p) => p.location)
+    ? i.prints.filter((p) => p.location).map((p) => ({ location: p.location, size: (i.method !== 'embroidery' && p.size) || undefined, artwork: uploads.has(p.artwork) ? p.artwork : undefined }))
+    : undefined,
+})
+const someReports = (r: Record<string, ArtworkReport>) => (Object.keys(r).length > 0 ? r : undefined)
+
+/** Asking for a figure sends only the lines and the analysis reports. Null means the form can't be priced yet. */
+export function buildPreview(f: Form, uploads: ReadonlySet<string>, reports: Record<string, ArtworkReport>) {
+  const parsed = estimatePreviewSchema.safeParse({ lines: f.items.map((i) => lineOf(i, uploads)), reports: someReports(reports) })
+  return parsed.success ? parsed.data : null
+}
+
 /** Exactly what the server's strict schema accepts; nothing else can leave the browser. */
-export function buildPayload(f: Form) {
+export function buildPayload(f: Form, uploads: ReadonlySet<string> = new Set(), reports: Record<string, ArtworkReport> = {}) {
   return inquirySubmitSchema.safeParse({
     customerKind: f.forOrganization ? f.customerKind : 'individual',
     organization: f.forOrganization ? optional(f.organization) : undefined,
@@ -95,11 +114,8 @@ export function buildPayload(f: Form) {
     dueDate: optional(f.dueDate),
     designHelp: f.designHelp || undefined,
     description: optional(f.description),
-    lines: f.items.map((i) => ({
-      product: i.product, method: i.method, quantity: totalQuantity(i),
-      sizes: productOf(i)?.sized ? Object.fromEntries(Object.entries(i.sizes).map(([k, v]) => [k, Number(v) || 0]).filter(([, v]) => Number(v) > 0)) : undefined,
-      color: optional(i.color), material: optional(i.material), personalization: optional(i.personalization),
-    })),
+    lines: f.items.map((i) => lineOf(i, uploads)),
+    reports: someReports(reports),
     website: f.website || undefined,
   })
 }
@@ -111,7 +127,7 @@ export const summarize = (f: Form) => f.items.map(describeItem).join('. ') + '.'
 
 // A phone can reload the page when leaving for its file picker, so the form survives in this tab only.
 const KEY = 'inquiry-draft'
-export type SavedFile = { id: string; name: string; bytes: number; purpose: 'artwork' | 'po' }
+export type SavedFile = { id: string; name: string; bytes: number; purpose: 'artwork' | 'po'; report?: ArtworkReport | null }
 export type Draft = { form: Form; token: string | null; files: SavedFile[] }
 export function loadDraft(): Draft | null {
   try {

@@ -41,7 +41,7 @@ const FORM = { customerKind: 'organization', contactName: 'Pat', contactPhone: '
 const submit = (token: string) => api('/submissions/submit', { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(FORM) })
 
 test('ships closed on a freshly migrated database', async () => {
-  expect(await (await api('/status')).json()).toEqual({ open: false, turnstileSiteKey: null })
+  expect(await (await api('/status')).json()).toEqual({ open: false, turnstileSiteKey: null, estimates: false })
   expect((await upload(TOKEN)).status).toBe(503)
   expect((await api('/nope')).status).toBe(404)
   sql("DELETE FROM settings WHERE key = 'intake_closed'")

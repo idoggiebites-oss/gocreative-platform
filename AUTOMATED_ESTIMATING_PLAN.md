@@ -2,6 +2,8 @@
 
 > Status 2026-11-01: **approved by Arturo.** His decisions: S4 waits for E1 to E3; browser analysis with required staff verification; owners alone configure and publish pricing and see costs and margins; staff may adjust individual draft quote prices; customers see one figure with his exact wording; validate on at least 30 real jobs before customers see automatic prices. Offsite backups are deferred as a documented risk, revisited before S4.
 
+> E3 built 2026-11-01 with customer prices switched off in code (`customerEstimates`). Arturo told us to build it while the 30 jobs are collected, ahead of the validation gate in §9; the gate now governs turning prices on, not building. "Start draft quote from this estimate" (§8, optional) was not built: staff enter final prices through the existing quote flow.
+
 ## 1. Confirmed decisions (Arturo)
 
 - **No LLMs, paid AI APIs, vision services or per-image subscriptions.** Deterministic image processing and a rules engine only.

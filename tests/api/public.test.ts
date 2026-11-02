@@ -57,7 +57,7 @@ test('as migrated, intake is closed: every public write refuses and status says 
   const t = setup()
   t.sqlite.exec("INSERT INTO settings (key, value) VALUES ('intake_closed', 'x')")
   expect(await code(await t.call('/submissions', { method: 'POST', body: '{}' }))).toEqual([503, 'intake_closed'])
-  expect(await (await t.call('/status')).json()).toEqual({ open: false, turnstileSiteKey: 'site' })
+  expect(await (await t.call('/status')).json()).toEqual({ open: false, turnstileSiteKey: 'site', estimates: false })
   expect(turnstile).not.toHaveBeenCalled()
   // The migration itself ships the row.
   const fresh = createTestD1()
@@ -73,8 +73,9 @@ test('the whole path: session, uploads, submit; a reference comes back and nothi
   expect(Object.keys(ack).sort()).toEqual(['bytes', 'filename', 'id'])
   const sent = await t.submit(token)
   expect(sent.status).toBe(201)
-  const body = await sent.json() as { ref: string }
-  expect(Object.keys(body)).toEqual(['ref'])
+  const body = await sent.json() as { ref: string; estimate: unknown }
+  expect(Object.keys(body)).toEqual(['ref', 'estimate'])
+  expect(body.estimate).toEqual({ status: 'manual_review_required', totalCents: null, assumptions: [] })
   expect(body.ref).toMatch(/^INQ-[2-9A-HJ-NP-Z]{6}$/)
   const row = t.sqlite.prepare('SELECT status, contact_name, customer_kind, order_id, payload FROM inquiries WHERE ref = ?').get(body.ref) as Record<string, string>
   expect(row).toMatchObject({ status: 'new', contact_name: 'Pat Doe', customer_kind: 'district', order_id: null })
@@ -176,7 +177,7 @@ test('Turnstile: refused, replayed, wrong host, wrong action, missing and down a
 test('status tells the truth: open only when a session could open, and it holds nothing but the public site key', async () => {
   const t = setup()
   const status = async (env: Partial<Env>) => (await app.request(`https://${HOST}/api/public/status`, {}, { ...t.env, ...env })).json()
-  expect(await status({})).toEqual({ open: true, turnstileSiteKey: 'site' })
+  expect(await status({})).toEqual({ open: true, turnstileSiteKey: 'site', estimates: false })
   for (const missing of ['TURNSTILE_SECRET', 'TURNSTILE_SITE_KEY', 'IP_HASH_SALT']) expect(await status({ [missing]: undefined }), missing).toMatchObject({ open: false })
 })
 

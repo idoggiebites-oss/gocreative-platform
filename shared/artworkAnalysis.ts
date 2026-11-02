@@ -24,7 +24,8 @@ export const ANALYSIS_DEFAULTS: AnalysisSettings = {
   maxPixels: 4_000_000, alphaOpaque: 255, flatTolerance: 30, mergeDeltaE: 14, minCoverage: 0.004, minFlatShare: 0.4, maxSpotColors: 8, gradientBinShare: 6, gradientMinBins: 48, softBoundaryShare: 0.002, rampCellDeltaE: 5, edgeColorDistance: 45, unexplainedShare: 0.002, semiManualShare: 0.25, backgroundEdgeShare: 0.6,
 }
 
-export type AnalysisFlag = 'gradient' | 'photographic' | 'too_little_flat_color' | 'too_many_colors' | 'small_details_dropped' | 'likely_background' | 'partly_transparent' | 'fully_transparent' | 'too_large' | 'too_small' | 'thin_details'
+export const ANALYSIS_FLAGS = ['gradient', 'photographic', 'too_little_flat_color', 'too_many_colors', 'small_details_dropped', 'likely_background', 'partly_transparent', 'fully_transparent', 'too_large', 'too_small', 'thin_details'] as const
+export type AnalysisFlag = (typeof ANALYSIS_FLAGS)[number]
 export type AnalysisColor = { hex: string; coverage: number; likelyBackground: boolean }
 export type ArtworkAnalysis = {
   analyzerVersion: number

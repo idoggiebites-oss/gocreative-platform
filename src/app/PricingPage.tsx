@@ -4,9 +4,9 @@ import { Link } from 'react-router'
 import { business } from '@shared/business'
 import { useI18n } from '@/i18n'
 import { send, useMe, usePricing, useSend } from '@/lib/api'
-import { analyzeFile, type AnalyzerOutcome } from '@/lib/artworkAnalyzer'
 import type { PricingConfig } from '../../worker/domain/pricing/engine'
 import { BTN, BTN_PRIMARY, Check, Field, FormDialog, H2, INPUT, LINK, MutationError, SEC } from './form'
+import ArtworkValidation from './ArtworkValidation'
 import QueryBoundary from './QueryBoundary'
 import { CARD, Chip, MUTED, PAGE, TD, TH } from './ui'
 
@@ -245,59 +245,6 @@ function Simulator({ proposal, activeId, onCompared }: { proposal: PricingConfig
   )
 }
 
-type CheckRow = { name: string; outcome: AnalyzerOutcome | null; known: string }
-function ArtworkCheck() {
-  const { m } = useI18n()
-  const t = m.pricing
-  const [rows, setRows] = useState<CheckRow[]>([])
-  const busy = rows.some((r) => !r.outcome) // one batch at a time, so a large selection can't exhaust the browser
-  const add = (files: File[]) => {
-    const start = rows.length
-    setRows((r) => [...r, ...files.map((f) => ({ name: f.name, outcome: null, known: '' }))])
-    files.reduce(async (prev, f, i) => { // one at a time, so a batch can't exhaust the browser
-      await prev
-      const outcome = await analyzeFile(f)
-      setRows((r) => r.map((x, j) => (j === start + i ? { ...x, outcome } : x)))
-    }, Promise.resolve())
-  }
-  const measured = rows.filter((r) => r.known !== '' && r.outcome)
-  const counted = measured.filter((r) => r.outcome && 'analysis' in r.outcome && r.outcome.analysis.estimatedInkColors !== null)
-  const inkOf = (r: CheckRow) => (r.outcome && 'analysis' in r.outcome ? r.outcome.analysis.estimatedInkColors : null)
-  const exact = counted.filter((r) => inkOf(r) === Number(r.known)).length
-  const near = counted.filter((r) => Math.abs((inkOf(r) ?? 99) - Number(r.known)) <= 1).length
-  return (
-    <section className={CARD} aria-labelledby="pricing-check">
-      <div className={SEC}><h2 id="pricing-check" className={H2}>{t.check}</h2></div>
-      <div className="flex flex-col gap-3 px-4 pb-4">
-        <p className={MUTED}>{t.checkHelp}</p>
-        <label className={`${BTN} self-start cursor-pointer`}>{busy ? t.analyzing : t.chooseFiles}<input type="file" multiple disabled={busy} accept=".png,.jpg,.jpeg,.svg,.pdf" className="sr-only" onChange={(e) => { add([...(e.target.files ?? [])]); e.target.value = '' }} /></label>
-        {rows.length > 0 && (
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-[13px]">
-              <thead><tr className="bg-header"><th className={TH}>{t.file}</th><th className={TH}>{t.known}</th><th className={TH}>{t.detected}</th><th className={TH}>{t.flagsCol}</th></tr></thead>
-              <tbody>
-                {rows.map((r, i) => {
-                  const a = r.outcome && 'analysis' in r.outcome ? r.outcome.analysis : null
-                  const flags = a ? a.flags : r.outcome && 'refused' in r.outcome ? [r.outcome.refused] : []
-                  return (
-                    <tr key={i}>
-                      <td className={`${TD} whitespace-normal`}>{r.name}</td>
-                      <td className={TD}><input aria-label={`${t.known}: ${r.name}`} className={`${INPUT} w-16`} inputMode="numeric" value={r.known} onChange={(e) => { const v = e.target.value.replace(/\D/g, ''); setRows(rows.map((x, j) => (j === i ? { ...x, known: v } : x))) }} /></td>
-                      <td className={`${TD} num`}>{!r.outcome ? t.analyzing : a?.estimatedInkColors ?? t.manual}</td>
-                      <td className={`${TD} whitespace-normal`}>{flags.map((f) => t.flags[f] ?? f).join(', ') || m.common.dash}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-        {measured.length > 0 && <p className="text-[13px]" data-testid="check-summary">{t.measured}: {measured.length}. {t.exact}: {exact}. {t.withinOne}: {near}. {t.refused}: {measured.length - counted.length}.</p>}
-      </div>
-    </section>
-  )
-}
-
 function Editor({ state }: { state: PricingState }) {
   const { m, fmt } = useI18n()
   const t = m.pricing
@@ -436,7 +383,7 @@ export default function PricingPage() {
             <>
               <p className="text-[13px]">{d.active ? t.activeVersion(d.active.id) : t.noneActive}{d.draft ? ` ${t.draftOpen}` : ''}</p>
               <Editor state={d} />
-              <ArtworkCheck />
+              <ArtworkValidation />
             </>
           )}
         </QueryBoundary>
