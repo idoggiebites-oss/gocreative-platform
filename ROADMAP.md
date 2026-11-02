@@ -26,7 +26,7 @@ S3 is done and live behind Access. Order, per Arturo: compatibility fix → E1 �
 | E1 | Automated estimating foundation: deterministic artwork analysis, per-service pricing engine, estimate persistence | **Done and live 2026-11-01** (0011 applied) | Stored estimates recalculate exactly; fixtures cover the brief's artwork types |
 | E2 | Settings → Pricing Management: simple and Advanced, simulator, versions, permissions, artwork check | **Done and live for owners 2026-11-01;** real rates come from the family; estimate overrides land in E3, where staff see estimates | Draft rules provably can't reach the storefront |
 | Gate | Validate colour counts against at least 30 real past jobs | Not started; needs the family's artwork | Accuracy measured and thresholds set |
-| E3 | Storefront estimates, uncertainty, staff review | Not started | Customer sees only preliminary totals; server recalculates at submit |
+| E3 | Storefront estimates, uncertainty, staff review | **Built and live behind Access 2026-11-01, customer prices off.** Turning them on needs real rates, the validation (notes/artwork-validation.md) and Arturo's approval | Customer sees only preliminary totals; server recalculates at submit |
 
 Earlier plans folded into this order: the estimator (old Phase 6 / "Phase 4") becomes an optional printing-module
 feature after the storefront; nothing about it is scheduled yet.

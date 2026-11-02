@@ -129,3 +129,12 @@ inside its card in Spanish.
 ### 2026-11-01 — The Cloudflare API can refuse a read once, then work
 - **Cost:** a D1 query returned code 7403 (not authorized) with no change in access; the next call worked. It happened twice this session.
 - **Rule:** retry once before treating 7403 as an access problem, and never let a check that errored count as a pass.
+
+### 2026-11-01 — A bulk replace on a key name hits every dialog that shares it
+
+Editing `reasonHint` by regex overwrote the hint on Cancel order and replace PO too; 677 tests and every browser check still passed, and Codex caught it. Rule: after a scripted i18n edit, `git diff main -- shared/i18n | grep '^-'` should list only lines meant to change.
+
+### 2026-11-01 — A new test that merges over a default may not remove anything
+
+`withScreen(configWithoutFee)` spreads over a config that has the fee, so the "blank fee" test never blanked it. Rule: pass the key explicitly as undefined. And run the target test before launching the gate, as the earlier learning already says.
+
