@@ -130,7 +130,7 @@ test('pricing on real D1: publishDraft itself, in parallel, with stale guards; o
 
 test('on real D1: the estimate quota holds under parallel calls, submit stores the server\'s figure, and parallel reviews write one row', async () => {
   const j = (method: string, body: unknown, token?: string) => ({ method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(body) })
-  const config = { productCostCents: { tshirts: 300 }, services: { screen: { adjustmentBps: 0, pricing: { mode: 'markup', rateBps: 10000 }, colorCostTiers: [{ minQty: 1, costCents: 100 }] } } }
+  const config = { productCostCents: { tshirts: 300 }, services: { screen: { adjustmentBps: 0, pricing: { mode: 'markup', rateBps: 10000 }, colorCostTiers: [{ minQty: 1, costCents: 100 }], screenFee: { sellCents: 0, costCents: 0 }, sizeCostCents: { small: 0, medium: 0, large: 0 } } } }
   const state = async () => (await (await fetch(`${base()}/app/pricing`)).json()) as { active: { id: number } | null; draft: { id: number; hash: string } | null }
   const was = await state()
   expect((await fetch(`${base()}/app/pricing/draft`, j('PUT', { config, expectedHash: was.draft?.hash ?? null }))).status).toBe(200)
@@ -142,7 +142,7 @@ test('on real D1: the estimate quota holds under parallel calls, submit stores t
   expect(up.status).toBe(201)
   const fileUpload = ((await up.json()) as { id: string }).id
   const report = { analyzerVersion: 1, estimatedInkColors: 2, confidence: 'high', needsManualReview: false, flags: [] }
-  const body = { lines: [{ product: 'tshirts', method: 'screen', quantity: 10, sizes: { M: 10 }, prints: [{ location: 'front', artwork: fileUpload }] }], reports: { [fileUpload]: report } }
+  const body = { lines: [{ product: 'tshirts', method: 'screen', quantity: 10, sizes: { M: 10 }, prints: [{ location: 'front', size: 'medium', artwork: fileUpload }] }], reports: { [fileUpload]: report } }
   const calls = await Promise.all(Array.from({ length: 25 }, () => fetch(`${base()}/public/estimate`, j('POST', body, token))))
   expect(calls.filter((r) => r.status === 200)).toHaveLength(20)
   expect(calls.filter((r) => r.status === 429)).toHaveLength(5)

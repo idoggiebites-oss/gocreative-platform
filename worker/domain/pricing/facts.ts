@@ -17,7 +17,8 @@ const assumptionsFrom = (reports: (ArtworkReport | null | undefined)[]) => [
   ...(reports.some((r) => r?.flags.includes('small_details_dropped')) ? [SMALL_DETAILS] : []),
 ]
 
-const withBlockers = (config: PricingConfig | null, request: EstimateRequest, blockers: string[]): EstimateResult => {
+/** The whole calculation from what is stored: the request plus what stopped it. This, not the engine alone, is what replays an estimate. */
+export const withBlockers = (config: PricingConfig | null, request: EstimateRequest, blockers: string[]): EstimateResult => {
   const result = calculateEstimate(config, request)
   return blockers.length > 0 ? manual([...blockers, ...result.reasons], result.assumptions) : result
 }
@@ -91,6 +92,7 @@ export function reviewedEstimate(config: PricingConfig | null, payload: PayloadL
         for (const f of FIELDS) change(`line${i + 1}.print${j + 1}.${f}`, before?.[f], d[f])
         if (s.method === 'screen') change(`line${i + 1}.print${j + 1}.colors`, d.fileId !== null ? defensibleColors(reports[j]) : before?.colors, d.colors)
       })
+      for (let j = was?.decorations.length ?? 0; j < s.decorations.length; j++) change(`line${i + 1}.print${j + 1}`, null, 'added')
       for (let j = s.decorations.length; j < (was?.decorations.length ?? 0); j++) change(`line${i + 1}.print${j + 1}`, was!.decorations[j].location ?? 'print', null)
       return {
         product: l.product, method: s.method, quantity: l.quantity, assumptions: assumptionsFrom(reports),

@@ -3,7 +3,8 @@ import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { ANALYZER_VERSION } from '../../shared/artworkAnalysis'
 import { business } from '../../shared/business'
-import { calculateEstimate, parseConfig } from '../../worker/domain/pricing/engine'
+import { parseConfig } from '../../worker/domain/pricing/engine'
+import { withBlockers } from '../../worker/domain/pricing/facts'
 import { SESSION_MAX_ESTIMATES } from '../../worker/domain/intake'
 import { app } from '../../worker/index'
 import { createTestD1 } from './d1'
@@ -13,7 +14,7 @@ const seed = readFileSync(new URL('../../scripts/seed.sql', import.meta.url), 'u
 const HOST = 'localhost'
 const OWNER = 'owner1@example.com'
 const STAFF = 'staff9@example.com'
-const SCREEN = { adjustmentBps: 0, pricing: { mode: 'markup', rateBps: 10000 }, colorCostTiers: [{ minQty: 1, costCents: 100 }], screenFee: { sellCents: 1000, costCents: 400 } }
+const SCREEN = { adjustmentBps: 0, pricing: { mode: 'markup', rateBps: 10000 }, colorCostTiers: [{ minQty: 1, costCents: 100 }], screenFee: { sellCents: 1000, costCents: 400 }, sizeCostCents: { small: 0, medium: 0, large: 0 } }
 const CONFIG = { productCostCents: { tshirts: 300 }, services: { screen: SCREEN } }
 const report = (colors: number | null, over: object = {}) => ({ analyzerVersion: ANALYZER_VERSION, estimatedInkColors: colors, confidence: 'high', needsManualReview: colors === null, flags: [], ...over })
 const FORM = { customerKind: 'individual', contactName: 'Pat Doe', contactEmail: 'pat@example.com' }
@@ -43,7 +44,7 @@ function setup(on = true) {
   const estimates = (id: number, as = OWNER) => staff('GET', `/inquiries/${id}/estimates`, undefined, as)
   return { sqlite, db, env, pub, staff, open, upload, preview, submit, publish, n, estimates }
 }
-const line = (artwork: string | undefined, quantity = 10) => ({ product: 'tshirts', method: 'screen', quantity, prints: [{ location: 'front', artwork }] })
+const line = (artwork: string | undefined, quantity = 10) => ({ product: 'tshirts', method: 'screen', quantity, prints: [{ location: 'front', size: 'medium', artwork }] })
 const inquiryId = (t: ReturnType<typeof setup>) => (t.sqlite.prepare('SELECT id FROM inquiries ORDER BY id DESC LIMIT 1').get() as { id: number }).id
 
 beforeEach(() => { vi.stubGlobal('fetch', vi.fn(async () => new Response('{}'))) })
@@ -130,14 +131,67 @@ test('no defensible count means manual review: gradients, photos, transparency, 
     [line(foreign), { [foreign]: report(2) }],
     [{ product: 'tshirts', method: 'help', quantity: 10 }, {}],
     [{ product: 'tshirts', method: 'screen', quantity: 10 }, {}],
-    [{ product: 'tshirts', method: 'embroidery', quantity: 10, prints: [{ location: 'front', artwork: id }] }, { [id]: report(2) }],
+    [{ product: 'tshirts', method: 'embroidery', quantity: 10, prints: [{ location: 'front', size: 'medium', artwork: id }] }, { [id]: report(2) }],
+    [{ product: 'tshirts', method: 'screen', quantity: 10, prints: [{ location: 'front', artwork: id }] }, { [id]: report(2) }],
     [{ product: 'trophies', method: 'laser_engrave', quantity: 10 }, {}],
-    [{ product: 'hoodies', method: 'screen', quantity: 10, prints: [{ location: 'front', artwork: id }] }, { [id]: report(2) }],
+    [{ product: 'hoodies', method: 'screen', quantity: 10, prints: [{ location: 'front', size: 'medium', artwork: id }] }, { [id]: report(2) }],
   ]
   for (const [l, reports] of cases) {
     const r = await (await t.preview(token, { lines: [l], reports })).json() as { estimate: { status: string; totalCents: null; assumptions: string[] } }
     expect(r.estimate, JSON.stringify(l)).toEqual({ status: 'manual_review_required', totalCents: null, assumptions: [] })
   }
+})
+
+test('a blank charge is never zero: a missing screen fee or size schedule goes to manual review, a typed zero prices', async () => {
+  const t = setup()
+  const { screenFee: _fee, ...noFee } = SCREEN
+  const { sizeCostCents: _sizes, ...noSizes } = SCREEN
+  const token = await t.open()
+  const id = await t.upload(token)
+  const ask = async () => ((await (await t.preview(token, { lines: [line(id)], reports: { [id]: report(2) } })).json()) as { estimate: { totalCents: number | null } }).estimate.totalCents
+  await t.publish({ ...CONFIG, services: { screen: noFee } })
+  expect(await ask()).toBeNull()
+  await t.publish({ ...CONFIG, services: { screen: noSizes } })
+  expect(await ask()).toBeNull()
+  await t.publish({ ...CONFIG, services: { screen: { ...SCREEN, screenFee: { sellCents: 0, costCents: 0 } } } })
+  expect(await ask()).toBe(10000)
+})
+
+test('replay: what stopped an estimate is stored with it, so replaying a manual review stays a manual review', async () => {
+  const t = setup()
+  await t.publish({ ...CONFIG, services: { dtg: { adjustmentBps: 0, pricing: { mode: 'markup', rateBps: 10000 }, sizeCostTiers: { small: [{ minQty: 1, costCents: 100 }] } } } })
+  const token = await t.open()
+  await t.submit(token, { lines: [{ product: 'tshirts', method: 'dtg', quantity: 10, prints: [{ location: 'front', size: 'small' }] }] })
+  const row = t.sqlite.prepare('SELECT status, inputs, pricing_version_id AS v FROM inquiry_estimates').get() as { status: string; inputs: string; v: number }
+  expect(row.status).toBe('manual_review_required')
+  const config = (t.sqlite.prepare('SELECT config FROM pricing_versions WHERE id = ?').get(row.v) as { config: string }).config
+  const { request, blockers } = JSON.parse(row.inputs)
+  expect(withBlockers(parseConfig(config), request, blockers).status).toBe('manual_review_required')
+})
+
+test('a file removed after the estimate was worked out: nothing is saved, and the customer is told', async () => {
+  const t = setup()
+  await t.publish(CONFIG)
+  const token = await t.open()
+  const id = await t.upload(token)
+  const original = t.db.batch.bind(t.db)
+  // The race: the file goes between the read and the batch.
+  t.db.batch = (async (s: Parameters<typeof t.db.batch>[0]) => { t.sqlite.exec(`UPDATE inquiry_files SET status = 'deleting' WHERE id = '${id}'`); t.db.batch = original; return original(s) }) as typeof t.db.batch
+  const res = await t.submit(token, { lines: [line(id)], reports: { [id]: report(2) } })
+  expect(res.status).toBe(409)
+  expect(((await res.json()) as { code: string }).code).toBe('files_changed')
+  expect(t.n('inquiries')).toBe(0)
+  expect(t.n('inquiry_estimates')).toBe(0)
+})
+
+test('adding an empty print is a change, so it needs a reason too', async () => {
+  const t = setup()
+  await t.publish(CONFIG)
+  const x = await submitted(t)
+  const empty = { location: null, size: null, colors: null, complexity: null, machineMinutes: null, fileId: null }
+  const b = reviewBody(x, 2)
+  const res = await t.staff('POST', `/inquiries/${x.inquiry}/estimates/review`, { ...b, lines: [{ method: 'screen', decorations: [...b.lines[0].decorations, empty] }] })
+  expect(((await res.json()) as { code: string }).code).toBe('estimate_reason_required')
 })
 
 test('a link to another session\'s file is never stored, and does not resolve for staff', async () => {
@@ -196,7 +250,7 @@ test('prices published between preview and submit: the stored figure and version
   expect(row.pricing_version_id).toBe(v2)
   // Reproducible: stored inputs plus the stored version give the stored figure.
   const config = (t.sqlite.prepare('SELECT config FROM pricing_versions WHERE id = ?').get(v2) as { config: string }).config
-  expect(calculateEstimate(parseConfig(config), JSON.parse(row.inputs).request).totalCents).toBe(JSON.parse(row.internal_result).totalCents)
+  expect(withBlockers(parseConfig(config), JSON.parse(row.inputs).request, JSON.parse(row.inputs).blockers).totalCents).toBe(JSON.parse(row.internal_result).totalCents)
   // A later publish leaves it alone.
   await t.publish({ ...CONFIG, productCostCents: { tshirts: 999 } })
   expect((t.sqlite.prepare('SELECT pricing_version_id FROM inquiry_estimates').get() as { pricing_version_id: number }).pricing_version_id).toBe(v2)

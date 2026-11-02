@@ -211,7 +211,7 @@ export function publicRoutes() {
       const ref = newRef()
       let submitted: boolean
       try {
-        submitted = await db.submitInquiry(c.env.DB, { submissionId: s.id, ref, ipHash, input, spam: Boolean(website), estimate }) // a filled honeypot looks accepted
+        submitted = await db.submitInquiry(c.env.DB, { submissionId: s.id, ref, ipHash, input, spam: Boolean(website), estimate, linked: [...new Set(facts.links.flat().filter((id) => id !== null))] }) // a filled honeypot looks accepted
       } catch (e) {
         if (!isDefiniteRollback(e)) throw e
         // A parallel submit got there first, or (one in a billion) the ref collided. The retry answers either way.
@@ -224,6 +224,8 @@ export function publicRoutes() {
       const raced = await db.findRef(c.env.DB, s.id)
       if (raced) return answer(raced)
       const files = await db.sessionFileKinds(c.env.DB, s.id)
+      const still = new Set((await db.listStoredFiles(c.env.DB, s.id)).map((f) => f.id))
+      if (facts.links.flat().some((id) => id !== null && !still.has(id))) return fail(c, 409, 'files_changed', 'Your files changed while sending. Please check them and send again.')
       if (files.some((f) => f.live)) return fail(c, 409, 'uploads_in_progress', 'Your files are still uploading.')
       if (input.customerKind === 'individual' && files.some((f) => f.kind === 'po' && f.status === 'stored')) {
         return fail(c, 400, 'po_not_accepted', 'Purchase orders are for schools, districts and organizations.')

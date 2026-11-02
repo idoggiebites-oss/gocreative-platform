@@ -527,4 +527,6 @@ Migration 0006 (additive), `worker/db/{pickups,payments}.ts`, `worker/routes/{pi
 - **Staff review adds a row; it never edits one, and writes to no order, item or quote.** It reads the stored original, requires every stored artwork file to be re-analysed, and needs a reason for any change. One reason per review, stored on each changed field.
 - **"Start draft quote from this estimate" not built.** Optional in the plan, not in Arturo's E3 list, and leaving it out keeps conversion and quotes untouched.
 - **Staff see "needs an owner to review the price" rather than a margin refusal,** because whether a job clears the margin is owner-only.
+- **Blank is unknown, in the engine too (Codex).** A missing screen, digitizing or setup fee, or missing print-size charges, now means manual review instead of silently adding nothing. An owner who charges nothing types 0. Print size is therefore required for a screen price. Engine version 2.
+- **`staff_reviewed` is an attestation, not proof (Codex; accepted limit).** Analysis runs in the staff browser, as approved, so the server can't prove it ran. A signed-in employee could post made-up results, as they could type any price on a draft quote. It records who did it, and every final price still goes through the quote.
 

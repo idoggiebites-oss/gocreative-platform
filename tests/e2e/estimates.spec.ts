@@ -11,7 +11,7 @@ test.beforeEach(async ({ page }) => {
 })
 
 async function publish(page: Page) {
-  const config = { productCostCents: { tshirts: 300 }, services: { screen: { adjustmentBps: 0, pricing: { mode: 'markup', rateBps: 10000 }, colorCostTiers: [{ minQty: 1, costCents: 100 }], screenFee: { sellCents: 1000, costCents: 400 } } } }
+  const config = { productCostCents: { tshirts: 300 }, services: { screen: { adjustmentBps: 0, pricing: { mode: 'markup', rateBps: 10000 }, colorCostTiers: [{ minQty: 1, costCents: 100 }], screenFee: { sellCents: 1000, costCents: 400 }, sizeCostCents: { small: 0, medium: 0, large: 0 } } } }
   expect((await page.request.put('/api/app/pricing/draft', { data: { config, expectedHash: null } })).status()).toBe(200)
   const draft = ((await (await page.request.get('/api/app/pricing')).json()) as { draft: { id: number; hash: string } }).draft
   expect((await page.request.post('/api/app/pricing/publish', { data: { draftId: draft.id, draftHash: draft.hash, expectedActiveId: null } })).status()).toBe(200)
@@ -33,6 +33,7 @@ async function toReview(page: Page, name: string, withPrint = true) {
     const prints = page.getByRole('region', { name: /^Print details/ })
     await prints.getByRole('button', { name: 'Add a print location' }).click()
     await prints.getByLabel('Where on the item').selectOption('front')
+    await prints.getByLabel('Print size').selectOption('medium')
   }
   await page.getByRole('button', { name: 'Continue to your details' }).click()
   await page.getByLabel('Your name').fill(name)
@@ -80,7 +81,7 @@ test('switched on: one figure in the agreed words, then staff re-analyze the sto
   await expect(card).toContainText('Calculated: $120.00')
   await expect(card).toContainText('not verified')
   await expect(card).toContainText('Shown to the customer: $120.00')
-  await expect(page.getByText('Full front, two-inks.png')).toBeVisible()
+  await expect(page.getByText('Full front, medium, two-inks.png')).toBeVisible()
 
   await card.getByRole('button', { name: 'Review artwork and details' }).click()
   const dialog = page.getByRole('dialog')

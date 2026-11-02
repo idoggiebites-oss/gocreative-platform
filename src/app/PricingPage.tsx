@@ -161,6 +161,7 @@ const toRequest = (lines: SampleLine[]) => ({
 
 // The engine's reasons are for the owner, in plain words. Spanish screens get them translated here; an unknown one shows as it is.
 const REASONS_ES: [RegExp, string][] = [
+  [/^line (\d+): screen fee not set$/, 'línea $1: tarifa de pantallas sin definir'], [/^line (\d+): print size charges not set$/, 'línea $1: cargos por tamaño sin definir'], [/^line (\d+): digitizing fee not set$/, 'línea $1: tarifa de digitalización sin definir'], [/^line (\d+): setup fee not set$/, 'línea $1: tarifa de preparación sin definir'], [/^line (\d+): a print has no artwork$/, 'línea $1: una impresión no tiene arte'],
   [/^no published pricing$/, 'no hay precios publicados'], [/^no lines$/, 'sin líneas'], [/^below the minimum margin$/, 'por debajo del margen mínimo'], [/^total over the review limit$/, 'total por encima del límite de revisión'],
   [/^amount too large to calculate exactly$/, 'monto demasiado grande para calcular con exactitud'], [/^the calculation came to nothing$/, 'el cálculo dio cero'], [/^line (\d+): invalid quantity$/, 'línea $1: cantidad no válida'],
   [/^line (\d+): quantity over the review limit$/, 'línea $1: cantidad por encima del límite de revisión'], [/^line (\d+): method needs a person \((.*)\)$/, 'línea $1: este método requiere a una persona ($2)'], [/^line (\d+): screen has no published rates$/, 'línea $1: serigrafía sin tarifas publicadas'], [/^line (\d+): embroidery has no published rates$/, 'línea $1: bordado sin tarifas publicadas'], [/^line (\d+): dtg has no published rates$/, 'línea $1: impresión directa sin tarifas publicadas'], [/^line (\d+): engraving has no published rates$/, 'línea $1: grabado sin tarifas publicadas'],
@@ -299,6 +300,7 @@ function Editor({ state }: { state: PricingState }) {
       <details className={CARD}>
         <summary className="cursor-pointer px-4 py-3 text-sm font-semibold">{t.advanced}</summary>
         <div className="flex flex-col gap-4 px-4 pb-4">
+          <p className={MUTED}>{t.blankHelp}</p>
           <section className="flex flex-col gap-2" aria-label={t.productCosts}>
             <h3 className="text-[13px] font-semibold">{t.productCosts}</h3>
             <p className={MUTED}>{t.productHelp}</p>

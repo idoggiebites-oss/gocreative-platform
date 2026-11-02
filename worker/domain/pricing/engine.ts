@@ -3,7 +3,7 @@
 // Money is integer cents and rates are basis points. Exact fractions are carried until a single round-up, so rounding never stacks.
 import { z } from 'zod'
 
-export const ENGINE_VERSION = 1
+export const ENGINE_VERSION = 2
 
 const cents = z.number().int().min(0).max(100_000_000)
 const bps = z.number().int().min(-9000).max(100_000)
@@ -24,7 +24,7 @@ export const pricingConfigSchema = z.object({
       adjustmentBps: bps, pricing,
       /** Cost of printing one color at one location, by quantity. */
       colorCostTiers: tier({ costCents: cents }),
-      screenFee: fee.optional(), // per color, per location
+      screenFee: fee.optional(), // per color, per location. Absent means not set, so manual review; a typed 0 means no charge
       sizeCostCents: bySize.optional(),
       maxColors: z.number().int().min(1).max(20).optional(),
     }).strict().optional(),
@@ -128,27 +128,29 @@ function costLine(cfg: PricingConfig, service: ServiceKey, line: EstimateLineInp
     const s = cfg.services.screen!
     const t = pickTier(s.colorCostTiers, q)
     if (!t) return { manual: 'quantity below the first screen tier' }
+    // Blank is unknown, and unknown is never zero. An owner who charges nothing here types 0.
+    if (!s.screenFee) return { manual: 'screen fee not set' }
+    if (!s.sizeCostCents) return { manual: 'print size charges not set' }
     for (const d of line.decorations) {
       if (d.colors === null || d.colors === undefined || !Number.isInteger(d.colors) || d.colors < 1) return { manual: 'ink colors unknown' }
       if (s.maxColors !== undefined && d.colors > s.maxColors) return { manual: 'more colors than the review limit' }
       unit += t.costCents * d.colors
-      if (s.sizeCostCents) {
-        if (!d.size) return { manual: 'print size unknown' }
-        const add = s.sizeCostCents[d.size]
-        if (add === undefined) return { manual: `no rate for ${d.size} prints` }
-        unit += add
-      }
-      if (s.screenFee) fees.push({ label: `Screen setup${d.location ? `, ${d.location}` : ''}`, quantity: d.colors, sell: s.screenFee.sellCents, cost: s.screenFee.costCents })
+      if (!d.size) return { manual: 'print size unknown' }
+      const add = s.sizeCostCents[d.size]
+      if (add === undefined) return { manual: `no rate for ${d.size} prints` }
+      unit += add
+      fees.push({ label: `Screen setup${d.location ? `, ${d.location}` : ''}`, quantity: d.colors, sell: s.screenFee.sellCents, cost: s.screenFee.costCents })
     }
   } else if (service === 'embroidery') {
     const s = cfg.services.embroidery!
+    if (!s.digitizingFee) return { manual: 'digitizing fee not set' }
     for (const d of line.decorations) {
       if (!d.complexity) return { manual: 'embroidery complexity unknown' }
       const tiers = s.complexityCostTiers[d.complexity]
       const t = tiers && pickTier(tiers, q)
       if (!t) return { manual: `no rate for ${d.complexity} embroidery at this quantity` }
       unit += t.costCents
-      if (s.digitizingFee) fees.push({ label: `Digitizing${d.location ? `, ${d.location}` : ''}`, quantity: 1, sell: s.digitizingFee.sellCents, cost: s.digitizingFee.costCents })
+      fees.push({ label: `Digitizing${d.location ? `, ${d.location}` : ''}`, quantity: 1, sell: s.digitizingFee.sellCents, cost: s.digitizingFee.costCents })
     }
   } else if (service === 'dtg') {
     const s = cfg.services.dtg!
@@ -161,11 +163,12 @@ function costLine(cfg: PricingConfig, service: ServiceKey, line: EstimateLineInp
     }
   } else {
     const s = cfg.services.engraving!
+    if (!s.setupFee) return { manual: 'setup fee not set' }
     for (const d of line.decorations) {
       if (d.machineMinutes === undefined || !Number.isFinite(d.machineMinutes) || d.machineMinutes <= 0 || d.machineMinutes > 1440) return { manual: 'machine time unknown' }
       unit += Math.ceil(s.machineCostPerMinuteCents * d.machineMinutes)
     }
-    if (s.setupFee) fees.push({ label: 'Setup', quantity: 1, sell: s.setupFee.sellCents, cost: s.setupFee.costCents })
+    fees.push({ label: 'Setup', quantity: 1, sell: s.setupFee.sellCents, cost: s.setupFee.costCents })
   }
   return { unitCost: unit, fees }
 }

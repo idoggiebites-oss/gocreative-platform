@@ -101,7 +101,7 @@ export const findRef = async (db: D1Database, submissionId: string) =>
  * One batch: the inquiry, its files linked, the audit row, and the session closed last. Everything is guarded on the
  * session being open with no upload in flight, so false means nothing happened and the caller works out why.
  */
-export async function submitInquiry(db: D1Database, p: { submissionId: string; ref: string; ipHash: string; input: Omit<InquirySubmit, 'website' | 'reports'>; spam: boolean; estimate: Omit<NewEstimate, 'inquiryId'> }) {
+export async function submitInquiry(db: D1Database, p: { submissionId: string; ref: string; ipHash: string; input: Omit<InquirySubmit, 'website' | 'reports'>; spam: boolean; estimate: Omit<NewEstimate, 'inquiryId'>; linked: string[] }) {
   const i = p.input
   const payload = JSON.stringify({ lines: i.lines, designHelp: i.designHelp ?? false, description: i.description ?? null })
   const sid = p.submissionId
@@ -113,8 +113,10 @@ export async function submitInquiry(db: D1Database, p: { submissionId: string; r
       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
       WHERE EXISTS (SELECT 1 FROM inquiry_submissions WHERE id = ? AND ${OPEN})
         AND NOT EXISTS (SELECT 1 FROM inquiry_files WHERE submission_id = ? AND ${LIVE})
-        AND (? <> 'individual' OR NOT EXISTS (SELECT 1 FROM inquiry_files WHERE submission_id = ? AND status = 'stored' AND kind = 'po'))`)
-      .bind(payload, i.contactName, i.contactEmail ?? null, i.contactPhone ?? null, p.spam ? 'spam' : 'new', p.ref, sid, i.customerKind, i.organization ?? null, i.preferredContact ?? null, i.dueDate ?? null, p.ipHash, sid, sid, i.customerKind, sid),
+        AND (? <> 'individual' OR NOT EXISTS (SELECT 1 FROM inquiry_files WHERE submission_id = ? AND status = 'stored' AND kind = 'po'))
+        -- The estimate was worked out from these files, so each must still be here when it is saved.
+        AND NOT EXISTS (SELECT 1 FROM json_each(?) j WHERE NOT EXISTS (SELECT 1 FROM inquiry_files f WHERE f.id = j.value AND f.submission_id = ? AND f.status = 'stored'))`)
+      .bind(payload, i.contactName, i.contactEmail ?? null, i.contactPhone ?? null, p.spam ? 'spam' : 'new', p.ref, sid, i.customerKind, i.organization ?? null, i.preferredContact ?? null, i.dueDate ?? null, p.ipHash, sid, sid, i.customerKind, sid, JSON.stringify(p.linked), sid),
     db.prepare(`INSERT INTO files (r2_key, mime, bytes, sha256, via_portal, filename)
       SELECT r2_key, mime, bytes, sha256, 1, filename FROM inquiry_files WHERE submission_id = ? AND status = 'stored' AND ${justInserted}`).bind(sid, sid, sid),
     db.prepare(`UPDATE inquiry_files SET status = 'linked', inquiry_id = ${mine}, file_id = (SELECT id FROM files WHERE files.r2_key = inquiry_files.r2_key)

@@ -32,7 +32,9 @@ export default function ArtworkValidation() {
     files.reduce(async (prev, f, i) => { // one at a time, so a batch can't exhaust the browser
       await prev
       const outcome = await analyzeFile(f)
-      setRows((r) => r.map((x, j) => (j === start + i ? { ...x, done: true, report: reportOf(outcome), refused: 'refused' in outcome ? outcome.refused : null } : x)))
+      const bytes = await crypto.subtle.digest('SHA-256', await f.arrayBuffer())
+      const hash = Array.from(new Uint8Array(bytes), (b) => b.toString(16).padStart(2, '0')).join('')
+      setRows((r) => r.map((x, j) => (j === start + i ? { ...x, done: true, hash, report: reportOf(outcome), refused: 'refused' in outcome ? outcome.refused : null } : x)))
     }, Promise.resolve())
   }
   const s = validationSummary(rows.filter((r) => r.done))
@@ -75,8 +77,8 @@ export default function ArtworkValidation() {
         {s.jobs > 0 && (
           <div className="flex flex-col gap-1 text-[13px]">
             <p data-testid="check-summary">{t.measured}: {s.jobs}. {t.exact}: {s.exact}. {t.withinOne}: {s.withinOne}. {t.refused}: {s.manual}.</p>
-            <p data-testid="check-risk"><strong>{t.wrongButPriced}: {s.wrongButPriced}.</strong>{s.exactRange && ` ${t.exactRange(s.counted, percent(s.exactRange[0]), percent(s.exactRange[1]))}`}</p>
-            <p data-testid="check-enough" className={MUTED}>{s.enough ? t.enoughJobs : t.notEnoughJobs(s.jobs, MIN_JOBS)}</p>
+            <p data-testid="check-risk"><strong>{t.wrongCount}: {s.wrongCount}.</strong>{s.exactRange && ` ${t.exactRange(s.counted, percent(s.exactRange[0]), percent(s.exactRange[1]))}`}</p>
+            <p data-testid="check-enough" className={MUTED}>{s.enough ? t.enoughJobs : t.notEnoughJobs(s.distinct, MIN_JOBS)}</p>
             {s.notes.length > 0 && (
               <ul data-testid="check-notes" className={MUTED}>
                 {s.notes.map((n) => <li key={n.note}>{t.flags[n.note] ?? n.note}: {t.noteLine(n.jobs, n.manual, n.wrong)}</li>)}

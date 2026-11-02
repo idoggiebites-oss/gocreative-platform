@@ -1,9 +1,10 @@
-// Measures the artwork analysis against real jobs. It uses the rule customers would really get (defensibleColors), so it measures what ships. Pure: no file ever reaches it.
+// Measures the color count against real jobs, by the rule customers would get (defensibleColors). It says nothing about rates, limits or margin checks, which can still send a job to a person. Pure: no file ever reaches it.
 import type { ArtworkReport } from './inquiry'
 import { defensibleColors } from './inquiry'
 
 export const MIN_JOBS = 30
-export type ValidationRow = { name: string; actual: number | null; report: ArtworkReport | null; refused: string | null }
+/** `hash` identifies the file's bytes, so choosing one file thirty times can't look like thirty jobs. */
+export type ValidationRow = { name: string; actual: number | null; report: ArtworkReport | null; refused: string | null; hash?: string | null }
 
 /** Wilson 95% interval: with 30 jobs a single percentage hides how little is known. Null with nothing to measure. */
 export function wilson(hits: number, n: number): [number, number] | null {
@@ -21,6 +22,7 @@ export function validationSummary(rows: readonly ValidationRow[]) {
   const counted = jobs.filter((r) => defensibleColors(r.report) !== null)
   const off = (r: ValidationRow) => Math.abs(defensibleColors(r.report)! - r.actual!)
   const exact = counted.filter((r) => off(r) === 0).length
+  const distinct = new Set(jobs.map((r, i) => r.hash ?? `row-${i}`)).size
   const notes = new Map<string, { jobs: number; manual: number; wrong: number }>()
   for (const r of jobs) {
     for (const note of r.refused ? [r.refused] : r.report?.flags ?? []) {
@@ -33,8 +35,8 @@ export function validationSummary(rows: readonly ValidationRow[]) {
   }
   return {
     jobs: jobs.length, counted: counted.length, manual: jobs.length - counted.length, exact, withinOne: counted.filter((r) => off(r) <= 1).length,
-    /** The number that matters most: a count that would have priced a customer's job, and was wrong. */
-    wrongButPriced: counted.length - exact, exactRange: wilson(exact, counted.length), enough: jobs.length >= MIN_JOBS, notes: [...notes].map(([note, n]) => ({ note, ...n })),
+    /** The number that matters most: the analysis gave a count, and it was wrong. */
+    wrongCount: counted.length - exact, exactRange: wilson(exact, counted.length), distinct, enough: distinct >= MIN_JOBS, notes: [...notes].map(([note, n]) => ({ note, ...n })),
   }
 }
 

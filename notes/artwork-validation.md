@@ -11,11 +11,12 @@ At least 30 past jobs, each with the original artwork file and the number of scr
 3. Download results. The results are kept only in that browser until cleared, so keep the CSV somewhere private.
 
 ## How to read it
-- **Would have priced a job with the wrong count** is the number that matters: the analysis gave a count, the customer would have seen a price, and the count was wrong.
+- **Gave a count, and it was wrong** is the number that matters. It measures the colour count only: rates, limits and margin checks can still send a job to a person, so it isn't a count of customers shown a wrong price.
 - **Sent to manual review** is safe but costs staff time. The notes list shows which kinds of artwork end up there.
 - The exact-match range is a 95% interval. 30 out of 30 still only means roughly 89% or better.
 
 ## Rules
+- Each file counts once, by its bytes: one file chosen thirty times is one job.
 - Don't tune thresholds until they pass this sample, and then quote this sample's numbers. If settings change, measure again on jobs the change wasn't based on.
 - No accuracy claim anywhere without these numbers and their range.
 - Passing is Arturo's decision, not a threshold in the code. The switch is `customerEstimates` in `shared/business.ts`: a code change and a deploy, on purpose.

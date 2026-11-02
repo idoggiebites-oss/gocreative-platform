@@ -8,7 +8,7 @@ const row = (actual: number | null, r: ArtworkReport | null, refused: string | n
 
 test('only jobs with a known count are measured, by the same rule customers would get', () => {
   const s = validationSummary([row(2, report(2)), row(3, report(2)), row(5, report(3)), row(2, report(2, ['gradient'])), row(4, null, 'unsupported'), row(null, report(1))])
-  expect(s).toMatchObject({ jobs: 5, counted: 3, manual: 2, exact: 1, withinOne: 2, wrongButPriced: 2, enough: false })
+  expect(s).toMatchObject({ jobs: 5, counted: 3, manual: 2, exact: 1, withinOne: 2, wrongCount: 2, enough: false })
   expect(s.notes).toEqual(expect.arrayContaining([{ note: 'gradient', jobs: 1, manual: 1, wrong: 0 }, { note: 'unsupported', jobs: 1, manual: 1, wrong: 0 }]))
 })
 
@@ -19,6 +19,11 @@ test('30 jobs is the floor, and the range stays honest about a small sample', ()
   expect(full.exactRange![0]).toBeGreaterThan(0.87) // 30 of 30 is not "100% accurate"
   expect(full.exactRange![0]).toBeLessThan(0.9)
   expect(wilson(0, 0)).toBeNull()
+})
+
+test('one file chosen thirty times is one job', () => {
+  const s = validationSummary(Array.from({ length: 30 }, () => ({ ...row(1, report(1)), hash: 'same' })))
+  expect(s).toMatchObject({ jobs: 30, distinct: 1, enough: false })
 })
 
 test('the download can\'t carry a spreadsheet formula, and names no one but the file', () => {

@@ -147,7 +147,7 @@ test('the artwork check measures locally: no upload, counts and refusals shown',
   await page.getByLabel('Screens used: two-inks.svg').fill('2')
   await page.getByLabel('Screens used: job.pdf').fill('3')
   await expect(page.getByTestId('check-summary')).toContainText('With a known count: 2. Exact: 1. Within one: 1. Sent to manual review: 1.')
-  await expect(page.getByTestId('check-risk')).toContainText('Would have priced a job with the wrong count: 0.')
+  await expect(page.getByTestId('check-risk')).toContainText('Gave a count, and it was wrong: 0.')
   await expect(page.getByTestId('check-enough')).toContainText('2 of at least 30 jobs')
   await expect(page.getByTestId('check-notes')).toContainText('Format not analyzed: 1 jobs, 1 to manual review, 0 wrong count')
   const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Download results' }).click()])

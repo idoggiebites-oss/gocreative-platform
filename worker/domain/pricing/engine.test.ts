@@ -52,7 +52,7 @@ describe('the adjustment applies exactly once', () => {
   })
   test('rounding happens once, from the exact fraction, not after each step', () => {
     // 3 × 1.5 × 1.01 = 4.545, up to 5. Rounding the markup first gives 5 × 1.01 = 5.05, up to 6, which would overcharge.
-    const cfg: PricingConfig = { ...withScreen({ adjustmentBps: 100, colorCostTiers: [{ minQty: 1, costCents: 0 }], screenFee: undefined, sizeCostCents: undefined }), productCostCents: { tshirts: 3 } }
+    const cfg: PricingConfig = { ...withScreen({ adjustmentBps: 100, colorCostTiers: [{ minQty: 1, costCents: 0 }], screenFee: { sellCents: 0, costCents: 0 }, sizeCostCents: { small: 0, medium: 0, large: 0 } }), productCostCents: { tshirts: 3 } }
     expect(one(shirt(1), cfg).lines[0].unitPriceCents).toBe(5)
   })
   test('a percentage change never stacks across published versions: rates stay unadjusted', () => {
@@ -93,7 +93,7 @@ describe('margin mode and other services', () => {
 })
 
 describe('minimums and margin floor', () => {
-  const small = { ...CONFIG, services: { ...CONFIG.services, screen: { ...CONFIG.services.screen!, screenFee: undefined } } }
+  const small = { ...CONFIG, services: { ...CONFIG.services, screen: { ...CONFIG.services.screen!, screenFee: { sellCents: 0, costCents: 0 } } } }
   test('the minimum order applies once per inquiry, not per line', () => {
     const r = calculateEstimate({ ...small, minOrderCents: 5000 }, { lines: [shirt(1), shirt(1)] })
     expect(r.lines.filter((l) => l.label === 'Minimum order')).toHaveLength(1)
@@ -180,7 +180,7 @@ describe('money stays exact', () => {
   })
   test('rounding up adds less than one cent per unit over the exact figure', () => {
     for (let q = 1; q <= 50; q++) {
-      const r = one(shirt(q), withScreen({ adjustmentBps: 137, screenFee: undefined }))
+      const r = one(shirt(q), withScreen({ adjustmentBps: 137, screenFee: { sellCents: 0, costCents: 0 } }))
       const tierCost = q >= 24 ? 50 : 100
       const exact = (300 + 2 * tierCost + 25) * 1.5 * 1.0137 * q
       expect(r.lines[0].lineTotalCents).toBeGreaterThanOrEqual(Math.floor(exact))
@@ -192,10 +192,22 @@ describe('money stays exact', () => {
     expect(Number.isSafeInteger(r.totalCents)).toBe(true)
     expect(r.lines[0].unitPriceCents).toBe((99_999_999 + 200) * 2)
   })
+  test('a blank fee or size schedule is manual review for every service that has one; a typed zero prices', () => {
+    const { screenFee: _a, ...noFee } = CONFIG.services.screen!
+    const { sizeCostCents: _b, ...noSizes } = CONFIG.services.screen!
+    expect(one(shirt(10), withScreen(noFee)).reasons.join()).toMatch(/screen fee not set/)
+    expect(one(shirt(10), withScreen(noSizes)).reasons.join()).toMatch(/print size charges not set/)
+    const { digitizingFee: _c, ...noDigitizing } = CONFIG.services.embroidery!
+    expect(one({ product: 'hats', method: 'embroidery', quantity: 5, decorations: [{ complexity: 'small' }] }, { ...CONFIG, services: { ...CONFIG.services, embroidery: noDigitizing } }).status).toBe('manual_review_required')
+    const { setupFee: _d, ...noSetup } = CONFIG.services.engraving!
+    expect(one({ product: 'engraved', method: 'laser_engrave', quantity: 5, decorations: [{ machineMinutes: 2 }] }, { ...CONFIG, services: { ...CONFIG.services, engraving: noSetup } }).status).toBe('manual_review_required')
+    expect(one(shirt(10), withScreen({ screenFee: { sellCents: 0, costCents: 0 } })).status).toBe('available')
+  })
   test('an amount beyond exact integers is manual review, never a figure that is off by cents', () => {
-    const huge: PricingConfig = { ...CONFIG, productCostCents: { tshirts: 100_000_000 }, services: { screen: { adjustmentBps: 100000, pricing: { mode: 'markup', rateBps: 1000000 }, colorCostTiers: [{ minQty: 1, costCents: 99_999_999 }] } } }
-    const r = one({ product: 'tshirts', method: 'screen', quantity: 999999, decorations: [{ colors: 20 }] }, huge)
+    const huge: PricingConfig = { ...CONFIG, productCostCents: { tshirts: 100_000_000 }, services: { screen: { adjustmentBps: 100000, pricing: { mode: 'markup', rateBps: 1000000 }, colorCostTiers: [{ minQty: 1, costCents: 99_999_999 }], screenFee: { sellCents: 0, costCents: 0 }, sizeCostCents: { small: 0, medium: 0, large: 0 } } } }
+    const r = one({ product: 'tshirts', method: 'screen', quantity: 999999, decorations: [{ size: 'medium', colors: 20 }] }, huge)
     expect(r.status).toBe('manual_review_required')
+    expect(r.reasons.join()).toMatch(/too large/)
     expect(r.totalCents).toBeNull()
   })
   test('the same config and request always give the same result', () => {
