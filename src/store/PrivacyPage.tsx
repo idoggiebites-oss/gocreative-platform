@@ -13,6 +13,7 @@ export default function PrivacyPage() {
       <p>We do not ask for your address, date of birth or payment details on this site.</p>
       <h2 className="s-display">Why we collect it</h2>
       <p>Only to reply to your request, quote it and, if you go ahead, make your order.</p>
+      {business.storefront.customerEstimates && <p>To give you a preliminary estimate, your browser checks your artwork for things like ink colors, and sends us the result along with the file. A person reviews it before any final quote.</p>}
       <h2 className="s-display">Keeping the site safe</h2>
       <p>We use Cloudflare Turnstile to check that a request comes from a person. We keep a scrambled version of your IP address to spot abuse, and never the address itself.</p>
       <h2 className="s-display">How long we keep it</h2>

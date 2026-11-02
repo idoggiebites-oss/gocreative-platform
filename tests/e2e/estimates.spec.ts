@@ -73,7 +73,7 @@ test('switched on: one figure in the agreed words, then staff re-analyze the sto
   await page.getByRole('button', { name: 'Send my request' }).click()
   await expect(page.getByRole('heading', { name: 'Thanks. We have your request.' })).toBeVisible()
   await expect(page.getByText('Preliminary estimate: $120.00')).toBeVisible()
-  await expect(page.getByText('You get a quote and a proof')).toBeVisible()
+  await expect(page.getByText('You get a final quote')).toBeVisible()
 
   await openInquiry(page, (await page.locator('.s-ref strong').innerText()).trim())
   const card = page.getByRole('region', { name: 'Preliminary estimate' })
@@ -112,8 +112,10 @@ test('switched on: one figure in the agreed words, then staff re-analyze the sto
   await convert.getByRole('button', { name: 'Create order' }).click()
   await expect(page).toHaveURL(/\/app\/orders\/\d{4}-/)
   await expect(page.getByText(/Staff verified at review \(.*\): Full front, medium, 3 ink colors\./)).toBeVisible()
+  const orderUrl = page.url()
   await page.goBack()
   await expect(page.getByRole('button', { name: 'Review artwork and details' })).toHaveCount(0)
+  await page.goto(orderUrl)
 })
 
 test('an estimate failure never stops the request: no print details means manual review, and sending works', async ({ page }) => {

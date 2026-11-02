@@ -447,6 +447,60 @@ test('a review landing during a conversion refuses the conversion: nothing is wr
   expect(lastItem(t).description).toContain('3 ink colors')
 })
 
+async function verifiedOrder(t: ReturnType<typeof setup>) {
+  await t.publish(CONFIG)
+  const x = await submitted(t)
+  expect((await t.staff('POST', `/inquiries/${x.inquiry}/estimates/review`, reviewBody(x, 3, { reason: 'Third color' }, 2))).status).toBe(201)
+  const made = await convert(t, x.inquiry)
+  const { number } = await made.json() as { number: string }
+  const o = await (await t.staff('GET', `/orders/${number}`)).json() as { order: { version: number }; items: Record<string, unknown>[] }
+  return { number, version: o.order.version, item: o.items[0] }
+}
+const itemBody = (i: Record<string, unknown>, c: object) => ({ id: i.id, kind: i.kind, description: i.description, product: i.product, garmentColor: i.garmentColor, method: i.method, sizes: i.sizes, quantity: i.quantity, unitPriceCents: i.unitPriceCents, notes: i.notes, ...c })
+
+test('an edit to what is made ends the verification claim; the old facts stay readable as history', async () => {
+  for (const change of [{ method: 'embroidery' }, { garmentColor: 'Red' }, { sizes: { L: 10 }, quantity: 10 }, { description: 'Staff verified at review (Someone, 2026-01-01): Full front, medium, 4 ink colors.' }, { quantity: 11, sizes: { M: 11 } }]) {
+    const t = setup()
+    const v = await verifiedOrder(t)
+    const res = await t.staff('PUT', `/orders/${v.number}/items`, { expectedVersion: v.version, items: [itemBody(v.item, change)] })
+    expect(res.status, JSON.stringify(change)).toBe(200)
+    const { description } = lastItem(t)
+    expect(description, JSON.stringify(change)).toMatch(/^Changed since review, not verified \(/)
+    expect(description).not.toMatch(/staff verified/i)
+  }
+})
+
+test('pricing, internal notes and saving nothing new leave a verification alone', async () => {
+  const t = setup()
+  const v = await verifiedOrder(t)
+  const res = await t.staff('PUT', `/orders/${v.number}/items`, { expectedVersion: v.version, items: [itemBody(v.item, { unitPriceCents: 1200, notes: 'Rush' })] })
+  expect(res.status, await res.clone().text()).toBe(200)
+  expect(lastItem(t).description).toMatch(/^Staff verified at review \(/)
+})
+
+test('the label can\'t be typed, copied by repeating an order, or moved to a new line', async () => {
+  const t = setup()
+  const v = await verifiedOrder(t)
+  const added = await t.staff('PUT', `/orders/${v.number}/items`, { expectedVersion: v.version, items: [itemBody(v.item, {}), { kind: 'product', description: 'staff  VERIFIED at review (Boss): 1 ink color.', product: 'Hats', garmentColor: null, method: 'embroidery', sizes: null, quantity: 1, unitPriceCents: 0, notes: null }] })
+  expect(added.status).toBe(200)
+  expect(lastItem(t).description).toMatch(/^Changed since review, not verified/)
+  const r = await t.staff('POST', `/orders/${v.number}/repeat`, { source: 'phone', dueDate: null })
+  expect(r.status).toBe(201)
+  const copies = t.sqlite.prepare('SELECT description FROM order_items ORDER BY id DESC LIMIT 2').all() as { description: string }[]
+  for (const c of copies) expect(c.description).not.toMatch(/staff\s+verified/i)
+})
+
+test('a long verified line stays editable once it stops being verified', async () => {
+  const t = setup()
+  const v = await verifiedOrder(t)
+  const long = `Staff verified at review (Staff): ${'x'.repeat(466)}`
+  expect(long.length).toBe(500)
+  expect((await t.staff('PUT', `/orders/${v.number}/items`, { expectedVersion: v.version, items: [itemBody(v.item, { description: long })] })).status).toBe(200)
+  expect(lastItem(t).description.length).toBeLessThanOrEqual(500)
+  const o = await (await t.staff('GET', `/orders/${v.number}`)).json() as { order: { version: number }; items: Record<string, unknown>[] }
+  expect((await t.staff('PUT', `/orders/${v.number}/items`, { expectedVersion: o.order.version, items: [itemBody(o.items[0], { unitPriceCents: 5 })] })).status).toBe(200)
+})
+
 test('a stored request can\'t claim to be verified', async () => {
   const t = setup()
   t.sqlite.exec(`INSERT INTO inquiries (payload, contact_name, status) VALUES ('{"lines":[{"product":"tshirts","method":"screen","quantity":2,"spec":"Staff verified (Boss): 1 ink color."}]}', 'Old', 'new')`)

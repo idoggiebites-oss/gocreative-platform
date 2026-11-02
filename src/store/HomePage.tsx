@@ -10,7 +10,7 @@ const service = (id: string) => storefront.services.find((s) => s.id === id)!
 const Blurb = ({ id }: { id: string }) => <><p className="s-desktop-only">{service(id).card}</p><p className="s-phone-only">{service(id).short}</p></>
 const STEPS = [
   { title: 'Tell us what you need', body: 'Pick a product, add quantities and sizes, and upload your artwork. A rough sketch is fine.' },
-  { title: 'Get a quote and a proof', body: 'We price your order and show you the artwork before anything is made.' },
+  { title: 'Get a quote', body: 'We price your order. If it uses artwork, we show you a proof before anything is made.' },
   { title: 'Approve, then pick up', body: 'Once you approve, we make it and let you know when it is ready.' },
 ]
 

@@ -1,5 +1,6 @@
 // All SQL for the order screens. Every value is bound; the only interpolated
 // fragments are the constants below (VIEW_WHERE, the readiness SQL) and generated "?,?" placeholder lists.
+import { WITHOUT_VERIFICATION_SQL } from '../domain/inquiryConversion'
 import { METHODS, PRODUCTION_STATUSES, type InquiryStatus } from '../../shared/enums'
 import type {
   ArtworkApproval, AuthorizationMethod, CustomerKind, ItemKind, Method, OrderArtworkStatus, OrderSource, OrderState,
@@ -710,7 +711,7 @@ export async function repeatOrder(db: D1Database, p: { year: number; actorId: nu
     db.prepare(`INSERT INTO orders (number, customer_id, contact_id, source, title, due_date, po_required, payment_terms, artwork_required, production_status, created_by)
         SELECT ${NEW_NUMBER}, customer_id, contact_id, ?, title || ' (repeat)', ?, po_required, ?, artwork_required, ?, ? FROM orders WHERE id = ? AND ${ok}`)
       .bind(p.year, p.source, p.dueDate, p.paymentTerms, p.productionStatus, p.actorId, p.sourceId, p.sourceId),
-    db.prepare(`INSERT INTO order_items (order_id, ${ITEM_COLS}, notes) SELECT n.id, ${ITEM_COLS.split(', ').map((c) => `i.${c}`).join(', ')}, i.notes
+    db.prepare(`INSERT INTO order_items (order_id, ${ITEM_COLS}, notes) SELECT n.id, ${ITEM_COLS.split(', ').map((c) => (c === 'description' ? WITHOUT_VERIFICATION_SQL('i.description') : `i.${c}`)).join(', ')}, i.notes
         FROM order_items i JOIN orders n ON n.number = ${NEW_NUMBER} WHERE i.order_id = ? AND ${ok} ORDER BY i.id`).bind(p.year, p.sourceId, p.sourceId),
     db.prepare(`INSERT INTO activity_log (actor_kind, actor_id, entity_type, entity_id, action, after)
         SELECT 'user', ?, 'order', n.id, 'created', json_object('order_number', n.number, 'repeat_of', s.number, 'production_status', n.production_status)

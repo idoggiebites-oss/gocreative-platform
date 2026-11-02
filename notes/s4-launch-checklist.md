@@ -18,10 +18,23 @@ To test a real token on the rehearsal site: set the secret, remove its `intake_c
 
 **Blocked:** Zero Trust → Applications says "You need an active plan to continue", so the self-hosted application in notes/access-rescope.md can't be created. The Worker-wide protection and the `GoCreative staff` policy still work. Arturo chooses a plan; then the rehearsal, then the cut-over.
 
+## Access: plan steps
+
+Dashboard confirmed 2026-11-02: Zero Trust Free, $0 per seat, 50-seat limit. Standard is $7 per seat. Arturo selects it; a payment method may be asked for.
+
+## Content blockers (`npm run check:launch`, 9)
+
+Address; phone; email; hours; placeholder photos; photo component labels; privacy draft notice; privacy backup period; services confirmation.
+
+## Before the first real customer submission
+
+- A verified encrypted off-machine backup and a recovery procedure (Arturo, 2026-11-02; not interrupting S4 testing).
+- Backup deletion that makes the eight-week target real, and retention rules approved: notes/retention-rules.md.
+- Wording reviewed: notes/disclosures-for-review.md.
+
 ## Backup risk (offsite deferred by Arturo)
 
 - **All backups are on one Mac, unencrypted there.** Losing it leaves only Cloudflare itself. Cloudflare's D1 Time Travel lasts 7 to 30 days depending on the plan, which is unverified, and doesn't cover R2 files or a lost account.
 - **Runs by hand.** Weekly by intention, and before each migration; nothing reminds anyone. Today the database holds only test rows, so the risk starts when real requests arrive.
 - **Restore is proven:** every pre-migration backup this session restored and verified, latest 2026-11-02T00-43-47-825Z. The encrypted USB tool exists; no offsite copy has been made.
-- **The privacy page promises a backup period that isn't enforced.** Nothing deletes old backups on the Mac yet, so "[N weeks]" needs a number and a habit.
-- Recommendation: one encrypted USB copy before the cut-over, which the backup note already suggests, then weekly backups once live. Arturo's call.
+- **Eight weeks is a provisional target, not yet enforced or published.** Nothing deletes old backups on the Mac yet.

@@ -56,8 +56,17 @@ const noteFor = (l: InquiryPayload['lines'][number]) => [
 ].filter(Boolean).join(' ')
 const reviewedLines = z.array(z.object({ method: z.string().max(40), decorations: z.array(z.object({ location: z.string().optional(), size: z.string().optional(), colors: z.number().nullable().optional(), complexity: z.string().optional(), machineMinutes: z.number().optional() })) }))
 export type ReviewedLine = z.infer<typeof reviewedLines>[number]
+const VERIFIED = 'Staff verified at review'
+export const UNVERIFIED_SINCE = 'Changed since review, not verified'
+const ITEM_DESCRIPTION_MAX = 500
+/** Keeps what the review said, as history, but stops it reading as a claim about what is on the item now. Also catches the label typed by hand. */
+export const withoutVerification = (description: string | null) =>
+  description && description.replace(new RegExp(VERIFIED.replace(/ /g, '\\s+'), 'gi'), UNVERIFIED_SINCE).slice(0, ITEM_DESCRIPTION_MAX)
+/** For the repeat-order copy, where SQL moves the rows: the same word for word. */
+export const WITHOUT_VERIFICATION_SQL = (column: string) => `CASE WHEN ${column} LIKE '%${VERIFIED}%' THEN substr(replace(${column}, '${VERIFIED}', '${UNVERIFIED_SINCE}'), 1, ${ITEM_DESCRIPTION_MAX}) ELSE ${column} END`
+
 // When, not just who: staff can edit the item afterwards, and this stays true of the review it describes.
-const reviewedText = (l: ReviewedLine, who: string) => `Staff verified at review (${who}): ${l.decorations.length === 0 ? 'no print details' : l.decorations.map((d) => [
+const reviewedText = (l: ReviewedLine, who: string) => `${VERIFIED} (${who}): ${l.decorations.length === 0 ? 'no print details' : l.decorations.map((d) => [
   d.location, d.size, d.colors ? `${d.colors} ink color${d.colors === 1 ? '' : 's'}` : l.method === 'screen' ? 'ink colors not set' : null, d.complexity && `${d.complexity} complexity`, d.machineMinutes && `${d.machineMinutes} machine minutes per piece`,
 ].filter(Boolean).join(', ') || 'print').join('; ')}.`
 

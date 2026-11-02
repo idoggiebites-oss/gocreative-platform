@@ -46,7 +46,7 @@ export default function SentPage() {
         <h2 className="s-display s-h-next s-rise-3">What happens next</h2>
         <ol className="s-next s-rise-3">
           <li><strong>We review your request</strong><p>We will contact you by email or phone.</p></li>
-          <li><strong>You get a quote and a proof</strong><p>Nothing is made until you approve both.</p></li>
+          <li><strong>You get a final quote</strong><p>If your order uses artwork, we show you a proof too. Nothing is made until you approve.</p></li>
           <li><strong>We make it, you pick it up</strong><p>We let you know when it is ready.</p></li>
         </ol>
         {state && (

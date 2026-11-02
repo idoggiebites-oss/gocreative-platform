@@ -9,7 +9,8 @@ import { AUTHORIZATION_METHODS, ITEM_KINDS, METHODS, ORDER_SOURCES, PAYMENT_TERM
 import type { ProductionStatus } from '../../shared/enums'
 import { addDays, businessToday } from '../../shared/businessDate'
 import { formatOrderNumber } from '../domain/orderNumber'
-import { checkQuoteAcceptable, checkQuoteTransition, itemsChangeRequiresReapproval, planNewVersion, restoreLines, snapshot, validateItem } from '../domain/quotes'
+import { withoutVerification } from '../domain/inquiryConversion'
+import { checkQuoteAcceptable, checkQuoteTransition, itemsChangeRequiresReapproval, planNewVersion, restoreLines, snapshot, specificationChanged, validateItem } from '../domain/quotes'
 import { readiness } from '../domain/readiness'
 import * as db from '../db/orders'
 import { bad, number } from './orders'
@@ -139,7 +140,7 @@ export function orderWriteRoutes() {
       const n = await db.createOrder(c.env.DB, {
         year: y, actorId: c.get('user').id, customerId: b.customerId, contactId: b.contactId ?? null, source: b.source, title: b.title,
         dueDate: b.dueDate ?? null, poRequired, paymentTerms: b.paymentTerms ?? customer.default_payment_terms, artworkRequired: b.artworkRequired,
-        productionStatus: initialStatus(b.artworkRequired, poRequired), items: b.items.map((i) => ({ ...toWrite(i), id: undefined })),
+        productionStatus: initialStatus(b.artworkRequired, poRequired), items: b.items.map((i) => ({ ...toWrite(i), id: undefined, description: withoutVerification(i.description) })),
       })
       if (n === null) return contactRefusal(c, b.contactId ?? null) // nothing written, no number used
       const state = await db.orderState(c.env.DB, { number: formatOrderNumber(y, n) })
@@ -196,7 +197,8 @@ export function orderWriteRoutes() {
       if (new Set(ids).size !== ids.length || ids.some((i) => !before.some((x) => x.id === i))) {
         return refuse(c, 'invalid_request', 'Item ids must be unique and belong to this order', 400)
       }
-      const after = b.items.map(toWrite)
+      // A line whose specifications change no longer has the staff check it carried, whoever edited it and however the text now reads.
+      const after = b.items.map(toWrite).map((i) => (specificationChanged(before.find((x) => x.id === i.id), i) ? { ...i, description: withoutVerification(i.description) } : i))
       const bump = itemsChangeRequiresReapproval(before, after) ? 1 : 0
       return written(c, await db.replaceItems(c.env.DB, {
         orderId: o.id, version: b.expectedVersion, actorId: c.get('user').id, items: after, itemsRevision: { from: o.items_revision, to: o.items_revision + bump },

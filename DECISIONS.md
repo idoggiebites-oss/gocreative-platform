@@ -530,3 +530,11 @@ Migration 0006 (additive), `worker/db/{pickups,payments}.ts`, `worker/routes/{pi
 - **Blank is unknown, in the engine too (Codex).** A missing screen, digitizing or setup fee, or missing print-size charges, now means manual review instead of silently adding nothing. An owner who charges nothing types 0. Print size is therefore required for a screen price. Engine version 2.
 - **`staff_reviewed` is an attestation, not proof (Codex; accepted limit).** Analysis runs in the staff browser, as approved, so the server can't prove it ran. A signed-in employee could post made-up results, as they could type any price on a draft quote. It records who did it, and every final price still goes through the quote.
 
+### 2026-11-02 — S4: verified specifications, rehearsal, retention (Arturo)
+
+- **A staff-verified label ends when what is made changes.** Editing method, product, colour, sizes, quantity or description rewrites the label to "Changed since review, not verified", keeping the old facts as history. Prices and internal notes don't affect it. A typed label and a repeat-order copy get the same treatment. Claude chose rewriting over structured fields: no migration.
+- **Reviews stop at conversion.** After that the order is what staff correct.
+- **Rehearsal intake approved** on the isolated site only: synthetic details and test artwork, Turnstile on, closed afterwards.
+- **Backups: eight weeks is a provisional operational target,** unpublished until deletion really happens. A verified encrypted off-machine backup comes before the first real customer submission.
+- **Access: the lowest-cost plan that meets the need.** Zero Trust Free seen in the dashboard; Arturo activates it.
+

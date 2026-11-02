@@ -83,6 +83,12 @@ export const CUSTOMER_FACING_ITEM_FIELDS = ['kind', 'description', 'product', 'g
 function normalizedSizes(sizes: Item['sizes']): string {
   return JSON.stringify(Object.entries(sizes ?? {}).filter(([, n]) => n !== 0).sort(([a], [b]) => a.localeCompare(b)))
 }
+// What is made, as opposed to what it costs: a price agreed later must not undo a check of the specifications.
+const SPECIFICATION_FIELDS = ['kind', 'description', 'product', 'garmentColor', 'method', 'sizes', 'quantity'] as const
+export function specificationChanged(previous: Item | undefined, item: Item) {
+  return !previous || SPECIFICATION_FIELDS.some((field) => (field === 'sizes' ? normalizedSizes(previous.sizes) !== normalizedSizes(item.sizes) : previous[field] !== item[field]))
+}
+
 export function itemsChangeRequiresReapproval(before: readonly Item[], after: readonly Item[]): boolean {
   if (before.length !== after.length) return true
   const byId = new Map(before.map(item => [item.id, item]))
