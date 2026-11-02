@@ -78,7 +78,7 @@ export default function ArtworkValidation() {
           <div className="flex flex-col gap-1 text-[13px]">
             <p data-testid="check-summary">{t.measured}: {s.jobs}. {t.exact}: {s.exact}. {t.withinOne}: {s.withinOne}. {t.refused}: {s.manual}.</p>
             <p data-testid="check-risk"><strong>{t.wrongCount}: {s.wrongCount}.</strong>{s.exactRange && ` ${t.exactRange(s.counted, percent(s.exactRange[0]), percent(s.exactRange[1]))}`}</p>
-            <p data-testid="check-enough" className={MUTED}>{s.enough ? t.enoughJobs : t.notEnoughJobs(s.distinct, MIN_JOBS)}</p>
+            <p data-testid="check-enough" className={MUTED}>{s.enough ? t.enoughJobs : t.notEnoughJobs(s.jobs, MIN_JOBS)}</p>
             {s.notes.length > 0 && (
               <ul data-testid="check-notes" className={MUTED}>
                 {s.notes.map((n) => <li key={n.note}>{t.flags[n.note] ?? n.note}: {t.noteLine(n.jobs, n.manual, n.wrong)}</li>)}

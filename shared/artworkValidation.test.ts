@@ -22,8 +22,8 @@ test('30 jobs is the floor, and the range stays honest about a small sample', ()
 })
 
 test('one file chosen thirty times is one job', () => {
-  const s = validationSummary(Array.from({ length: 30 }, () => ({ ...row(1, report(1)), hash: 'same' })))
-  expect(s).toMatchObject({ jobs: 30, distinct: 1, enough: false })
+  const s = validationSummary([...Array.from({ length: 30 }, () => ({ ...row(1, report(1)), hash: 'same' })), { ...row(9, report(1)), hash: 'other' }])
+  expect(s).toMatchObject({ jobs: 2, exact: 1, wrongCount: 1, enough: false })
 })
 
 test('the download can\'t carry a spreadsheet formula, and names no one but the file', () => {

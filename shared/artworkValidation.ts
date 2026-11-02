@@ -18,11 +18,18 @@ export function wilson(hits: number, n: number): [number, number] | null {
 }
 
 export function validationSummary(rows: readonly ValidationRow[]) {
-  const jobs = rows.filter((r) => r.actual !== null)
+  // One file is one piece of evidence, however many times it was chosen: the first with a known count stands.
+  const seen = new Set<string>()
+  const jobs = rows.filter((r) => {
+    if (r.actual === null) return false
+    if (!r.hash) return true
+    if (seen.has(r.hash)) return false
+    seen.add(r.hash)
+    return true
+  })
   const counted = jobs.filter((r) => defensibleColors(r.report) !== null)
   const off = (r: ValidationRow) => Math.abs(defensibleColors(r.report)! - r.actual!)
   const exact = counted.filter((r) => off(r) === 0).length
-  const distinct = new Set(jobs.map((r, i) => r.hash ?? `row-${i}`)).size
   const notes = new Map<string, { jobs: number; manual: number; wrong: number }>()
   for (const r of jobs) {
     for (const note of r.refused ? [r.refused] : r.report?.flags ?? []) {
@@ -36,7 +43,7 @@ export function validationSummary(rows: readonly ValidationRow[]) {
   return {
     jobs: jobs.length, counted: counted.length, manual: jobs.length - counted.length, exact, withinOne: counted.filter((r) => off(r) <= 1).length,
     /** The number that matters most: the analysis gave a count, and it was wrong. */
-    wrongCount: counted.length - exact, exactRange: wilson(exact, counted.length), distinct, enough: distinct >= MIN_JOBS, notes: [...notes].map(([note, n]) => ({ note, ...n })),
+    wrongCount: counted.length - exact, exactRange: wilson(exact, counted.length), enough: jobs.length >= MIN_JOBS, notes: [...notes].map(([note, n]) => ({ note, ...n })),
   }
 }
 
