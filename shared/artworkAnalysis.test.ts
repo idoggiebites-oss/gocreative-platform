@@ -271,6 +271,22 @@ describe('what a file can and cannot say about background, white and shades', ()
     const patch = analyzeArtwork(paint(200, 200, (x, y) => (inSolid(x, y) ? SOLID : x < 20 && y < 20 ? GLASS : CLEAR)))
     expect(patch.flags).toContain('partly_transparent')
   })
+  test('a colored halo beside solid ink is translucent art, and a same-colored soft edge is not', () => {
+    const inSolid = (x: number, y: number) => x >= 50 && x < 150 && y >= 50 && y < 150
+    const near = (x: number, y: number) => x >= 48 && x < 152 && y >= 48 && y < 152
+    const halo = analyzeArtwork(paint(200, 200, (x, y) => (inSolid(x, y) ? RED : near(x, y) ? [0, 0, 204, 128] : CLEAR)))
+    expect(halo.flags).toContain('partly_transparent')
+    expect(defensibleColors(reportOf(halo), 'light')).toBeNull()
+    const edge = analyzeArtwork(paint(200, 200, (x, y) => (inSolid(x, y) ? RED : near(x, y) ? [204, 0, 0, 128] : CLEAR)))
+    expect(edge.flags).not.toContain('partly_transparent')
+  })
+  test('white details too small to be flat are still seen', () => {
+    for (const size of [2, 3, 5]) {
+      const a = analyzeArtwork(paint(200, 200, (x, y) => (x >= 90 && x < 90 + size && y >= 90 && y < 90 + size ? WHITE : x >= 50 && x < 150 && y >= 50 && y < 150 ? RED : WHITE)))
+      expect(a.flags, String(size)).toContain('background_inside')
+      expect(defensibleColors(reportOf(a), 'light'), String(size)).toBeNull()
+    }
+  })
   test('a small white detail inside art on white is not silently lost', () => {
     const a = analyzeArtwork(paint(200, 200, (x, y) => (x >= 90 && x < 104 && y >= 90 && y < 104 ? WHITE : x >= 50 && x < 150 && y >= 50 && y < 150 ? RED : WHITE)))
     expect(a.flags).toContain('background_inside')

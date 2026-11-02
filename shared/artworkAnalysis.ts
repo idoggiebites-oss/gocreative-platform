@@ -20,12 +20,12 @@ export type AnalysisSettings = {
   semiManualShare: number // this share of visible pixels partly transparent means no solid inks can be assumed
   backgroundEdgeShare: number // this share of the border in one color suggests a background
   translucentShare: number // this share of visible pixels translucent, away from any solid ink, means the art has no solid inks to count there
-  enclosedMinPixels: number // this many flat pixels of the background color shut inside the art may be ink
+  enclosedMinPixels: number // this many pixels of the background color shut inside the art may be ink
   maxConfidentInks: number // above this, a separation is complicated enough that a person decides
   similarShadeDeltaE: number // two inks closer than this may be shading of one ink, not two screens
 }
 export const ANALYSIS_DEFAULTS: AnalysisSettings = {
-  maxPixels: 4_000_000, alphaOpaque: 255, flatTolerance: 30, mergeDeltaE: 14, minCoverage: 0.004, minFlatShare: 0.4, maxSpotColors: 8, gradientBinShare: 6, gradientMinBins: 48, softBoundaryShare: 0.002, rampCellDeltaE: 5, edgeColorDistance: 45, unexplainedShare: 0.002, semiManualShare: 0.25, backgroundEdgeShare: 0.6, translucentShare: 0.002, enclosedMinPixels: 16, maxConfidentInks: 4, similarShadeDeltaE: 25,
+  maxPixels: 4_000_000, alphaOpaque: 255, flatTolerance: 30, mergeDeltaE: 14, minCoverage: 0.004, minFlatShare: 0.4, maxSpotColors: 8, gradientBinShare: 6, gradientMinBins: 48, softBoundaryShare: 0.002, rampCellDeltaE: 5, edgeColorDistance: 45, unexplainedShare: 0.002, semiManualShare: 0.25, backgroundEdgeShare: 0.6, translucentShare: 0.002, enclosedMinPixels: 2, maxConfidentInks: 4, similarShadeDeltaE: 25,
 }
 
 export const ANALYSIS_FLAGS = ['gradient', 'photographic', 'too_little_flat_color', 'too_many_colors', 'small_details_dropped', 'likely_background', 'partly_transparent', 'fully_transparent', 'too_large', 'too_small', 'thin_details', 'white_ink', 'white_background', 'background_inside', 'similar_shades', 'complex_separation', 'uncertain_background'] as const
@@ -85,10 +85,13 @@ export function analyzeArtwork(px: Pixels, settings: AnalysisSettings = ANALYSIS
       if (a < settings.alphaOpaque) {
         if (a > 15) {
           semi++
-          // A soft edge sits right beside solid ink. Anything partly see-through with no solid ink next to it is translucent artwork, however thin: narrowness proves nothing.
+          // A soft edge is the color of the solid ink right beside it. Anything else partly see-through is translucent artwork, however thin or close: a colored halo is not an edge.
           let beside = false
           for (let ny = Math.max(0, y - 2); ny <= Math.min(h - 1, y + 2) && !beside; ny++) {
-            for (let nx = Math.max(0, x - 2); nx <= Math.min(w - 1, x + 2); nx++) if (data[(ny * w + nx) * 4 + 3] >= settings.alphaOpaque) { beside = true; break }
+            for (let nx = Math.max(0, x - 2); nx <= Math.min(w - 1, x + 2); nx++) {
+              const j = (ny * w + nx) * 4
+              if (data[j + 3] >= settings.alphaOpaque && Math.hypot(data[i] - data[j], data[i + 1] - data[j + 1], data[i + 2] - data[j + 2]) <= settings.edgeColorDistance) { beside = true; break }
+            }
           }
           if (!beside) translucent++
         }
@@ -264,22 +267,29 @@ export function analyzeArtwork(px: Pixels, settings: AnalysisSettings = ANALYSIS
   if (printed.some(isWhite)) flags.push('white_ink')
   if (hasBackground && background && isWhite(background)) flags.push('white_background')
   if (hasBackground && background) {
-    // The same color shut inside the artwork, away from the border, may be ink rather than background.
-    const inBackground = new Set(background.keys)
+    // The same color shut inside the artwork, away from the border, may be ink rather than background. Every pixel of that color counts, flat or not: a detail too small to be flat is still a detail.
+    const anchor = [background.r / background.n, background.g / background.n, background.b / background.n]
+    const isBackground = (p: number) => data[p * 4 + 3] >= settings.alphaOpaque && Math.hypot(data[p * 4] - anchor[0], data[p * 4 + 1] - anchor[1], data[p * 4 + 2] - anchor[2]) <= settings.flatTolerance
     const seen = new Uint8Array(total)
     const stack: number[] = []
     for (let p = 0; p < total; p++) {
       const onEdge = p % w === 0 || p % w === w - 1 || p < w || p >= total - w
-      if (onEdge && inBackground.has(flatKey[p])) { seen[p] = 1; stack.push(p) }
+      if (onEdge && isBackground(p)) { seen[p] = 1; stack.push(p) }
     }
     while (stack.length > 0) {
       const p = stack.pop()!
-      for (const q of [p % w === 0 ? -1 : p - 1, p % w === w - 1 ? -1 : p + 1, p - w, p + w]) {
-        if (q >= 0 && q < total && !seen[q] && inBackground.has(flatKey[q])) { seen[q] = 1; stack.push(q) }
+      const x = p % w
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const q = p + dy * w + dx
+          if (x + dx < 0 || x + dx >= w || q < 0 || q >= total || seen[q] || !isBackground(q)) continue
+          seen[q] = 1
+          stack.push(q)
+        }
       }
     }
     let enclosed = 0
-    for (let p = 0; p < total; p++) if (!seen[p] && inBackground.has(flatKey[p])) enclosed++
+    for (let p = 0; p < total; p++) if (!seen[p] && isBackground(p)) enclosed++
     if (enclosed >= settings.enclosedMinPixels) flags.push('background_inside')
   }
   for (let a = 0; a < printed.length && !flags.includes('similar_shades'); a++) {
