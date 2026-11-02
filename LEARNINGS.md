@@ -142,3 +142,7 @@ Editing `reasonHint` by regex overwrote the hint on Cancel order and replace PO 
 
 Cloudflare's new-widget page shows the secret beside the site key, and a full screenshot put it in the session. Rotated at once. Rule: on pages that can show secrets, use a zoom on the exact public field or an element search, never a full screenshot, and have a person run `wrangler secret put`.
 
+### 2026-11-02 — `wrangler secret put` through the session's `!` saves an empty secret
+
+It reported success with nothing typed, and `/status` stayed closed. Rule: a person sets secrets in their own Terminal, and `/status` confirms it.
+

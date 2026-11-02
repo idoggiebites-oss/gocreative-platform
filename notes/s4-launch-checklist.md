@@ -6,13 +6,17 @@ Present state only; update as items close. Intake, Access and customer prices ch
 
 `https://gocreative-access-drill.idoggiebites.workers.dev`: the real code on its own database (`gocreative-drill`) and bucket (`gocreative-drill-files`), no cron, no customer data. Its pages are public but it can't accept requests: `intake_closed` is set and it has no `TURNSTILE_SECRET`. `/app` and `/api/app` are behind the `Access drill` application, with the same staff emails as production. Delete all three after S4: the Worker, the database, the bucket.
 
+## Rehearsal result (2026-11-02, closed again)
+
+Real Turnstile tokens passed on Arturo's real phone and Mac; a fake token was refused. Upload, submit, staff re-analysis, audited override, conversion and the verified and unverified labels all worked on real Cloudflare. Automated Chrome could not pass Turnstile, by design, and wasn't pushed. A submit retry on the live network was not run: tests on real local D1 cover it. Rehearsal orders 2026-0001 and 2026-0002 and their files are test data, gone when the rehearsal site is deleted.
+
 ## Turnstile
 
 Widget `GoCreative inquiry`, Managed, site key `0x4AAAAAAFv_TFYatdxiQDME`, hostnames: live and rehearsal. Remove the rehearsal hostname after S4. The first secret was exposed in a session screenshot and rotated the same day, without being used; the old one stopped working two hours later.
 
-Set by a person, so the value never enters a session: `npx wrangler secret put TURNSTILE_SECRET --name gocreative-access-drill`, and at cut-over the same on `gocreative`. Production also needs `TURNSTILE_SITE_KEY` and a random `IP_HASH_SALT` at cut-over.
+Set by a person in a separate Terminal, not with the `!` prefix, which saves an empty value: done on the rehearsal site; at cut-over the same on `gocreative`. Production also needs `TURNSTILE_SITE_KEY` and a random `IP_HASH_SALT` at cut-over.
 
-To test a real token on the rehearsal site: set the secret, remove its `intake_closed` row, send a request from a real browser and check the row, then add the row back.
+Reopening the rehearsal site needs only its `intake_closed` row removed; put it back afterwards. Its config isn't in the repo: pass `-c` with a config naming `gocreative-drill`.
 
 ## Access
 
