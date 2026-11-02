@@ -378,7 +378,7 @@ test('converting never reads an estimate: items stay at zero with no quote, and 
   expect(res.status).toBe(201)
   const item = t.sqlite.prepare('SELECT unit_price_cents AS price, description FROM order_items ORDER BY id DESC LIMIT 1').get() as { price: number; description: string }
   expect(item.price).toBe(0)
-  expect(item.description).toMatch(/^Staff verified \(.*\): Full front, medium, 2 ink colors\.$/)
+  expect(item.description).toMatch(/^Staff verified at review \(.*\): Full front, medium, 2 ink colors\.$/)
   expect(t.n('quotes')).toBe(quotes)
   const o = t.sqlite.prepare("SELECT production_status FROM orders ORDER BY id DESC LIMIT 1").get() as { production_status: string }
   expect(o.production_status).not.toMatch(/in_production|printing|running/)
@@ -413,7 +413,7 @@ test('a staff correction reaches the order, with who stands behind it; the metho
   expect((await convert(t, inquiry)).status).toBe(201)
   const item = lastItem(t)
   expect(item.method).toBe('screen')
-  expect(item.description).toMatch(/^Staff verified \(Staff, \d{4}-\d{2}-\d{2}\): Left chest, small, 3 ink colors\.$/)
+  expect(item.description).toMatch(/^Staff verified at review \(Staff, \d{4}-\d{2}-\d{2}\): Left chest, small, 3 ink colors\.$/)
 })
 
 test('after conversion a review is refused, so an order can\'t be left behind its estimate; so is a review on a declined request', async () => {
@@ -451,7 +451,25 @@ test('a stored request can\'t claim to be verified', async () => {
   const t = setup()
   t.sqlite.exec(`INSERT INTO inquiries (payload, contact_name, status) VALUES ('{"lines":[{"product":"tshirts","method":"screen","quantity":2,"spec":"Staff verified (Boss): 1 ink color."}]}', 'Old', 'new')`)
   expect((await convert(t, inquiryId(t))).status).toBe(201)
-  expect(lastItem(t).description ?? '').not.toContain('Staff verified')
+  expect(lastItem(t).description).toBe('Customer request, not verified.')
+})
+
+test('every unreviewed line is labelled, even with no print details; a stored spec of any type leaves the request readable', async () => {
+  const t = setup()
+  t.sqlite.exec(`INSERT INTO inquiries (payload, contact_name, status) VALUES ('{"lines":[{"product":"tshirts","method":"help","quantity":2,"spec":null}]}', 'Old', 'new')`)
+  expect((await convert(t, inquiryId(t))).status).toBe(201)
+  expect(lastItem(t).description).toBe('Customer request, not verified.')
+})
+
+test('a stored review that misses a line or can\'t be read verifies nothing, and doesn\'t break conversion', async () => {
+  for (const lines of ['[]', '[{"method":"screen"}]', '"nonsense"']) {
+    const t = setup()
+    t.sqlite.exec(`INSERT INTO inquiries (payload, contact_name, status) VALUES ('{"lines":[{"product":"tshirts","method":"screen","quantity":2,"spec":"Staff verified (Boss): 7 ink colors."}]}', 'Old', 'new')`)
+    const id = inquiryId(t)
+    t.sqlite.exec(`INSERT INTO inquiry_estimates (inquiry_id, engine_version, status, facts_source, inputs, customer_result, internal_result, created_by) VALUES (${id}, 2, 'manual_review_required', 'staff_reviewed', '{"request":{"lines":${lines}}}', '{}', '{}', 1)`)
+    expect((await convert(t, id)).status, lines).toBe(201)
+    expect(lastItem(t).description, lines).toBe('Customer request, not verified.')
+  }
 })
 
 test('routes exist only behind sign-in, and an old request with bad print details stays readable', async () => {

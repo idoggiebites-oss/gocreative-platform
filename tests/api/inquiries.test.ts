@@ -65,11 +65,11 @@ test('every line transfers completely and accurately: product, method, sizes, qu
   expect(order).toMatchObject({ source: 'portal', due_date: '2031-05-01', title: 'Valley spring order' })
   const items = t.sqlite.prepare('SELECT kind, product, method, quantity, sizes, garment_color, description, notes, unit_price_cents FROM order_items WHERE order_id = ? ORDER BY id').all(order.id) as Row[]
   expect(items).toEqual([
-    { kind: 'product', product: 'T-shirts', method: 'screen', quantity: 34, sizes: '{"M":20,"L":14}', garment_color: 'Navy', description: null, notes: null, unit_price_cents: 0 },
-    { kind: 'product', product: 'T-shirts', method: 'dtg', quantity: 5, sizes: '{"S":5}', garment_color: 'White', description: null, notes: null, unit_price_cents: 0 },
-    { kind: 'product', product: 'Hats', method: 'embroidery', quantity: 12, sizes: null, garment_color: null, description: null, notes: null, unit_price_cents: 0 },
-    { kind: 'product', product: 'Trophies and awards', method: 'laser_engrave', quantity: 6, sizes: null, garment_color: null, description: 'Personalization: Names to follow', notes: null, unit_price_cents: 0 },
-    { kind: 'product', product: 'Engraved or cut items', method: 'other', quantity: 3, sizes: null, garment_color: null, description: 'Material or item: Tumblers', notes: 'Customer asked for help choosing the method.', unit_price_cents: 0 },
+    { kind: 'product', product: 'T-shirts', method: 'screen', quantity: 34, sizes: '{"M":20,"L":14}', garment_color: 'Navy', description: 'Customer request, not verified.', notes: null, unit_price_cents: 0 },
+    { kind: 'product', product: 'T-shirts', method: 'dtg', quantity: 5, sizes: '{"S":5}', garment_color: 'White', description: 'Customer request, not verified.', notes: null, unit_price_cents: 0 },
+    { kind: 'product', product: 'Hats', method: 'embroidery', quantity: 12, sizes: null, garment_color: null, description: 'Customer request, not verified.', notes: null, unit_price_cents: 0 },
+    { kind: 'product', product: 'Trophies and awards', method: 'laser_engrave', quantity: 6, sizes: null, garment_color: null, description: 'Customer request, not verified.\nPersonalization: Names to follow', notes: null, unit_price_cents: 0 },
+    { kind: 'product', product: 'Engraved or cut items', method: 'other', quantity: 3, sizes: null, garment_color: null, description: 'Customer request, not verified.\nMaterial or item: Tumblers', notes: 'Customer asked for help choosing the method.', unit_price_cents: 0 },
   ])
   expect((t.sqlite.prepare("SELECT body FROM notes WHERE entity_type = 'order' AND entity_id = ?").get(order.id) as { body: string }).body).toContain('Left chest logo.\nSpring banquet.')
   // The original is kept exactly as sent.

@@ -8,7 +8,7 @@ import { printLocationName } from '../../shared/inquiry'
 import { requireRole, type AppEnv } from '../auth'
 import { customerDefaults } from '../domain/customerDefaults'
 import { readiness } from '../domain/readiness'
-import { conversionNote, lineToItem, parsePayload, withVerifiedFacts, type ReviewedLine } from '../domain/inquiryConversion'
+import { conversionNote, lineToItem, parsePayload, withVerifiedFacts } from '../domain/inquiryConversion'
 import { listEstimates, userNames } from '../db/pricing'
 import * as db from '../db/inquiries'
 import { getCustomerDefaults } from '../db/orders'
@@ -42,7 +42,7 @@ const statusOf = (artworkRequired: boolean, poRequired: boolean) => readiness({
 function verifiedFacts(e: Awaited<ReturnType<typeof listEstimates>>[number] | null, who: string | undefined) {
   if (e?.facts_source !== 'staff_reviewed') return null
   try {
-    const lines = (JSON.parse(e.inputs) as { request?: { lines?: ReviewedLine[] } }).request?.lines
+    const lines = (JSON.parse(e.inputs) as { request?: { lines?: unknown } }).request?.lines
     return lines ? { lines, who: who ?? 'staff', on: e.created_at.slice(0, 10) } : null
   } catch {
     return null

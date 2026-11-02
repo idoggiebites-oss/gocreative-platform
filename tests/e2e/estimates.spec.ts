@@ -111,7 +111,7 @@ test('switched on: one figure in the agreed words, then staff re-analyze the sto
   await expect(convert.getByTestId('convert-specs')).toContainText('staff-verified')
   await convert.getByRole('button', { name: 'Create order' }).click()
   await expect(page).toHaveURL(/\/app\/orders\/\d{4}-/)
-  await expect(page.getByText(/Staff verified \(.*\): Full front, medium, 3 ink colors\./)).toBeVisible()
+  await expect(page.getByText(/Staff verified at review \(.*\): Full front, medium, 3 ink colors\./)).toBeVisible()
   await page.goBack()
   await expect(page.getByRole('button', { name: 'Review artwork and details' })).toHaveCount(0)
 })
