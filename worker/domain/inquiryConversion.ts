@@ -41,7 +41,8 @@ const COLOR_MAX = 100
 const NOTES_MAX = 2000
 // Says on the order whose word it is. A count a browser reported is deliberately left out: only staff-reviewed facts can put an ink count on an order.
 const printsText = (l: InquiryPayload['lines'][number]) => (l.prints?.length ? `Customer request, not verified: ${l.prints.map((p) => [printLocationName(p.location), p.size].filter(Boolean).join(', ')).join('; ')}. Ink colors not verified.` : 'Customer request, not verified.')
-const details = (l: InquiryPayload['lines'][number]) => [typeof l.spec === 'string' ? l.spec : printsText(l), l.personalization && `Personalization: ${l.personalization}`, l.material && `Material or item: ${l.material}`, l.notes].filter(Boolean).join('\n')
+// A customer's own words can't claim a staff check, whatever they typed: only the spec line can say it.
+const details = (l: InquiryPayload['lines'][number]) => [typeof l.spec === 'string' ? l.spec : printsText(l), ...[l.personalization && `Personalization: ${l.personalization}`, l.material && `Material or item: ${l.material}`, l.notes].map((x) => x && neutralized(x))].filter(Boolean).join('\n')
 const knownMethod = (m: string): Method | null => METHODS.find((x) => x === m) ?? null
 /** Sizes that don't add up to the quantity would make the item uneditable, so such a grid stays in the note rather than on the item. */
 const usableSizes = (l: InquiryPayload['lines'][number]) => {
@@ -59,12 +60,10 @@ export type ReviewedLine = z.infer<typeof reviewedLines>[number]
 const VERIFIED = 'Staff verified at review'
 export const UNVERIFIED_SINCE = 'Changed since review, not verified'
 const ITEM_DESCRIPTION_MAX = 500
+const neutralized = (text: string) => text.replace(new RegExp(VERIFIED.replace(/ /g, '\\s+'), 'gi'), UNVERIFIED_SINCE)
 /** Keeps what the review said, as history, but stops it reading as a claim about what is on the item now. Also catches the label typed by hand. */
 export const withoutVerification = (description: string | null) =>
-  description && description.replace(new RegExp(VERIFIED.replace(/ /g, '\\s+'), 'gi'), UNVERIFIED_SINCE).slice(0, ITEM_DESCRIPTION_MAX)
-/** For the repeat-order copy, where SQL moves the rows: the same word for word. */
-export const WITHOUT_VERIFICATION_SQL = (column: string) => `CASE WHEN ${column} LIKE '%${VERIFIED}%' THEN substr(replace(${column}, '${VERIFIED}', '${UNVERIFIED_SINCE}'), 1, ${ITEM_DESCRIPTION_MAX}) ELSE ${column} END`
-
+  description && neutralized(description).slice(0, ITEM_DESCRIPTION_MAX)
 // When, not just who: staff can edit the item afterwards, and this stays true of the review it describes.
 const reviewedText = (l: ReviewedLine, who: string) => `${VERIFIED} (${who}): ${l.decorations.length === 0 ? 'no print details' : l.decorations.map((d) => [
   d.location, d.size, d.colors ? `${d.colors} ink color${d.colors === 1 ? '' : 's'}` : l.method === 'screen' ? 'ink colors not set' : null, d.complexity && `${d.complexity} complexity`, d.machineMinutes && `${d.machineMinutes} machine minutes per piece`,
@@ -87,7 +86,7 @@ const fits = (text: string, max: number) => (text.length <= max ? text : `${text
 export function lineToItem(l: InquiryPayload['lines'][number]): ConvertedItem {
   const text = details(l)
   return {
-    kind: 'product', product: productName(l.product), method: knownMethod(l.method) ?? 'other', garmentColor: l.color ? fits(l.color, COLOR_MAX) : null,
+    kind: 'product', product: productName(l.product), method: knownMethod(l.method) ?? 'other', garmentColor: l.color ? fits(neutralized(l.color), COLOR_MAX) : null,
     sizes: usableSizes(l), quantity: l.quantity, unitPriceCents: 0,
     description: text ? fits(text, DESCRIPTION_MAX) : null,
     notes: noteFor(l) ? fits(noteFor(l), NOTES_MAX) : null,

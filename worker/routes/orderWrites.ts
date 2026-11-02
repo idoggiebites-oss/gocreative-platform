@@ -242,6 +242,8 @@ export function orderWriteRoutes() {
       // The quote's lines become the order's items again (internal notes don't travel with a quote).
       const restored = restoreLines(current, (await db.quoteLines(c.env.DB, source.id)).map((l) => ({ ...l, notes: null })))
         .map((l) => ({ ...l, id: l.id as number | undefined }))
+        // Bringing back old text is an edit like any other: it stays verified only where the line is what it already was.
+        .map((l) => (specificationChanged(current.find((x) => x.id === l.id), l) ? { ...l, description: withoutVerification(l.description) } : l))
       const itemsRevision = o.items_revision + (itemsChangeRequiresReapproval(current, restored) ? 1 : 0)
       const snap = snapshotOr409(c, restored)
       if (snap instanceof Response) return snap

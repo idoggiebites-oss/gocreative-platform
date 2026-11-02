@@ -1,6 +1,6 @@
 // All SQL for the order screens. Every value is bound; the only interpolated
 // fragments are the constants below (VIEW_WHERE, the readiness SQL) and generated "?,?" placeholder lists.
-import { WITHOUT_VERIFICATION_SQL } from '../domain/inquiryConversion'
+import { withoutVerification } from '../domain/inquiryConversion'
 import { METHODS, PRODUCTION_STATUSES, type InquiryStatus } from '../../shared/enums'
 import type {
   ArtworkApproval, AuthorizationMethod, CustomerKind, ItemKind, Method, OrderArtworkStatus, OrderSource, OrderState,
@@ -706,13 +706,16 @@ export async function createOrder(db: D1Database, p: {
 export async function repeatOrder(db: D1Database, p: { year: number; actorId: number; sourceId: number; source: OrderSource; dueDate: string | null; productionStatus: ProductionStatus; paymentTerms: PaymentTerms }): Promise<number | null> {
   const ok = `EXISTS (SELECT 1 FROM orders src WHERE src.id = ? AND (src.contact_id IS NULL OR EXISTS (SELECT 1 FROM customer_contacts cc
     WHERE cc.id = src.contact_id AND cc.customer_id = src.customer_id AND cc.archived_at IS NULL)))`
+  // A new job hasn't been checked, whatever the old one's review said.
+  const labelled = (await listItems(db, p.sourceId)).flatMap((i) => (i.description && withoutVerification(i.description) !== i.description ? [{ from: i.description, to: withoutVerification(i.description) }] : []))
   const [counter] = await db.batch([
     db.prepare(COUNTER_SQL(ok)).bind(p.year, p.sourceId),
     db.prepare(`INSERT INTO orders (number, customer_id, contact_id, source, title, due_date, po_required, payment_terms, artwork_required, production_status, created_by)
         SELECT ${NEW_NUMBER}, customer_id, contact_id, ?, title || ' (repeat)', ?, po_required, ?, artwork_required, ?, ? FROM orders WHERE id = ? AND ${ok}`)
       .bind(p.year, p.source, p.dueDate, p.paymentTerms, p.productionStatus, p.actorId, p.sourceId, p.sourceId),
-    db.prepare(`INSERT INTO order_items (order_id, ${ITEM_COLS}, notes) SELECT n.id, ${ITEM_COLS.split(', ').map((c) => (c === 'description' ? WITHOUT_VERIFICATION_SQL('i.description') : `i.${c}`)).join(', ')}, i.notes
+    db.prepare(`INSERT INTO order_items (order_id, ${ITEM_COLS}, notes) SELECT n.id, ${ITEM_COLS.split(', ').map((c) => `i.${c}`).join(', ')}, i.notes
         FROM order_items i JOIN orders n ON n.number = ${NEW_NUMBER} WHERE i.order_id = ? AND ${ok} ORDER BY i.id`).bind(p.year, p.sourceId, p.sourceId),
+    ...labelled.map((l) => db.prepare(`UPDATE order_items SET description = ? WHERE description = ? AND order_id = (SELECT id FROM orders WHERE number = ${NEW_NUMBER}) AND ${ok}`).bind(l.to, l.from, p.year, p.sourceId)),
     db.prepare(`INSERT INTO activity_log (actor_kind, actor_id, entity_type, entity_id, action, after)
         SELECT 'user', ?, 'order', n.id, 'created', json_object('order_number', n.number, 'repeat_of', s.number, 'production_status', n.production_status)
         FROM orders n JOIN orders s ON s.id = ? WHERE n.number = ${NEW_NUMBER} AND ${ok}`).bind(p.actorId, p.sourceId, p.year, p.sourceId),

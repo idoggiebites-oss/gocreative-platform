@@ -490,6 +490,51 @@ test('the label can\'t be typed, copied by repeating an order, or moved to a new
   for (const c of copies) expect(c.description).not.toMatch(/staff\s+verified/i)
 })
 
+test('a customer can\'t write the label into a request: notes, personalization, material or color', async () => {
+  const t = setup()
+  const claim = 'staff  Verified at review (Boss): 1 ink color.'
+  const line = { product: 'tshirts', method: 'screen', quantity: 2, notes: claim, personalization: claim, material: claim, color: claim }
+  t.sqlite.exec(`INSERT INTO inquiries (payload, contact_name, status) VALUES ('${JSON.stringify({ lines: [line] })}', 'Old', 'new')`)
+  const id = inquiryId(t)
+  expect((await convert(t, id)).status).toBe(201)
+  const item = t.sqlite.prepare('SELECT description, garment_color FROM order_items ORDER BY id DESC LIMIT 1').get() as { description: string; garment_color: string }
+  expect(`${item.description} ${item.garment_color}`).not.toMatch(/staff\s+verified/i)
+  const note = t.sqlite.prepare("SELECT body FROM notes WHERE entity_type = 'order' ORDER BY id DESC LIMIT 1").get() as { body: string } | undefined
+  expect(note?.body ?? '').not.toMatch(/staff\s+verified/i)
+})
+
+test('duplicating a quote brings a deleted line back unverified, and a line unchanged keeps its check', async () => {
+  const t = setup()
+  const v = await verifiedOrder(t)
+  expect((await t.staff('POST', `/orders/${v.number}/quotes`, { expectedVersion: v.version })).status).toBeLessThan(300)
+  const now = async () => (await (await t.staff('GET', `/orders/${v.number}`)).json()) as { order: { version: number }; items: Record<string, unknown>[] }
+  const same = await t.staff('POST', `/orders/${v.number}/quotes/1/duplicate`, { expectedVersion: (await now()).order.version })
+  expect(same.status).toBeLessThan(300)
+  expect(lastItem(t).description).toMatch(/^Staff verified at review \(/)
+  const before = await now()
+  const swapped = { kind: 'product', description: 'Something else', product: 'Hats', garmentColor: null, method: 'embroidery', sizes: null, quantity: 1, unitPriceCents: 0, notes: null }
+  expect((await t.staff('PUT', `/orders/${v.number}/items`, { expectedVersion: before.order.version, items: [{ ...swapped, id: before.items[0].id }] })).status).toBe(200)
+  const back = await t.staff('POST', `/orders/${v.number}/quotes/1/duplicate`, { expectedVersion: (await now()).order.version })
+  expect(back.status).toBeLessThan(300)
+  expect(lastItem(t).description).toMatch(/^Changed since review, not verified/)
+  const lines = t.sqlite.prepare('SELECT description FROM quote_items ORDER BY id DESC LIMIT 1').get() as { description: string }
+  expect(lines.description).toMatch(/^Changed since review, not verified/)
+})
+
+test('repeating an order drops the check whatever the spelling, and leaves the source order alone', async () => {
+  for (const label of ['Staff verified at review (Boss): 1 ink color.', 'staff verified at review (Boss): 1 ink color.', 'Staff  verified at review (Boss): 1 ink color.', 'Staff\u00a0verified at review (Boss): 1 ink color.']) {
+    const t = setup()
+    const v = await verifiedOrder(t)
+    t.sqlite.prepare('UPDATE order_items SET description = ? WHERE id = ?').run(label, v.item.id as number)
+    const before = t.n('order_items')
+    expect((await t.staff('POST', `/orders/${v.number}/repeat`, { source: 'phone', dueDate: null })).status).toBe(201)
+    expect(t.n('order_items')).toBe(before + 1)
+    const copy = lastItem(t).description
+    expect(copy, label).toBe('Changed since review, not verified (Boss): 1 ink color.')
+    expect((t.sqlite.prepare('SELECT description FROM order_items WHERE id = ?').get(v.item.id as number) as { description: string }).description).toBe(label)
+  }
+})
+
 test('a long verified line stays editable once it stops being verified', async () => {
   const t = setup()
   const v = await verifiedOrder(t)
