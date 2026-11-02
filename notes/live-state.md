@@ -11,13 +11,16 @@ Update this whenever something deploys. History is in git and ROADMAP.md; this i
 - **S3 (inquiry review and conversion):** live for signed-in staff. Retention and abandoned-upload cleanup run in the daily cron.
 - **Backups:** `~/gocreative-backups/` on Arturo's Mac only. Offsite: encrypted bundles by USB to Arturo's Windows machine (`npm run backup:bundle`); first copy not made yet. Latest: 2026-11-02T00-43-47-825Z (pre-migration). Run weekly by hand and before every remote migration.
 
-- **Throwaway:** Worker `gocreative-access-drill` (no data), public until the S0c rehearsal finishes, then delete it.
+- **Throwaway:** rehearsal site `gocreative-access-drill`, public pages, closed to requests, its own database and bucket. See notes/s4-launch-checklist.md, then delete after S4.
 
 - **Pricing Management:** live for owners at Settings → Pricing Management. **No prices are published**, and customers can't see prices: `customerEstimates` is false in `shared/business.ts`, so the storefront says "Manual review required" even once rates are published.
 
 ## Needed before opening intake (S4)
 
-1. Create the Turnstile widget (action `inquiry`, the real hostname), and set `TURNSTILE_SECRET` and a random `IP_HASH_SALT` with `wrangler secret put`.
+Full list: notes/s4-launch-checklist.md.
+
+
+1. Turnstile widget created; set `TURNSTILE_SECRET`, `TURNSTILE_SITE_KEY` and a random `IP_HASH_SALT` with `wrangler secret put`.
 2. Access re-scope (notes/access-rescope.md).
 3. `npm run check:launch` must pass.
 4. Remove the row: `npx wrangler d1 execute gocreative --remote --command "DELETE FROM settings WHERE key = 'intake_closed'"`. Adding it back is the emergency off switch; no deploy needed.

@@ -11,6 +11,8 @@ Sources: [Workers + Access](https://developers.cloudflare.com/workers/configurat
 - A wildcard doesn't include its parent, so `/app/*` leaves `/app` open. All four paths are needed: `/app`, `/app/*`, `/api/app`, `/api/app/*`.
 - `/app` is a static shell, served without running the Worker, so only Access guards it. It holds no records or credentials. `/api/app/*` also re-verifies the JWT.
 
+> **2026-11-02: blocked.** Zero Trust Applications asks for an active plan first (notes/s4-launch-checklist.md). The rehearsal Worker now serves the real code.
+
 ## S0c rehearsal (Arturo, about 10 minutes; nothing live changes)
 
 Throwaway Worker: `https://gocreative-access-drill.idoggiebites.workers.dev`. No data, same routing as the real one.
